@@ -5,3 +5,11 @@ version = 3
 [[package]]
 name = "archive-router"
 version = "0.1.0"
+
+[[package]]
+name = "archive-router-api"
+version = "0.1.0"
+
+[[package]]
+name = "archive-router-bin"
+version = "0.1.0"

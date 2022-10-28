@@ -6,3 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+archive-router = { version = "0.1", path = "../archive-router" }
+archive-router-api = { version = "0.1", path = "../archive-router-api" }
+
+tokio = { version = "1.21.2", features = ["full"] }

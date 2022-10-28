@@ -1,1 +1,3 @@
-pub struct Server;
+mod server;
+
+pub use server::Server;

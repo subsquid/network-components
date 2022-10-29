@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 archive-router = { version = "0.1", path = "../archive-router" }
-
 axum = "0.5.17"
-
+axum-macros = "0.2.3"
+hyper = "0.14.20"
+serde = { version = "1.0.147", features = ["derive"] }

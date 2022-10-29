@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-uuid = "1.2.1"
-url = "2.3.1"
+uuid = { version = "1.2.1", features = ["serde"] }
+url = { version = "2.3.1", features = ["serde"] }
 rand = "0.8.5"
+serde = { version = "1.0.147", features = ["derive"] }

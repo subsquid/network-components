@@ -1,13 +1,14 @@
 use crate::dataset::{get_data_ranges, get_dataset_range, DataRange};
 use crate::error::Error;
 use crate::util::get_random_item;
+use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
 use url::Url;
 use uuid::Uuid;
 
 type Dataset = String;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct WorkerState {
     pub dataset: Dataset,
     pub ranges: Vec<DataRange>,

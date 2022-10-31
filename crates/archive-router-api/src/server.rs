@@ -48,6 +48,14 @@ async fn get_worker(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "no suitable worker".into_response(),
             ),
+            Error::ParquetFolderNameError(name) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("dataset has invalid parquet folder - {:?}", name).into_response(),
+            ),
+            Error::ReadDatasetError(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "dataset read error".into_response(),
+            ),
         },
     }
 }
@@ -57,8 +65,27 @@ async fn get_dataset_range(
     Extension(router): Extension<Arc<Mutex<ArchiveRouter>>>,
 ) -> impl IntoResponse {
     let router = router.lock().unwrap();
-    let range = router.get_dataset_range();
-    Json(range)
+    match router.get_dataset_range() {
+        Ok(range) => (StatusCode::OK, Json(range).into_response()),
+        Err(e) => match e {
+            Error::NoRequestedData => (
+                StatusCode::BAD_REQUEST,
+                "dataset doesn't have requested data".into_response(),
+            ),
+            Error::NoSuitableWorker => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "no suitable worker".into_response(),
+            ),
+            Error::ParquetFolderNameError(name) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("dataset has invalid parquet folder - {:?}", name).into_response(),
+            ),
+            Error::ReadDatasetError(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "dataset read error".into_response(),
+            ),
+        },
+    }
 }
 
 pub struct Server {

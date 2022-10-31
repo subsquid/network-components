@@ -71,7 +71,7 @@ impl ArchiveRouter {
     }
 
     pub fn get_worker(&self, start_block: i32) -> Result<&Url, Error> {
-        if !includes(&get_dataset_range(), start_block) {
+        if !includes(&get_dataset_range(&self.dataset)?, start_block) {
             return Err(Error::NoRequestedData);
         }
 
@@ -102,18 +102,18 @@ impl ArchiveRouter {
         Ok(&worker.url)
     }
 
-    pub fn get_dataset_range(&self) -> DataRange {
-        get_dataset_range()
+    pub fn get_dataset_range(&self) -> Result<DataRange, Error> {
+        get_dataset_range(&self.dataset)
     }
 
-    pub fn schedule(&mut self) {
+    pub fn schedule(&mut self) -> Result<(), Error> {
         let now = SystemTime::now();
 
         // remove dead workers
         self.workers
             .retain(|w| now.duration_since(w.last_ping).unwrap() < Duration::from_secs(10 * 60));
 
-        let ranges = get_data_ranges();
+        let ranges = get_data_ranges(&self.dataset)?;
 
         // remove dead ranges from desired state
         for w in &mut self.workers {
@@ -178,5 +178,6 @@ impl ArchiveRouter {
                 }
             }
         }
+        Ok(())
     }
 }

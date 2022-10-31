@@ -1,13 +1,11 @@
-use archive_router::error::Error;
 use archive_router::url::Url;
 use archive_router::uuid::Uuid;
-use archive_router::{ArchiveRouter, WorkerState};
+use archive_router::{ArchiveRouter, DataRange, WorkerState};
 use axum::extract::{Extension, Path};
-use axum::response::{IntoResponse, Result};
+use axum::response::Result;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_macros::debug_handler;
-use hyper::StatusCode;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -23,7 +21,7 @@ struct Ping {
 async fn ping(
     Json(payload): Json<Ping>,
     Extension(router): Extension<Arc<Mutex<ArchiveRouter>>>,
-) -> impl IntoResponse {
+) -> Json<WorkerState> {
     let mut router = router.lock().unwrap();
     let desired_state = router
         .ping(payload.worker_id, payload.worker_url, payload.state)
@@ -35,57 +33,19 @@ async fn ping(
 async fn get_worker(
     Path(start_block): Path<i32>,
     Extension(router): Extension<Arc<Mutex<ArchiveRouter>>>,
-) -> impl IntoResponse {
+) -> Result<Json<Url>> {
     let router = router.lock().unwrap();
-    match router.get_worker(start_block) {
-        Ok(url) => (StatusCode::OK, Json(url.clone()).into_response()),
-        Err(e) => match e {
-            Error::NoRequestedData => (
-                StatusCode::BAD_REQUEST,
-                "dataset doesn't have requested data".into_response(),
-            ),
-            Error::NoSuitableWorker => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "no suitable worker".into_response(),
-            ),
-            Error::ParquetFolderNameError(name) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("dataset has invalid parquet folder - {:?}", name).into_response(),
-            ),
-            Error::ReadDatasetError(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "dataset read error".into_response(),
-            ),
-        },
-    }
+    let url = router.get_worker(start_block)?.clone();
+    Ok(Json(url))
 }
 
 #[debug_handler]
 async fn get_dataset_range(
     Extension(router): Extension<Arc<Mutex<ArchiveRouter>>>,
-) -> impl IntoResponse {
+) -> Result<Json<DataRange>> {
     let router = router.lock().unwrap();
-    match router.get_dataset_range() {
-        Ok(range) => (StatusCode::OK, Json(range).into_response()),
-        Err(e) => match e {
-            Error::NoRequestedData => (
-                StatusCode::BAD_REQUEST,
-                "dataset doesn't have requested data".into_response(),
-            ),
-            Error::NoSuitableWorker => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "no suitable worker".into_response(),
-            ),
-            Error::ParquetFolderNameError(name) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("dataset has invalid parquet folder - {:?}", name).into_response(),
-            ),
-            Error::ReadDatasetError(_) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "dataset read error".into_response(),
-            ),
-        },
-    }
+    let range = router.get_dataset_range()?;
+    Ok(Json(range))
 }
 
 pub struct Server {

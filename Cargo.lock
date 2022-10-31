@@ -6,6 +6,7 @@ version = 3
 name = "archive-router"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "rand",
  "serde",
  "url",

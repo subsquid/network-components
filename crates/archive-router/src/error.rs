@@ -4,6 +4,7 @@ use std::ffi::OsString;
 use std::fmt::Debug;
 use std::io;
 
+#[derive(Debug)]
 pub enum Error {
     NoRequestedData,
     NoSuitableWorker,

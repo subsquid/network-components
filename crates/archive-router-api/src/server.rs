@@ -53,10 +53,8 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new(router: ArchiveRouter) -> Self {
-        Server {
-            router: Arc::new(Mutex::new(router)),
-        }
+    pub fn new(router: Arc<Mutex<ArchiveRouter>>) -> Self {
+        Server { router }
     }
 
     pub async fn run(&self) -> Result<(), hyper::Error> {

@@ -39,11 +39,11 @@ pub struct ArchiveRouter {
 }
 
 impl ArchiveRouter {
-    pub fn new(dataset: Dataset) -> Self {
+    pub fn new(dataset: Dataset, replication: usize) -> Self {
         ArchiveRouter {
             workers: vec![],
             dataset,
-            replication: 5,
+            replication,
         }
     }
 

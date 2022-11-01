@@ -106,6 +106,7 @@ impl ArchiveRouter {
         get_dataset_range(&self.dataset)
     }
 
+    /// Distributes data ranges among available workers
     pub fn schedule(&mut self) -> Result<(), Error> {
         let now = SystemTime::now();
 

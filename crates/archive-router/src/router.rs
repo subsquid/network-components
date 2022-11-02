@@ -1,4 +1,4 @@
-use crate::dataset::{get_data_ranges, get_dataset_range, DataRange};
+use crate::dataset::DatasetStorage;
 use crate::error::Error;
 use crate::util::get_random_item;
 use serde::{Deserialize, Serialize};
@@ -7,6 +7,12 @@ use url::Url;
 use uuid::Uuid;
 
 type Dataset = String;
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct DataRange {
+    pub from: i32,
+    pub to: i32,
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct WorkerState {
@@ -32,18 +38,20 @@ fn state_includes(state: &WorkerState, block: i32) -> bool {
 }
 
 #[derive(Default)]
-pub struct ArchiveRouter {
+pub struct ArchiveRouter<S: DatasetStorage> {
     workers: Vec<Worker>,
     dataset: Dataset,
     replication: usize,
+    storage: S,
 }
 
-impl ArchiveRouter {
-    pub fn new(dataset: Dataset, replication: usize) -> Self {
+impl<S: DatasetStorage> ArchiveRouter<S> {
+    pub fn new(dataset: Dataset, replication: usize, storage: S) -> Self {
         ArchiveRouter {
             workers: vec![],
             dataset,
             replication,
+            storage,
         }
     }
 
@@ -71,7 +79,7 @@ impl ArchiveRouter {
     }
 
     pub fn get_worker(&self, start_block: i32) -> Result<&Url, Error> {
-        if !includes(&get_dataset_range(&self.dataset)?, start_block) {
+        if !includes(&self.get_dataset_range()?, start_block) {
             return Err(Error::NoRequestedData);
         }
 
@@ -103,7 +111,16 @@ impl ArchiveRouter {
     }
 
     pub fn get_dataset_range(&self) -> Result<DataRange, Error> {
-        get_dataset_range(&self.dataset)
+        let ranges = self.get_data_ranges()?;
+
+        if ranges.is_empty() {
+            return Ok(DataRange { from: -1, to: -1 });
+        }
+
+        Ok(DataRange {
+            from: ranges.first().unwrap().from,
+            to: ranges.last().unwrap().to,
+        })
     }
 
     /// Distributes data ranges among available workers
@@ -114,7 +131,7 @@ impl ArchiveRouter {
         self.workers
             .retain(|w| now.duration_since(w.last_ping).unwrap() < Duration::from_secs(10 * 60));
 
-        let ranges = get_data_ranges(&self.dataset)?;
+        let ranges = self.get_data_ranges()?;
 
         // remove dead ranges from desired state
         for w in &mut self.workers {
@@ -180,5 +197,48 @@ impl ArchiveRouter {
             }
         }
         Ok(())
+    }
+
+    /**
+    Get dataset ranges (data scheduling units).
+
+    The resulting ranges are sorted and guaranteed to cover continues range of blocks
+    starting from block 0.
+    */
+    pub fn get_data_ranges(&self) -> Result<Vec<DataRange>, Error> {
+        let mut dirs = self.storage.get_data_directories(&self.dataset)?;
+        dirs.sort_by_key(|dir| dir.from);
+        let mut ranges = vec![];
+
+        for dir in dirs {
+            if ranges.is_empty() {
+                if dir.from == 0 {
+                    ranges.push(dir);
+                } else {
+                    break;
+                }
+            } else {
+                let current = ranges.last_mut().unwrap();
+                if current.to + 1 != dir.from {
+                    break;
+                }
+                if current.size > 20 * 1024 * 1024 * 1024 {
+                    ranges.push(dir);
+                } else {
+                    current.size = dir.size;
+                    current.to = dir.to;
+                }
+            }
+        }
+
+        // TODO: avoid extra iteration
+        let ranges = ranges
+            .into_iter()
+            .map(|dir| DataRange {
+                from: dir.from,
+                to: dir.to,
+            })
+            .collect();
+        Ok(ranges)
     }
 }

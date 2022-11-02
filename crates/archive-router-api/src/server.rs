@@ -1,3 +1,4 @@
+use archive_router::dataset::DatasetStorage;
 use archive_router::url::Url;
 use archive_router::uuid::Uuid;
 use archive_router::{ArchiveRouter, DataRange, WorkerState};
@@ -5,7 +6,6 @@ use axum::extract::{Extension, Path};
 use axum::response::Result;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use axum_macros::debug_handler;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -17,10 +17,9 @@ struct Ping {
     state: WorkerState,
 }
 
-#[debug_handler]
-async fn ping(
+async fn ping<S: DatasetStorage + Send>(
     Json(payload): Json<Ping>,
-    Extension(router): Extension<Arc<Mutex<ArchiveRouter>>>,
+    Extension(router): Extension<Arc<Mutex<ArchiveRouter<S>>>>,
 ) -> Json<WorkerState> {
     let mut router = router.lock().unwrap();
     let desired_state = router
@@ -29,39 +28,37 @@ async fn ping(
     Json(desired_state)
 }
 
-#[debug_handler]
-async fn get_worker(
+async fn get_worker<S: DatasetStorage>(
     Path(start_block): Path<i32>,
-    Extension(router): Extension<Arc<Mutex<ArchiveRouter>>>,
+    Extension(router): Extension<Arc<Mutex<ArchiveRouter<S>>>>,
 ) -> Result<Json<Url>> {
     let router = router.lock().unwrap();
     let url = router.get_worker(start_block)?.clone();
     Ok(Json(url))
 }
 
-#[debug_handler]
-async fn get_dataset_range(
-    Extension(router): Extension<Arc<Mutex<ArchiveRouter>>>,
+async fn get_dataset_range<S: DatasetStorage>(
+    Extension(router): Extension<Arc<Mutex<ArchiveRouter<S>>>>,
 ) -> Result<Json<DataRange>> {
     let router = router.lock().unwrap();
     let range = router.get_dataset_range()?;
     Ok(Json(range))
 }
 
-pub struct Server {
-    router: Arc<Mutex<ArchiveRouter>>,
+pub struct Server<S: DatasetStorage + Send> {
+    router: Arc<Mutex<ArchiveRouter<S>>>,
 }
 
-impl Server {
-    pub fn new(router: Arc<Mutex<ArchiveRouter>>) -> Self {
+impl<S: DatasetStorage + Send + 'static> Server<S> {
+    pub fn new(router: Arc<Mutex<ArchiveRouter<S>>>) -> Self {
         Server { router }
     }
 
     pub async fn run(&self) -> Result<(), hyper::Error> {
         let app = Router::new()
-            .route("/ping", post(ping))
-            .route("/worker/:start_block", get(get_worker))
-            .route("/dataset-range", get(get_dataset_range))
+            .route("/ping", post(ping::<S>))
+            .route("/worker/:start_block", get(get_worker::<S>))
+            .route("/dataset-range", get(get_dataset_range::<S>))
             .layer(Extension(self.router.clone()));
         let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
         axum::Server::bind(&addr)

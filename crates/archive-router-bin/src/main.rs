@@ -1,4 +1,4 @@
-use archive_router::dataset::LocalDatasetStorage;
+use archive_router::dataset::{DatasetStorage, LocalStorage};
 use archive_router::ArchiveRouter;
 use archive_router_api::hyper::Error;
 use archive_router_api::Server;
@@ -13,15 +13,16 @@ mod scheduler;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let args = Cli::parse();
-    let storage = LocalDatasetStorage {};
+
+    let storage = Box::new(LocalStorage::new(args.dataset.clone()));
+    let dataset_storage = Arc::new(DatasetStorage::new(storage));
     let router = Arc::new(Mutex::new(ArchiveRouter::new(
         args.dataset,
         args.replication,
-        storage,
     )));
 
     let interval = Duration::from_secs(args.scheduling_interval);
-    scheduler::start(router.clone(), interval);
+    scheduler::start(router.clone(), dataset_storage.clone(), interval);
 
-    Server::new(router).run().await
+    Server::new(router, dataset_storage).run().await
 }

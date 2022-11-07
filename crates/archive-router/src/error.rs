@@ -8,13 +8,13 @@ use std::io;
 pub enum Error {
     NoRequestedData,
     NoSuitableWorker,
-    ReadDatasetError(io::Error),
+    ReadDatasetError,
     ParquetFolderNameError(Box<dyn Debug>),
 }
 
 impl From<io::Error> for Error {
-    fn from(err: io::Error) -> Self {
-        Error::ReadDatasetError(err)
+    fn from(_: io::Error) -> Self {
+        Error::ReadDatasetError
     }
 }
 
@@ -39,7 +39,7 @@ impl IntoResponse for Error {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("dataset has invalid parquet folder - {:?}", name),
             ),
-            Error::ReadDatasetError(_) => (
+            Error::ReadDatasetError => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "dataset read error".to_string(),
             ),

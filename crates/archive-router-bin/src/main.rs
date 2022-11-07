@@ -1,4 +1,6 @@
-use archive_router::dataset::{DatasetStorage, LocalStorage};
+use archive_router::aws_config;
+use archive_router::aws_sdk_s3;
+use archive_router::dataset::{DatasetStorage, LocalStorage, S3Storage, Storage};
 use archive_router::ArchiveRouter;
 use archive_router_api::hyper::Error;
 use archive_router_api::Server;
@@ -6,6 +8,7 @@ use clap::Parser;
 use cli::Cli;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use url::Url;
 
 mod cli;
 mod scheduler;
@@ -14,15 +17,40 @@ mod scheduler;
 async fn main() -> Result<(), Error> {
     let args = Cli::parse();
 
-    let storage = Box::new(LocalStorage::new(args.dataset.clone()));
-    let dataset_storage = Arc::new(DatasetStorage::new(storage));
+    let storage = create_storage(&args).await;
     let router = Arc::new(Mutex::new(ArchiveRouter::new(
         args.dataset,
         args.replication,
     )));
 
     let interval = Duration::from_secs(args.scheduling_interval);
-    scheduler::start(router.clone(), dataset_storage.clone(), interval);
+    scheduler::start(router.clone(), storage.clone(), interval);
 
-    Server::new(router, dataset_storage).run().await
+    Server::new(router, storage).run().await
+}
+
+async fn create_storage(args: &Cli) -> Arc<DatasetStorage> {
+    let url = Url::parse(&args.dataset);
+    let storage_api: Box<dyn Storage + Send + Sync> = match url {
+        Ok(url) => match url.scheme() {
+            "s3" => {
+                let mut config_loader = aws_config::from_env();
+                if let Some(s3_endpoint) = &args.s3_endpoint {
+                    let uri = s3_endpoint.parse().expect("invalid s3-endpoint");
+                    let endpoint = aws_sdk_s3::Endpoint::immutable(uri);
+                    config_loader = config_loader.endpoint_resolver(endpoint);
+                }
+                let config = config_loader.load().await;
+
+                let client = aws_sdk_s3::Client::new(&config);
+                let host = url.host_str().expect("invalid dataset host").to_string();
+                let bucket = host + url.path();
+                Box::new(S3Storage::new(client, bucket))
+            }
+            _ => panic!("unsupported filesystem - {}", url.scheme()),
+        },
+        Err(..) => Box::new(LocalStorage::new(args.dataset.clone())),
+    };
+
+    Arc::new(DatasetStorage::new(storage_api))
 }

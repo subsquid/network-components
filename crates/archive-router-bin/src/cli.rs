@@ -13,4 +13,8 @@ pub struct Cli {
     /// Interval of distribution data ranges among available workers (in seconds)
     #[clap(short = 'i', long)]
     pub scheduling_interval: u64,
+
+    /// S3 api endpoint
+    #[clap(long)]
+    pub s3_endpoint: Option<String>,
 }

@@ -10,3 +10,4 @@ archive-router = { version = "0.1", path = "../archive-router" }
 archive-router-api = { version = "0.1", path = "../archive-router-api" }
 clap = { version = "4.0.18", features = ["derive"] }
 tokio = { version = "1.21.2", features = ["full"] }
+url = "2.3.1"

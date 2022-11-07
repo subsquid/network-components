@@ -10,7 +10,7 @@ pub fn start(router: Arc<Mutex<ArchiveRouter>>, storage: Arc<DatasetStorage>, in
             let ranges = match storage.get_data_ranges().await {
                 Ok(ranges) => ranges,
                 Err(e) => {
-                    eprintln!("Error occured while scheduling {:?}", e);
+                    eprintln!("Error occured while scheduling: {:?}", e);
                     continue;
                 }
             };

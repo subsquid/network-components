@@ -1,4 +1,5 @@
 use crate::error::Error;
+use aws_sdk_s3::Client;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
@@ -10,6 +11,7 @@ pub struct DataRange {
 }
 
 /// Directory in the dataset containing data for a certain range of blocks.
+#[derive(Debug)]
 pub struct DataDir {
     /// First block covered by the dir.
     pub from: i32,
@@ -120,7 +122,7 @@ impl Storage for LocalStorage {
                 let folder = folder?;
                 let folder_name = folder.file_name().into_string()?;
 
-                let block_range = folder_name.split_whitespace().collect::<Vec<&str>>();
+                let block_range = folder_name.split('-').collect::<Vec<&str>>();
                 if block_range.len() != 2 {
                     return Err(Error::ParquetFolderNameError(Box::new(folder_name)));
                 }
@@ -142,5 +144,59 @@ impl Storage for LocalStorage {
             }
         }
         Ok(dirs)
+    }
+}
+
+pub struct S3Storage {
+    client: Client,
+    bucket: String,
+}
+
+#[async_trait::async_trait]
+impl Storage for S3Storage {
+    async fn get_data_directories(&self) -> Result<Vec<DataDir>, Error> {
+        let objects = self
+            .client
+            .list_objects()
+            .bucket(&self.bucket)
+            .send()
+            .await
+            .map_err(|_| Error::ReadDatasetError)?;
+        let dirs = objects
+            .contents()
+            .unwrap_or_default()
+            .chunks(3)
+            .map(|chunk| {
+                let key = chunk[0].key().ok_or(Error::ReadDatasetError)?;
+                let splitted = key.split('/').collect::<Vec<_>>();
+                let folder = splitted.get(1).ok_or(Error::ReadDatasetError)?;
+                let block_range = folder.split('-').collect::<Vec<_>>();
+                let size = chunk.iter().fold(0, |size, o| size + o.size());
+
+                let from = block_range
+                    .first()
+                    .ok_or_else(|| Error::ParquetFolderNameError(Box::new(folder.to_string())))?
+                    .parse()
+                    .map_err(|_| Error::ParquetFolderNameError(Box::new(folder.to_string())))?;
+                let to = block_range
+                    .get(1)
+                    .ok_or_else(|| Error::ParquetFolderNameError(Box::new(folder.to_string())))?
+                    .parse()
+                    .map_err(|_| Error::ParquetFolderNameError(Box::new(folder.to_string())))?;
+
+                Ok(DataDir {
+                    from,
+                    to,
+                    size: size.try_into().unwrap(),
+                })
+            })
+            .collect::<Result<Vec<DataDir>, Error>>()?;
+        Ok(dirs)
+    }
+}
+
+impl S3Storage {
+    pub fn new(client: Client, bucket: String) -> Self {
+        S3Storage { client, bucket }
     }
 }

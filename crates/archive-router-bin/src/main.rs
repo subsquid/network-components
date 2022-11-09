@@ -12,6 +12,7 @@ use url::Url;
 
 mod cli;
 mod scheduler;
+mod storage_sync;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -23,10 +24,12 @@ async fn main() -> Result<(), Error> {
         args.replication,
     )));
 
-    let interval = Duration::from_secs(args.scheduling_interval);
-    scheduler::start(router.clone(), storage.clone(), interval);
+    let scheduling_interval = Duration::from_secs(args.scheduling_interval);
+    scheduler::start(router.clone(), scheduling_interval);
+    let sync_interval = Duration::from_secs(args.sync_interval);
+    storage_sync::start(router.clone(), storage, sync_interval);
 
-    Server::new(router, storage).run().await
+    Server::new(router).run().await
 }
 
 async fn create_storage(args: &Cli) -> Arc<DatasetStorage> {

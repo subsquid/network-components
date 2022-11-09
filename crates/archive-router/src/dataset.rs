@@ -78,19 +78,6 @@ impl DatasetStorage {
             .collect();
         Ok(ranges)
     }
-
-    pub async fn get_dataset_range(&self) -> Result<DataRange, Error> {
-        let ranges = self.get_data_ranges().await?;
-
-        if ranges.is_empty() {
-            return Ok(DataRange { from: -1, to: -1 });
-        }
-
-        Ok(DataRange {
-            from: ranges.first().unwrap().from,
-            to: ranges.last().unwrap().to,
-        })
-    }
 }
 
 fn dir_size(dir: &fs::DirEntry) -> io::Result<u64> {

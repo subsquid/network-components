@@ -11,8 +11,12 @@ pub struct Cli {
     pub replication: usize,
 
     /// Interval of distribution data ranges among available workers (in seconds)
-    #[clap(short = 'i', long)]
+    #[clap(long)]
     pub scheduling_interval: u64,
+
+    /// Interval of dataset syncronization (in seconds)
+    #[clap(long)]
+    pub sync_interval: u64,
 
     /// S3 api endpoint
     #[clap(long)]

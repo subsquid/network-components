@@ -33,6 +33,7 @@ fn state_includes(state: &WorkerState, block: i32) -> bool {
 
 pub struct ArchiveRouter {
     workers: Vec<Worker>,
+    ranges: Vec<DataRange>,
     dataset: Dataset,
     replication: usize,
 }
@@ -41,6 +42,7 @@ impl ArchiveRouter {
     pub fn new(dataset: Dataset, replication: usize) -> Self {
         ArchiveRouter {
             workers: vec![],
+            ranges: vec![],
             dataset,
             replication,
         }
@@ -69,8 +71,8 @@ impl ArchiveRouter {
         &worker.desired_state
     }
 
-    pub fn get_worker(&self, start_block: i32, data_range: &DataRange) -> Result<&Url, Error> {
-        if !includes(data_range, start_block) {
+    pub fn get_worker(&self, start_block: i32) -> Result<&Url, Error> {
+        if !includes(&self.get_dataset_range(), start_block) {
             return Err(Error::NoRequestedData);
         }
 
@@ -101,8 +103,19 @@ impl ArchiveRouter {
         Ok(&worker.url)
     }
 
+    pub fn get_dataset_range(&self) -> DataRange {
+        if self.ranges.is_empty() {
+            return DataRange { from: -1, to: -1 };
+        }
+
+        DataRange {
+            from: self.ranges.first().unwrap().from,
+            to: self.ranges.last().unwrap().to,
+        }
+    }
+
     /// Distributes data ranges among available workers
-    pub fn schedule(&mut self, ranges: &Vec<DataRange>) -> Result<(), Error> {
+    pub fn schedule(&mut self) {
         let now = SystemTime::now();
 
         // remove dead workers
@@ -114,14 +127,14 @@ impl ArchiveRouter {
             if w.desired_state.dataset == self.dataset {
                 w.desired_state
                     .ranges
-                    .retain(|i| ranges.iter().any(|r| r.from == i.from))
+                    .retain(|i| self.ranges.iter().any(|r| r.from == i.from))
             } else {
                 w.desired_state.dataset = self.dataset.clone();
                 w.desired_state.ranges = vec![];
             }
         }
 
-        for range in ranges {
+        for range in &self.ranges {
             let holders: Vec<usize> = self
                 .workers
                 .iter()
@@ -172,6 +185,9 @@ impl ArchiveRouter {
                 }
             }
         }
-        Ok(())
+    }
+
+    pub fn update_ranges(&mut self, ranges: Vec<DataRange>) {
+        self.ranges = ranges;
     }
 }

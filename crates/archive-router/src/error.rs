@@ -1,6 +1,5 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use std::ffi::OsString;
 use std::fmt::Debug;
 use std::io;
 
@@ -8,19 +7,13 @@ use std::io;
 pub enum Error {
     NoRequestedData,
     NoSuitableWorker,
-    ReadDatasetError,
-    ParquetFolderNameError(Box<dyn Debug>),
+    ReadDatasetError(Box<dyn std::error::Error>),
+    InvalidLayoutError(String),
 }
 
 impl From<io::Error> for Error {
-    fn from(_: io::Error) -> Self {
-        Error::ReadDatasetError
-    }
-}
-
-impl From<OsString> for Error {
-    fn from(string: OsString) -> Self {
-        Error::ParquetFolderNameError(Box::new(string))
+    fn from(err: io::Error) -> Self {
+        Error::ReadDatasetError(Box::new(err))
     }
 }
 
@@ -35,11 +28,8 @@ impl IntoResponse for Error {
                 StatusCode::SERVICE_UNAVAILABLE,
                 "no suitable worker".to_string(),
             ),
-            Error::ParquetFolderNameError(name) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("dataset has invalid parquet folder - {:?}", name),
-            ),
-            Error::ReadDatasetError => (
+            Error::InvalidLayoutError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+            Error::ReadDatasetError(..) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "dataset read error".to_string(),
             ),

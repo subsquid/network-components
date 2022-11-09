@@ -97,6 +97,10 @@ impl LocalStorage {
     }
 }
 
+fn invalid_folder_name(folder_name: &String) -> Error {
+    Error::InvalidLayoutError(format!("invalid folder name - {folder_name}"))
+}
+
 #[async_trait::async_trait]
 impl Storage for LocalStorage {
     async fn get_data_directories(&self) -> Result<Vec<DataDir>, Error> {
@@ -107,20 +111,22 @@ impl Storage for LocalStorage {
             let subfolder_dir = fs::read_dir(subfolder.path())?;
             for folder in subfolder_dir {
                 let folder = folder?;
-                let folder_name = folder.file_name().into_string()?;
+                let folder_name = folder.file_name().into_string().map_err(|_| {
+                    Error::InvalidLayoutError("parquet folder name contains invalid unicode".into())
+                })?;
 
                 let block_range = folder_name.split('-').collect::<Vec<&str>>();
                 if block_range.len() != 2 {
-                    return Err(Error::ParquetFolderNameError(Box::new(folder_name)));
+                    return Err(invalid_folder_name(&folder_name));
                 }
 
                 let from = match block_range[0].parse() {
                     Ok(from) => from,
-                    Err(..) => return Err(Error::ParquetFolderNameError(Box::new(folder_name))),
+                    Err(..) => return Err(invalid_folder_name(&folder_name)),
                 };
                 let to = match block_range[1].parse() {
                     Ok(to) => to,
-                    Err(..) => return Err(Error::ParquetFolderNameError(Box::new(folder_name))),
+                    Err(..) => return Err(invalid_folder_name(&folder_name)),
                 };
 
                 dirs.push(DataDir {
@@ -132,6 +138,10 @@ impl Storage for LocalStorage {
         }
         Ok(dirs)
     }
+}
+
+fn invalid_object_key(key: &str) -> Error {
+    Error::InvalidLayoutError(format!("invalid object key - {key}"))
 }
 
 pub struct S3Storage {
@@ -148,28 +158,30 @@ impl Storage for S3Storage {
             .bucket(&self.bucket)
             .send()
             .await
-            .map_err(|_| Error::ReadDatasetError)?;
+            .map_err(|err| Error::ReadDatasetError(Box::new(err)))?;
         let dirs = objects
             .contents()
             .unwrap_or_default()
             .chunks(3)
             .map(|chunk| {
-                let key = chunk[0].key().ok_or(Error::ReadDatasetError)?;
+                let key = chunk[0]
+                    .key()
+                    .ok_or_else(|| Error::InvalidLayoutError("invalid object key".into()))?;
                 let splitted = key.split('/').collect::<Vec<_>>();
-                let folder = splitted.get(1).ok_or(Error::ReadDatasetError)?;
+                let folder = splitted.get(1).ok_or_else(|| invalid_object_key(key))?;
                 let block_range = folder.split('-').collect::<Vec<_>>();
                 let size = chunk.iter().fold(0, |size, o| size + o.size());
 
                 let from = block_range
                     .first()
-                    .ok_or_else(|| Error::ParquetFolderNameError(Box::new(folder.to_string())))?
+                    .ok_or_else(|| invalid_object_key(key))?
                     .parse()
-                    .map_err(|_| Error::ParquetFolderNameError(Box::new(folder.to_string())))?;
+                    .map_err(|_| invalid_object_key(key))?;
                 let to = block_range
                     .get(1)
-                    .ok_or_else(|| Error::ParquetFolderNameError(Box::new(folder.to_string())))?
+                    .ok_or_else(|| invalid_object_key(key))?
                     .parse()
-                    .map_err(|_| Error::ParquetFolderNameError(Box::new(folder.to_string())))?;
+                    .map_err(|_| invalid_object_key(key))?;
 
                 Ok(DataDir {
                     from,

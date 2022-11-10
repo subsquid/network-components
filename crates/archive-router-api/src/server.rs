@@ -1,8 +1,10 @@
+use crate::middleware::logging;
 use archive_router::dataset::DataRange;
 use archive_router::url::Url;
 use archive_router::uuid::Uuid;
 use archive_router::{ArchiveRouter, WorkerState};
 use axum::extract::{Extension, Path};
+use axum::middleware::from_fn;
 use axum::response::Result;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -62,6 +64,7 @@ impl Server {
             .route("/ping", post(ping))
             .route("/worker/:start_block", get(get_worker))
             .route("/dataset-range", get(get_dataset_range))
+            .layer(from_fn(logging))
             .layer(Extension(self.router.clone()));
         let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
         axum::Server::bind(&addr)

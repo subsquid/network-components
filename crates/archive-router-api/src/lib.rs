@@ -1,3 +1,4 @@
+mod middleware;
 mod server;
 
 pub use hyper;

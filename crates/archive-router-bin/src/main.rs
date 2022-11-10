@@ -11,12 +11,14 @@ use std::time::Duration;
 use url::Url;
 
 mod cli;
+mod logger;
 mod scheduler;
 mod storage_sync;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let args = Cli::parse();
+    logger::init();
 
     let storage = create_storage(&args).await;
     let router = Arc::new(Mutex::new(ArchiveRouter::new(

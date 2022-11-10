@@ -2,6 +2,7 @@ use archive_router::dataset::DatasetStorage;
 use archive_router::ArchiveRouter;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tracing::error;
 
 pub fn start(router: Arc<Mutex<ArchiveRouter>>, storage: Arc<DatasetStorage>, interval: Duration) {
     tokio::spawn(async move {
@@ -10,7 +11,7 @@ pub fn start(router: Arc<Mutex<ArchiveRouter>>, storage: Arc<DatasetStorage>, in
             let ranges = match storage.get_data_ranges().await {
                 Ok(ranges) => ranges,
                 Err(e) => {
-                    eprintln!("Error occured while dataset syncronization: {:?}", e);
+                    error!("Error occured while dataset syncronization: {:?}", e);
                     continue;
                 }
             };

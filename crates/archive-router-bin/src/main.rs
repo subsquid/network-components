@@ -34,7 +34,7 @@ async fn main() -> Result<(), Error> {
     Server::new(router).run().await
 }
 
-async fn create_storage(args: &Cli) -> Arc<DatasetStorage> {
+async fn create_storage(args: &Cli) -> Arc<tokio::sync::Mutex<DatasetStorage>> {
     let url = Url::parse(&args.dataset);
     let storage_api: Box<dyn Storage + Send + Sync> = match url {
         Ok(url) => match url.scheme() {
@@ -57,5 +57,5 @@ async fn create_storage(args: &Cli) -> Arc<DatasetStorage> {
         Err(..) => Box::new(LocalStorage::new(args.dataset.clone())),
     };
 
-    Arc::new(DatasetStorage::new(storage_api))
+    Arc::new(tokio::sync::Mutex::new(DatasetStorage::new(storage_api)))
 }

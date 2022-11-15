@@ -4,10 +4,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::error;
 
-pub fn start(router: Arc<Mutex<ArchiveRouter>>, storage: Arc<DatasetStorage>, interval: Duration) {
+pub fn start(
+    router: Arc<Mutex<ArchiveRouter>>,
+    storage: Arc<tokio::sync::Mutex<DatasetStorage>>,
+    interval: Duration,
+) {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(interval).await;
+            let mut storage = storage.lock().await;
             let ranges = match storage.get_data_ranges().await {
                 Ok(ranges) => ranges,
                 Err(e) => {

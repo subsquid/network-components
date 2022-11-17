@@ -117,17 +117,16 @@ impl Storage for LocalStorage {
 
                 let block_range = folder_name.split('-').collect::<Vec<&str>>();
                 if block_range.len() != 2 {
-                    return Err(invalid_folder_name(&folder_name));
+                    // for the case when folder is temporary
+                    continue;
                 }
 
-                let from = match block_range[0].parse() {
-                    Ok(from) => from,
-                    Err(..) => return Err(invalid_folder_name(&folder_name)),
-                };
-                let to = match block_range[1].parse() {
-                    Ok(to) => to,
-                    Err(..) => return Err(invalid_folder_name(&folder_name)),
-                };
+                let from = block_range[0]
+                    .parse()
+                    .map_err(|_| invalid_folder_name(&folder_name))?;
+                let to = block_range[1]
+                    .parse()
+                    .map_err(|_| invalid_folder_name(&folder_name))?;
 
                 dirs.push(DataDir {
                     from,

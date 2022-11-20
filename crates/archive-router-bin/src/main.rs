@@ -6,6 +6,7 @@ use archive_router_api::hyper::Error;
 use archive_router_api::Server;
 use clap::Parser;
 use cli::Cli;
+use std::env;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use url::Url;
@@ -40,7 +41,8 @@ async fn create_storage(args: &Cli) -> Arc<tokio::sync::Mutex<DatasetStorage>> {
         Ok(url) => match url.scheme() {
             "s3" => {
                 let mut config_loader = aws_config::from_env();
-                if let Some(s3_endpoint) = &args.s3_endpoint {
+                let s3_endpoint = env::var("AWS_S3_ENDPOINT").ok();
+                if let Some(s3_endpoint) = &s3_endpoint {
                     let uri = s3_endpoint.parse().expect("invalid s3-endpoint");
                     let endpoint = aws_sdk_s3::Endpoint::immutable(uri);
                     config_loader = config_loader.endpoint_resolver(endpoint);

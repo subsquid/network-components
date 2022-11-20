@@ -17,8 +17,4 @@ pub struct Cli {
     /// Interval of dataset syncronization (in seconds)
     #[clap(long)]
     pub sync_interval: u64,
-
-    /// S3 api endpoint
-    #[clap(long)]
-    pub s3_endpoint: Option<String>,
 }

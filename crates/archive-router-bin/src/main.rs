@@ -59,5 +59,8 @@ async fn create_storage(args: &Cli) -> Arc<tokio::sync::Mutex<DatasetStorage>> {
         Err(..) => Box::new(LocalStorage::new(args.dataset.clone())),
     };
 
-    Arc::new(tokio::sync::Mutex::new(DatasetStorage::new(storage_api)))
+    Arc::new(tokio::sync::Mutex::new(DatasetStorage::new(
+        storage_api,
+        args.chunk_size,
+    )))
 }

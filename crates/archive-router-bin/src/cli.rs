@@ -10,6 +10,9 @@ pub struct Cli {
     #[clap(short, long)]
     pub replication: usize,
 
+    /// Size of a data schedule unit
+    pub chunk_size: usize,
+
     /// Interval of distribution data ranges among available workers (in seconds)
     #[clap(long)]
     pub scheduling_interval: u64,

@@ -29,11 +29,15 @@ pub trait Storage {
 
 pub struct DatasetStorage {
     storage: Box<dyn Storage + Send + Sync>,
+    chunk_size: usize,
 }
 
 impl DatasetStorage {
-    pub fn new(storage: Box<dyn Storage + Send + Sync>) -> DatasetStorage {
-        DatasetStorage { storage }
+    pub fn new(storage: Box<dyn Storage + Send + Sync>, chunk_size: usize) -> DatasetStorage {
+        DatasetStorage {
+            storage,
+            chunk_size,
+        }
     }
 
     /**
@@ -47,35 +51,21 @@ impl DatasetStorage {
         dirs.sort_by_key(|dir| dir.from);
         let mut ranges = vec![];
 
-        for dir in dirs {
+        for chunk in dirs.chunks(self.chunk_size) {
             if ranges.is_empty() {
-                if dir.from == 0 {
-                    ranges.push(dir);
-                } else {
+                let dir = &chunk[0];
+                if dir.from != 0 {
                     break;
-                }
-            } else {
-                let current = ranges.last_mut().unwrap();
-                if current.to + 1 != dir.from {
-                    break;
-                }
-                if current.size > 20 * 1024 * 1024 * 1024 {
-                    ranges.push(dir);
-                } else {
-                    current.size = dir.size;
-                    current.to = dir.to;
                 }
             }
+
+            let range = DataRange {
+                from: chunk.first().unwrap().from,
+                to: chunk.last().unwrap().to,
+            };
+            ranges.push(range);
         }
 
-        // TODO: avoid extra iteration
-        let ranges = ranges
-            .into_iter()
-            .map(|dir| DataRange {
-                from: dir.from,
-                to: dir.to,
-            })
-            .collect();
         Ok(ranges)
     }
 }

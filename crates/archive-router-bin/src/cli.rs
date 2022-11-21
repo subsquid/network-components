@@ -11,13 +11,14 @@ pub struct Cli {
     pub replication: usize,
 
     /// Size of a data schedule unit
+    #[clap(short, long)]
     pub chunk_size: usize,
 
-    /// Interval of distribution data ranges among available workers (in seconds)
-    #[clap(long)]
-    pub scheduling_interval: u64,
+    /// Minimum number of workers to start distribution
+    #[clap(short, long, default_value_t = 0)]
+    pub min_workers: usize,
 
-    /// Interval of dataset syncronization (in seconds)
-    #[clap(long)]
-    pub sync_interval: u64,
+    /// Interval of distribution data ranges among available workers (in seconds)
+    #[clap(short = 'i', long)]
+    pub scheduling_interval: u64,
 }

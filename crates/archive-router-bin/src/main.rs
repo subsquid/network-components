@@ -14,7 +14,6 @@ use url::Url;
 mod cli;
 mod logger;
 mod scheduler;
-mod storage_sync;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -25,12 +24,11 @@ async fn main() -> Result<(), Error> {
     let router = Arc::new(Mutex::new(ArchiveRouter::new(
         args.dataset,
         args.replication,
+        args.min_workers,
     )));
 
     let scheduling_interval = Duration::from_secs(args.scheduling_interval);
-    scheduler::start(router.clone(), scheduling_interval);
-    let sync_interval = Duration::from_secs(args.sync_interval);
-    storage_sync::start(router.clone(), storage, sync_interval);
+    scheduler::start(router.clone(), storage, scheduling_interval);
 
     Server::new(router).run().await
 }

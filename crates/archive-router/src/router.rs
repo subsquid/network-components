@@ -36,15 +36,17 @@ pub struct ArchiveRouter {
     ranges: Vec<DataRange>,
     dataset: Dataset,
     replication: usize,
+    min_workers: usize,
 }
 
 impl ArchiveRouter {
-    pub fn new(dataset: Dataset, replication: usize) -> Self {
+    pub fn new(dataset: Dataset, replication: usize, min_workers: usize) -> Self {
         ArchiveRouter {
             workers: vec![],
             ranges: vec![],
             dataset,
             replication,
+            min_workers,
         }
     }
 
@@ -116,6 +118,10 @@ impl ArchiveRouter {
 
     /// Distributes data ranges among available workers
     pub fn schedule(&mut self) {
+        if self.workers.len() < self.min_workers {
+            return;
+        }
+
         let now = SystemTime::now();
 
         // remove dead workers

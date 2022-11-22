@@ -14,3 +14,4 @@ serde = { version = "1.0.147", features = ["derive"] }
 aws-sdk-s3 = "0.21.0"
 aws-config = "0.51.0"
 async-trait = "0.1.58"
+tracing = "0.1"

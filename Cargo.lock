@@ -21,6 +21,7 @@ dependencies = [
  "axum",
  "rand",
  "serde",
+ "tracing",
  "url",
  "uuid",
 ]

@@ -3,6 +3,7 @@ use crate::error::Error;
 use crate::util::get_random_item;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
+use tracing::debug;
 use url::Url;
 use uuid::Uuid;
 
@@ -119,6 +120,7 @@ impl ArchiveRouter {
     /// Distributes data ranges among available workers
     pub fn schedule(&mut self) {
         if self.workers.len() < self.min_workers {
+            debug!("skipping scheduling because of not enough workers");
             return;
         }
 

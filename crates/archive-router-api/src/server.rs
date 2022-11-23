@@ -1,7 +1,6 @@
 use crate::middleware::logging;
 use archive_router::dataset::DataRange;
 use archive_router::url::Url;
-use archive_router::uuid::Uuid;
 use archive_router::{ArchiveRouter, WorkerState};
 use axum::extract::{Extension, Path};
 use axum::middleware::from_fn;
@@ -14,9 +13,9 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Deserialize)]
 struct Ping {
-    worker_id: Uuid,
+    worker_id: String,
     worker_url: Url,
-    state: WorkerState,
+    state: Option<WorkerState>,
 }
 
 #[axum_macros::debug_handler]

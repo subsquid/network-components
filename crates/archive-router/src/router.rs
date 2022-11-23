@@ -5,18 +5,18 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
 use tracing::debug;
 use url::Url;
-use uuid::Uuid;
 
 type Dataset = String;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerState {
     pub dataset: Dataset,
     pub ranges: Vec<DataRange>,
 }
 
+#[derive(Debug)]
 pub struct Worker {
-    pub id: Uuid,
+    pub id: String,
     pub url: Url,
     pub desired_state: WorkerState,
     pub current_state: WorkerState,
@@ -51,8 +51,17 @@ impl ArchiveRouter {
         }
     }
 
-    pub fn ping(&mut self, worker_id: Uuid, worker_url: Url, state: WorkerState) -> &WorkerState {
+    pub fn ping(
+        &mut self,
+        worker_id: String,
+        worker_url: Url,
+        state: Option<WorkerState>,
+    ) -> &WorkerState {
         let now = SystemTime::now();
+        let state = state.unwrap_or_else(|| WorkerState {
+            dataset: self.dataset.clone(),
+            ranges: vec![],
+        });
         let index = self.workers.iter().position(|w| w.id == worker_id);
         let worker = if let Some(index) = index {
             let worker = &mut self.workers[index];
@@ -175,17 +184,19 @@ impl ArchiveRouter {
             }
 
             if holders.len() < self.replication {
-                let mut holders: Vec<Uuid> =
-                    holders.into_iter().map(|h| self.workers[h].id).collect();
+                let mut holders: Vec<_> = holders
+                    .into_iter()
+                    .map(|h| self.workers[h].id.clone())
+                    .collect();
 
                 // sort workers by amount of data they hold in ascending order
                 self.workers.sort_by_key(|w| w.desired_state.ranges.len());
 
                 // find a suitable worker
                 for worker in &mut self.workers {
-                    if !holders.iter().any(|&h| h == worker.id) {
+                    if !holders.iter().any(|h| h == &worker.id) {
                         worker.desired_state.ranges.push(range.clone());
-                        holders.push(worker.id);
+                        holders.push(worker.id.clone());
                         if holders.len() == self.replication {
                             break;
                         }

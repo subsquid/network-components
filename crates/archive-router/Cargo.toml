@@ -7,7 +7,6 @@ edition = "2021"
 
 [dependencies]
 axum = "0.5.17"
-uuid = { version = "1.2.1", features = ["serde"] }
 url = { version = "2.3.1", features = ["serde"] }
 rand = "0.8.5"
 serde = { version = "1.0.147", features = ["derive"] }

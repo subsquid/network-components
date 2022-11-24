@@ -177,8 +177,6 @@ impl ArchiveRouter {
                 for r in &mut holder.desired_state.ranges {
                     if r.from == range.from {
                         r.to = range.to;
-                    } else {
-                        break;
                     }
                 }
             }

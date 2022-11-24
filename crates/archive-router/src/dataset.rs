@@ -227,8 +227,8 @@ impl Storage for S3Storage {
             self.last_key = last_key.map(|key| key.to_string());
         }
 
-        self.dirs.append(&mut dirs.clone());
-        Ok(dirs)
+        self.dirs.append(&mut dirs);
+        Ok(self.dirs.clone())
     }
 }
 

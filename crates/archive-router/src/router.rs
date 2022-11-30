@@ -1,5 +1,6 @@
 use crate::dataset::DataRange;
 use crate::error::Error;
+use crate::metrics::WORKERS_COUNTER;
 use crate::util::get_random_item;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
@@ -78,6 +79,7 @@ impl ArchiveRouter {
                 last_ping: now,
             };
             self.workers.push(worker);
+            WORKERS_COUNTER.inc();
             self.workers.last().unwrap()
         };
         &worker.desired_state
@@ -138,6 +140,7 @@ impl ArchiveRouter {
         // remove dead workers
         self.workers
             .retain(|w| now.duration_since(w.last_ping).unwrap() < Duration::from_secs(10 * 60));
+        WORKERS_COUNTER.set(self.workers.len() as i64);
 
         // remove dead ranges from desired state
         for w in &mut self.workers {

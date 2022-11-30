@@ -13,6 +13,7 @@ use url::Url;
 
 mod cli;
 mod logger;
+mod metrics;
 mod scheduler;
 
 #[tokio::main]

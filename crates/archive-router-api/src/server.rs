@@ -1,10 +1,13 @@
 use crate::middleware::logging;
 use archive_router::dataset::DataRange;
+use archive_router::prometheus::{gather, Encoder, TextEncoder};
 use archive_router::url::Url;
 use archive_router::{ArchiveRouter, WorkerState};
+use axum::body::{boxed, Body};
 use axum::extract::{Extension, Path};
+use axum::http::header::CONTENT_TYPE;
 use axum::middleware::from_fn;
-use axum::response::Result;
+use axum::response::{Response, Result};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
@@ -49,6 +52,20 @@ async fn get_dataset_range(
     Ok(Json(range))
 }
 
+#[axum_macros::debug_handler]
+async fn get_metrics() -> Response {
+    let encoder = TextEncoder::new();
+    let mut buffer = vec![];
+    encoder
+        .encode(&gather(), &mut buffer)
+        .expect("Failed to encode metrics");
+    Response::builder()
+        .status(200)
+        .header(CONTENT_TYPE, encoder.format_type())
+        .body(boxed(Body::from(buffer)))
+        .unwrap()
+}
+
 pub struct Server {
     router: Arc<Mutex<ArchiveRouter>>,
 }
@@ -63,6 +80,7 @@ impl Server {
             .route("/ping", post(ping))
             .route("/worker/:start_block", get(get_worker))
             .route("/dataset-range", get(get_dataset_range))
+            .route("/metrics", get(get_metrics))
             .layer(from_fn(logging))
             .layer(Extension(self.router.clone()));
         let addr = SocketAddr::from(([127, 0, 0, 1], 3000));

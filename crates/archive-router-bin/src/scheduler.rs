@@ -1,3 +1,4 @@
+use crate::metrics::DATASET_SYNC_ERRORS;
 use archive_router::dataset::DatasetStorage;
 use archive_router::ArchiveRouter;
 use std::sync::{Arc, Mutex};
@@ -18,6 +19,7 @@ pub fn start(
             let ranges = match storage.get_data_ranges().await {
                 Ok(ranges) => ranges,
                 Err(e) => {
+                    DATASET_SYNC_ERRORS.inc();
                     error!("error occured while dataset syncronization: {:?}", e);
                     continue;
                 }

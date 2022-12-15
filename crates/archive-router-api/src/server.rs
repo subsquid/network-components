@@ -19,16 +19,17 @@ struct Ping {
     worker_id: String,
     worker_url: Url,
     state: Option<WorkerState>,
+    pause: Option<bool>,
 }
 
 #[axum_macros::debug_handler]
 async fn ping(
-    Json(payload): Json<Ping>,
+    Json(ping): Json<Ping>,
     Extension(router): Extension<Arc<Mutex<ArchiveRouter>>>,
 ) -> Json<WorkerState> {
     let mut router = router.lock().unwrap();
     let desired_state = router
-        .ping(payload.worker_id, payload.worker_url, payload.state)
+        .ping(ping.worker_id, ping.worker_url, ping.state, ping.pause)
         .clone();
     Json(desired_state)
 }

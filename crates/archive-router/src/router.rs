@@ -22,6 +22,7 @@ pub struct Worker {
     pub desired_state: WorkerState,
     pub current_state: WorkerState,
     pub last_ping: SystemTime,
+    pub is_active: bool,
 }
 
 /// Checks whether the given block is within a data range.
@@ -57,17 +58,20 @@ impl ArchiveRouter {
         worker_id: String,
         worker_url: Url,
         state: Option<WorkerState>,
+        pause: Option<bool>,
     ) -> &WorkerState {
         let now = SystemTime::now();
         let state = state.unwrap_or_else(|| WorkerState {
             dataset: self.dataset.clone(),
             ranges: vec![],
         });
+        let pause = pause.unwrap_or(false);
         let index = self.workers.iter().position(|w| w.id == worker_id);
         let worker = if let Some(index) = index {
             let worker = &mut self.workers[index];
             worker.url = worker_url;
             worker.current_state = state;
+            worker.is_active = !pause;
             worker.last_ping = now;
             worker
         } else {
@@ -76,6 +80,7 @@ impl ArchiveRouter {
                 url: worker_url,
                 desired_state: state.clone(),
                 current_state: state,
+                is_active: !pause,
                 last_ping: now,
             };
             self.workers.push(worker);
@@ -96,6 +101,10 @@ impl ArchiveRouter {
             .workers
             .iter()
             .filter(|w| {
+                if !w.is_active {
+                    return false;
+                }
+
                 if w.current_state.dataset != self.dataset {
                     return false;
                 }

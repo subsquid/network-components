@@ -55,6 +55,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "archive-router-controller"
+version = "0.1.0"
+dependencies = [
+ "parking_lot",
+ "rand",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"

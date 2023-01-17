@@ -15,7 +15,7 @@ dependencies = [
 name = "archive-router"
 version = "0.1.0"
 dependencies = [
- "async-trait",
+ "archive-router-controller",
  "aws-config",
  "aws-sdk-s3",
  "axum",
@@ -23,6 +23,7 @@ dependencies = [
  "prometheus",
  "rand",
  "serde",
+ "tokio",
  "tracing",
  "url",
 ]
@@ -32,11 +33,13 @@ name = "archive-router-api"
 version = "0.1.0"
 dependencies = [
  "archive-router",
+ "archive-router-controller",
  "axum",
  "axum-macros",
  "hyper",
  "serde",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -45,6 +48,7 @@ version = "0.1.0"
 dependencies = [
  "archive-router",
  "archive-router-api",
+ "archive-router-controller",
  "clap",
  "lazy_static",
  "libc",
@@ -60,6 +64,7 @@ version = "0.1.0"
 dependencies = [
  "parking_lot",
  "rand",
+ "serde",
 ]
 
 [[package]]

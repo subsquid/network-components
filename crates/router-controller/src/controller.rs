@@ -4,6 +4,8 @@ use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
 
 use crate::atom::Atom;
 use crate::data_chunk::DataChunk;
@@ -44,10 +46,11 @@ struct WorkerInfo<C: Config> {
 pub trait Config {
     type WorkerId: Clone + Eq + Hash;
     type WorkerUrl;
-    type Dataset: Clone + Eq + Hash;
+    type Dataset: Clone + Eq + Hash + DeserializeOwned;
 }
 
 
+#[derive(Deserialize)]
 pub struct PingMessage<C: Config> {
     worker_id: C::WorkerId,
     worker_url: C::WorkerUrl,

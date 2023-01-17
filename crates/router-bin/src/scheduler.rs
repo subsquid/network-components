@@ -1,32 +1,27 @@
-use crate::metrics::DATASET_SYNC_ERRORS;
-use archive_router::dataset::DatasetStorage;
-use archive_router::ArchiveRouter;
-use std::sync::{Arc, Mutex};
+use archive_router::config::Config;
+use archive_router::dataset::Storage;
+use archive_router_controller::controller::Controller;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
-use tracing::{debug, error};
+use tracing::debug;
 
 pub fn start(
-    router: Arc<Mutex<ArchiveRouter>>,
-    storage: Arc<tokio::sync::Mutex<DatasetStorage>>,
+    controller: Arc<Controller<Config>>,
+    mut storages: HashMap<String, Box<dyn Storage + Send>>,
     interval: Duration,
 ) {
-    debug!("started scheduling task with {:?} interval", &interval);
-    tokio::spawn(async move {
+    tokio::task::spawn_blocking(move || {
+        debug!("started scheduling task with {:?} interval", interval);
         loop {
-            tokio::time::sleep(interval).await;
+            thread::sleep(interval);
             debug!("started scheduling");
-            let mut storage = storage.lock().await;
-            let ranges = match storage.get_data_ranges().await {
-                Ok(ranges) => ranges,
-                Err(e) => {
-                    DATASET_SYNC_ERRORS.inc();
-                    error!("error occured while dataset syncronization: {:?}", e);
-                    continue;
-                }
-            };
-            let mut router = router.lock().unwrap();
-            router.update_ranges(ranges);
-            router.schedule();
+            controller.schedule(|dataset, next_block| {
+                debug!("downloading chunks for {}", dataset);
+                let storage = storages.get_mut(dataset).unwrap();
+                storage.get_chunks(next_block).map_err(|_| ())
+            });
             debug!("finished scheduling");
         }
     });

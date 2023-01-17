@@ -1,56 +1,35 @@
 use crate::middleware::logging;
-use archive_router::dataset::DataRange;
+use archive_router::config::Config;
 use archive_router::prometheus::{gather, Encoder, TextEncoder};
-use archive_router::url::Url;
-use archive_router::{ArchiveRouter, WorkerState};
+use archive_router_controller::controller::{Controller, PingMessage, WorkerState};
 use axum::body::{boxed, Body};
 use axum::extract::{Extension, Path};
 use axum::http::header::CONTENT_TYPE;
+use axum::http::StatusCode;
 use axum::middleware::from_fn;
-use axum::response::{Response, Result};
+use axum::response::{IntoResponse, Response, Result};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-
-#[derive(Deserialize)]
-struct Ping {
-    worker_id: String,
-    worker_url: Url,
-    state: Option<WorkerState>,
-    pause: Option<bool>,
-}
+use std::sync::Arc;
 
 #[axum_macros::debug_handler]
 async fn ping(
-    Json(ping): Json<Ping>,
-    Extension(router): Extension<Arc<Mutex<ArchiveRouter>>>,
-) -> Json<WorkerState> {
-    let mut router = router.lock().unwrap();
-    let desired_state = router
-        .ping(ping.worker_id, ping.worker_url, ping.state, ping.pause)
-        .clone();
-    Json(desired_state)
+    Json(msg): Json<PingMessage<Config>>,
+    Extension(controller): Extension<Arc<Controller<Config>>>,
+) -> Json<WorkerState<Config>> {
+    Json((*controller.ping(msg)).clone())
 }
 
 #[axum_macros::debug_handler]
 async fn get_worker(
-    Path(start_block): Path<i32>,
-    Extension(router): Extension<Arc<Mutex<ArchiveRouter>>>,
-) -> Result<Json<Url>> {
-    let router = router.lock().unwrap();
-    let url = router.get_worker(start_block)?.clone();
-    Ok(Json(url))
-}
-
-#[axum_macros::debug_handler]
-async fn get_dataset_range(
-    Extension(router): Extension<Arc<Mutex<ArchiveRouter>>>,
-) -> Result<Json<DataRange>> {
-    let router = router.lock().unwrap();
-    let range = router.get_dataset_range();
-    Ok(Json(range))
+    Path((dataset, start_block)): Path<(String, u32)>,
+    Extension(controller): Extension<Arc<Controller<Config>>>,
+) -> Response {
+    match controller.get_worker(&dataset, start_block) {
+        Some(url) => Json((*url).clone()).into_response(),
+        None => (StatusCode::SERVICE_UNAVAILABLE, "no suitable worker").into_response(),
+    }
 }
 
 #[axum_macros::debug_handler]
@@ -68,22 +47,21 @@ async fn get_metrics() -> Response {
 }
 
 pub struct Server {
-    router: Arc<Mutex<ArchiveRouter>>,
+    controller: Arc<Controller<Config>>,
 }
 
 impl Server {
-    pub fn new(router: Arc<Mutex<ArchiveRouter>>) -> Self {
-        Server { router }
+    pub fn new(controller: Arc<Controller<Config>>) -> Self {
+        Server { controller }
     }
 
     pub async fn run(&self) -> Result<(), hyper::Error> {
         let app = Router::new()
             .route("/ping", post(ping))
-            .route("/worker/:start_block", get(get_worker))
-            .route("/dataset-range", get(get_dataset_range))
+            .route("/worker/:dataset/:start_block", get(get_worker))
             .route("/metrics", get(get_metrics))
             .layer(from_fn(logging))
-            .layer(Extension(self.router.clone()));
+            .layer(Extension(self.controller.clone()));
         let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
         axum::Server::bind(&addr)
             .serve(app.into_make_service())

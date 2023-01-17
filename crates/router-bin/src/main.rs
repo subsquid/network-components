@@ -1,13 +1,14 @@
-use archive_router::aws_config;
-use archive_router::aws_sdk_s3;
-use archive_router::dataset::{DatasetStorage, LocalStorage, S3Storage, Storage};
-use archive_router::ArchiveRouter;
+use archive_router::config::Config;
+use archive_router::dataset::{S3Storage, Storage};
+use archive_router::{aws_config, aws_sdk_s3};
 use archive_router_api::hyper::Error;
 use archive_router_api::Server;
+use archive_router_controller::controller::ControllerBuilder;
 use clap::Parser;
 use cli::Cli;
+use std::collections::HashMap;
 use std::env;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
 
@@ -21,22 +22,29 @@ async fn main() -> Result<(), Error> {
     let args = Cli::parse();
     logger::init();
 
-    let storage = create_storage(&args).await;
-    let router = Arc::new(Mutex::new(ArchiveRouter::new(
-        args.dataset,
-        args.replication,
-        args.min_workers,
-    )));
+    let mut storages: HashMap<String, Box<dyn Storage + Send>> = HashMap::new();
+    for dataset in &args.dataset {
+        let storage = create_storage(&"s3://etha-mainnet-sia".to_string()).await;
+        storages.insert(dataset.clone(), storage);
+    }
+
+    let controller = ControllerBuilder::<Config>::new()
+        .set_data_replication(args.replication)
+        .set_data_management_unit(args.chunk_size)
+        .set_workers(args.worker)
+        .set_datasets(args.dataset)
+        .build();
+    let controller = Arc::new(controller);
 
     let scheduling_interval = Duration::from_secs(args.scheduling_interval);
-    scheduler::start(router.clone(), storage, scheduling_interval);
+    scheduler::start(controller.clone(), storages, scheduling_interval);
 
-    Server::new(router).run().await
+    Server::new(controller).run().await
 }
 
-async fn create_storage(args: &Cli) -> Arc<tokio::sync::Mutex<DatasetStorage>> {
-    let url = Url::parse(&args.dataset);
-    let storage_api: Box<dyn Storage + Send + Sync> = match url {
+async fn create_storage(dataset: &String) -> Box<dyn Storage + Send> {
+    let url = Url::parse(dataset);
+    match url {
         Ok(url) => match url.scheme() {
             "s3" => {
                 let mut config_loader = aws_config::from_env();
@@ -55,11 +63,6 @@ async fn create_storage(args: &Cli) -> Arc<tokio::sync::Mutex<DatasetStorage>> {
             }
             _ => panic!("unsupported filesystem - {}", url.scheme()),
         },
-        Err(..) => Box::new(LocalStorage::new(args.dataset.clone())),
-    };
-
-    Arc::new(tokio::sync::Mutex::new(DatasetStorage::new(
-        storage_api,
-        args.chunk_size,
-    )))
+        Err(..) => panic!("unsupported dataset - {}", dataset),
+    }
 }

@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 archive-router = { version = "0.1", path = "../router" }
 archive-router-api = { version = "0.1", path = "../router-api" }
+archive-router-controller = { version = "0.1", path = "../router-controller" }
 clap = { version = "4.0.18", features = ["derive"] }
 tokio = { version = "1.21.2", features = ["full"] }
 url = "2.3.1"

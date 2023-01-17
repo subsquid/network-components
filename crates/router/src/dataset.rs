@@ -1,157 +1,44 @@
 use crate::error::Error;
+use archive_router_controller::data_chunk::DataChunk;
 use aws_sdk_s3::Client;
-use serde::{Deserialize, Serialize};
-use std::fs;
-use std::io;
+use tokio::runtime::Handle;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DataRange {
-    pub from: i32,
-    pub to: i32,
-}
-
-/// Directory in the dataset containing data for a certain range of blocks.
-#[derive(Clone, Debug)]
-pub struct DataDir {
-    /// First block covered by the dir.
-    pub from: i32,
-    /// Last block covered by the dir (inclusive).
-    pub to: i32,
-    /// Size of dir in bytes.
-    pub size: u64,
-}
-
-#[async_trait::async_trait]
 pub trait Storage {
-    /// Get data directories in the dataset.
-    async fn get_data_directories(&mut self) -> Result<Vec<DataDir>, Error>;
-}
-
-pub struct DatasetStorage {
-    storage: Box<dyn Storage + Send + Sync>,
-    chunk_size: usize,
-}
-
-impl DatasetStorage {
-    pub fn new(storage: Box<dyn Storage + Send + Sync>, chunk_size: usize) -> DatasetStorage {
-        DatasetStorage {
-            storage,
-            chunk_size,
-        }
-    }
-
-    /**
-    Get dataset ranges (data scheduling units).
-
-    The resulting ranges are sorted and guaranteed to cover continues range of blocks
-    starting from block 0.
-    */
-    pub async fn get_data_ranges(&mut self) -> Result<Vec<DataRange>, Error> {
-        let mut dirs = self.storage.get_data_directories().await?;
-        dirs.sort_by_key(|dir| dir.from);
-        let mut ranges = vec![];
-
-        for chunk in dirs.chunks(self.chunk_size) {
-            if ranges.is_empty() {
-                let dir = &chunk[0];
-                if dir.from != 0 {
-                    break;
-                }
-            }
-
-            let range = DataRange {
-                from: chunk.first().unwrap().from,
-                to: chunk.last().unwrap().to,
-            };
-            ranges.push(range);
-        }
-
-        Ok(ranges)
-    }
-}
-
-fn dir_size(dir: &fs::DirEntry) -> io::Result<u64> {
-    fs::read_dir(dir.path())?.try_fold(0, |size, entry| {
-        let entry = entry?;
-        Ok(size + entry.metadata()?.len())
-    })
-}
-
-pub struct LocalStorage {
-    dataset: String,
-}
-
-impl LocalStorage {
-    pub fn new(dataset: String) -> Self {
-        LocalStorage { dataset }
-    }
-}
-
-fn invalid_folder_name(folder_name: &String) -> Error {
-    Error::InvalidLayoutError(format!("invalid folder name - {folder_name}"))
-}
-
-#[async_trait::async_trait]
-impl Storage for LocalStorage {
-    async fn get_data_directories(&mut self) -> Result<Vec<DataDir>, Error> {
-        let mut dirs = vec![];
-        let dataset_dir = fs::read_dir(&self.dataset)?;
-        for subfolder in dataset_dir {
-            let subfolder = subfolder?;
-            let subfolder_dir = fs::read_dir(subfolder.path())?;
-            for folder in subfolder_dir {
-                let folder = folder?;
-                let folder_name = folder.file_name().into_string().map_err(|_| {
-                    Error::InvalidLayoutError("parquet folder name contains invalid unicode".into())
-                })?;
-
-                let block_range = folder_name.split('-').collect::<Vec<&str>>();
-                if block_range.len() != 2 {
-                    // for the case when folder is temporary
-                    continue;
-                }
-
-                let from = block_range[0]
-                    .parse()
-                    .map_err(|_| invalid_folder_name(&folder_name))?;
-                let to = block_range[1]
-                    .parse()
-                    .map_err(|_| invalid_folder_name(&folder_name))?;
-
-                dirs.push(DataDir {
-                    from,
-                    to,
-                    size: dir_size(&folder)?,
-                });
-            }
-        }
-        Ok(dirs)
-    }
+    /// Get data chunks in the dataset.
+    fn get_chunks(&mut self, next_block: u32) -> Result<Vec<DataChunk>, Error>;
 }
 
 fn invalid_object_key(key: &str) -> Error {
     Error::InvalidLayoutError(format!("invalid object key - {key}"))
 }
 
+fn extract_last_block(last_key: &str) -> u32 {
+    let segments = last_key.split('/').collect::<Vec<&str>>();
+    let range = segments[1].split('-').collect::<Vec<&str>>();
+    range[1].parse().unwrap()
+}
+
 pub struct S3Storage {
     client: Client,
     bucket: String,
-    dirs: Vec<DataDir>,
     last_key: Option<String>,
 }
 
-#[async_trait::async_trait]
 impl Storage for S3Storage {
-    async fn get_data_directories(&mut self) -> Result<Vec<DataDir>, Error> {
+    fn get_chunks(&mut self, next_block: u32) -> Result<Vec<DataChunk>, Error> {
         let mut objects = vec![];
+        if let Some(last_key) = &self.last_key {
+            let last_block = extract_last_block(last_key);
+            assert_eq!(last_block + 1, next_block);
+        }
 
+        let handle = Handle::current();
         let mut builder = self.client.list_objects_v2().bucket(&self.bucket);
         if let Some(last_key) = &self.last_key {
             builder = builder.start_after(last_key);
         }
-        let output = builder
-            .send()
-            .await
+        let output = handle
+            .block_on(builder.send())
             .map_err(|err| Error::ReadDatasetError(Box::new(err)))?;
 
         let mut continuation_token = output.next_continuation_token.clone();
@@ -159,13 +46,14 @@ impl Storage for S3Storage {
             objects.extend_from_slice(contents);
         }
         while let Some(token) = continuation_token {
-            let output = self
+            let future = self
                 .client
                 .list_objects_v2()
                 .bucket(&self.bucket)
                 .continuation_token(token)
-                .send()
-                .await
+                .send();
+            let output = handle
+                .block_on(future)
                 .map_err(|err| Error::ReadDatasetError(Box::new(err)))?;
             continuation_token = output.next_continuation_token.clone();
             if let Some(contents) = output.contents() {
@@ -174,7 +62,7 @@ impl Storage for S3Storage {
         }
 
         let mut last_key = None;
-        let mut dirs = vec![];
+        let mut chunks = vec![];
         for chunk in objects.chunks_exact(3) {
             let blocks_key = chunk[0]
                 .key()
@@ -196,11 +84,15 @@ impl Storage for S3Storage {
             }
 
             let splitted = blocks_key.split('/').collect::<Vec<_>>();
+            let top = splitted
+                .first()
+                .ok_or_else(|| invalid_object_key(blocks_key))?
+                .parse()
+                .map_err(|_| invalid_object_key(blocks_key))?;
             let folder = splitted
                 .get(1)
                 .ok_or_else(|| invalid_object_key(blocks_key))?;
             let block_range = folder.split('-').collect::<Vec<_>>();
-            let size = chunk.iter().fold(0, |size, o| size + o.size());
 
             let from = block_range
                 .first()
@@ -215,20 +107,15 @@ impl Storage for S3Storage {
 
             last_key = Some(transactions_key);
 
-            let dir = DataDir {
-                from,
-                to,
-                size: size.try_into().unwrap(),
-            };
-            dirs.push(dir);
+            let data_chunk = DataChunk::new(top, from, to);
+            chunks.push(data_chunk);
         }
 
         if last_key.is_some() {
             self.last_key = last_key.map(|key| key.to_string());
         }
 
-        self.dirs.append(&mut dirs);
-        Ok(self.dirs.clone())
+        Ok(chunks)
     }
 }
 
@@ -237,7 +124,6 @@ impl S3Storage {
         S3Storage {
             client,
             bucket,
-            dirs: vec![],
             last_key: None,
         }
     }

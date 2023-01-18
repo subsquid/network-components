@@ -54,7 +54,8 @@ pub trait Config {
 pub struct PingMessage<C: Config> {
     worker_id: C::WorkerId,
     worker_url: C::WorkerUrl,
-    worker_state: WorkerState<C>,
+    state: WorkerState<C>,
+    #[serde(default)]
     pause: bool
 }
 
@@ -134,7 +135,7 @@ impl <C: Config> Controller<C> {
     pub fn ping(&self, msg: PingMessage<C>) -> Arc<WorkerState<C>> {
         let info = Arc::new(WorkerInfo {
             url: Arc::new(msg.worker_url),
-            state: msg.worker_state,
+            state: msg.state,
             suspended: msg.pause,
             last_ping: SystemTime::now()
         });
@@ -495,7 +496,7 @@ mod tests {
             controller.ping(PingMessage {
                 worker_id: w,
                 worker_url: w,
-                worker_state: HashMap::new(),
+                state: HashMap::new(),
                 pause: false
             });
         }
@@ -508,7 +509,7 @@ mod tests {
             controller.ping(PingMessage {
                 worker_id: w,
                 worker_url: w,
-                worker_state: HashMap::new(),
+                state: HashMap::new(),
                 pause: false
             })
         }).collect();
@@ -519,7 +520,7 @@ mod tests {
             controller.ping(PingMessage {
                 worker_id: w,
                 worker_url: w,
-                worker_state: state.deref().clone(),
+                state: state.deref().clone(),
                 pause: false
             });
         }

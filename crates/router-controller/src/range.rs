@@ -3,41 +3,34 @@ use serde::{Serialize, Deserialize};
 
 
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct Range {
-    beg: u32,
-    end: u32
-}
+pub struct Range(u32, u32);
 
 
 impl Range {
     pub fn new(beg: u32, end: u32) -> Self {
         assert!(beg <= end);
-        Range { beg, end }
+        Range(beg, end)
     }
 
     #[inline]
     pub fn begin(&self) -> u32 {
-        self.beg
+        self.0
     }
 
     #[inline]
     pub fn end(&self) -> u32 {
-        self.end
+        self.1
     }
 }
 
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct RangeSet {
-    ranges: Box<[Range]>
-}
+pub struct RangeSet(Box<[Range]>);
 
 
 impl RangeSet {
     pub fn empty() -> Self {
-        RangeSet {
-            ranges: Box::new([])
-        }
+        RangeSet(Box::new([]))
     }
 
     pub fn has(&self, point: u32) -> bool {
@@ -45,14 +38,14 @@ impl RangeSet {
     }
 
     pub fn find_containing_range(&self, point: u32) -> Option<Range> {
-        self.containing_range(point).map(|i| self.ranges[i])
+        self.containing_range(point).map(|i| self.0[i])
     }
 
     fn containing_range(&self, point: u32) -> Option<usize> {
-        self.ranges.binary_search_by(|i| {
-            if point < i.beg {
+        self.0.binary_search_by(|i| {
+            if point < i.begin() {
                 Ordering::Greater
-            } else if i.end < point {
+            } else if i.end() < point {
                 Ordering::Less
             } else {
                 Ordering::Equal
@@ -61,8 +54,8 @@ impl RangeSet {
     }
 
     pub fn includes(&self, range: Range) -> bool {
-        if let Some(c) = self.find_containing_range(range.beg) {
-            c.end >= range.end
+        if let Some(c) = self.find_containing_range(range.begin()) {
+            c.end() >= range.end()
         } else {
             false
         }
@@ -80,16 +73,14 @@ impl From<Vec<Range>> for RangeSet {
         for i in 1..ranges.len() {
             let c = ranges[i];
             let mut p = ranges[pi];
-            if c.beg > p.end {
+            if c.begin() > p.end() {
                 pi += 1;
                 ranges[pi] = c;
             } else {
-                p.end = c.end;
+                p.1 = c.end();
             }
         }
         ranges.truncate(pi + 1);
-        RangeSet {
-            ranges: ranges.into_boxed_slice()
-        }
+        RangeSet(ranges.into_boxed_slice())
     }
 }

@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::fmt::write;
 use serde::{Serialize, Deserialize};
 
 
@@ -24,7 +25,7 @@ impl Range {
 }
 
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct RangeSet(Box<[Range]>);
 
 
@@ -82,5 +83,12 @@ impl From<Vec<Range>> for RangeSet {
         }
         ranges.truncate(pi + 1);
         RangeSet(ranges.into_boxed_slice())
+    }
+}
+
+
+impl std::fmt::Debug for RangeSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RangeSet{:?}", self.0)
     }
 }

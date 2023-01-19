@@ -1,29 +1,36 @@
-use crate::middleware::logging;
-use archive_router::config::Config;
-use archive_router::prometheus::{gather, Encoder, TextEncoder};
-use archive_router_controller::controller::{Controller, PingMessage, WorkerState};
-use axum::body::{boxed, Body};
+use std::net::SocketAddr;
+use std::ops::Deref;
+use std::sync::Arc;
+
+use axum::{Json, Router};
+use axum::body::{Body, boxed};
 use axum::extract::{Extension, Path};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::StatusCode;
 use axum::middleware::from_fn;
 use axum::response::{IntoResponse, Response, Result};
 use axum::routing::{get, post};
-use axum::{Json, Router};
-use std::net::SocketAddr;
-use std::ops::Deref;
-use std::sync::Arc;
 use tracing::info;
+
+use archive_router::config::Config;
+use archive_router::prometheus::{Encoder, gather, TextEncoder};
+use archive_router_controller::controller::{Controller, PingMessage, WorkerState};
+
+use crate::middleware::logging;
 
 #[axum_macros::debug_handler]
 async fn ping(
     Json(msg): Json<PingMessage<Config>>,
     Extension(controller): Extension<Arc<Controller<Config>>>,
 ) -> Json<WorkerState<Config>> {
-    let formatted_msg = format!("{:?}", msg);
+    let worker_id = msg.worker_id.clone();
+    let worker_url = msg.worker_url.to_string();
+    let current_state = format!("{:?}", msg.state);
     let desired_state = controller.ping(msg);
     info!(
-        ping = formatted_msg,
+        ping_from = worker_id,
+        worker_url,
+        current_state,
         desired_state = format!("{:?}", desired_state)
     );
     Json(desired_state.deref().clone())

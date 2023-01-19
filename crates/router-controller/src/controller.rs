@@ -53,11 +53,11 @@ pub trait Config {
 
 #[derive(Deserialize, Debug)]
 pub struct PingMessage<C: Config> {
-    worker_id: C::WorkerId,
-    worker_url: C::WorkerUrl,
-    state: WorkerState<C>,
+    pub worker_id: C::WorkerId,
+    pub worker_url: C::WorkerUrl,
+    pub state: WorkerState<C>,
     #[serde(default)]
-    pause: bool
+    pub pause: bool
 }
 
 

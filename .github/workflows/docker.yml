@@ -1,0 +1,27 @@
+name: docker
+on:
+  workflow_dispatch: # manually run
+    inputs:
+      tag:
+        description: image tag
+        required: true
+
+env:
+  CI: true
+
+jobs:
+  publish:
+    name: docker-publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Docker login
+        uses: docker/login-action@v1
+        with:
+          username: eldar
+          password: ${{ secrets.ELDAR_DOCKER }}
+
+      - name: Docker build and push
+        uses: docker/build-push-action@v3
+        with:
+          push: true
+          tags: eldar/archive-router:${{ inputs.tag }}

@@ -2,7 +2,7 @@ use archive_router_controller::controller;
 use serde::Deserialize;
 use url::Url;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Config;
 
 impl controller::Config for Config {

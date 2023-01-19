@@ -43,6 +43,13 @@ impl std::fmt::Display for DataChunk {
 }
 
 
+impl std::fmt::Debug for DataChunk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+
 impl std::str::FromStr for DataChunk {
     type Err = ();
 

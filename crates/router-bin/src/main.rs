@@ -24,7 +24,7 @@ async fn main() -> Result<(), Error> {
 
     let mut storages: HashMap<String, Box<dyn Storage + Send>> = HashMap::new();
     for dataset in &args.dataset {
-        let storage = create_storage(&"s3://etha-mainnet-sia".to_string()).await;
+        let storage = create_storage(dataset).await;
         storages.insert(dataset.clone(), storage);
     }
 
@@ -34,6 +34,7 @@ async fn main() -> Result<(), Error> {
         .set_workers(args.worker)
         .set_datasets(args.dataset)
         .build();
+
     let controller = Arc::new(controller);
 
     let scheduling_interval = Duration::from_secs(args.scheduling_interval);

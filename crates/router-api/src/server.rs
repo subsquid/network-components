@@ -11,14 +11,22 @@ use axum::response::{IntoResponse, Response, Result};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::sync::Arc;
+use tracing::info;
 
 #[axum_macros::debug_handler]
 async fn ping(
     Json(msg): Json<PingMessage<Config>>,
     Extension(controller): Extension<Arc<Controller<Config>>>,
 ) -> Json<WorkerState<Config>> {
-    Json((*controller.ping(msg)).clone())
+    let formatted_msg = format!("{:?}", msg);
+    let desired_state = controller.ping(msg);
+    info!(
+        ping = formatted_msg,
+        desired_state = format!("{:?}", desired_state)
+    );
+    Json(desired_state.deref().clone())
 }
 
 #[axum_macros::debug_handler]

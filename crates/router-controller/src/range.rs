@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use serde::{Serialize, Deserialize};
 
 
-#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Serialize, Deserialize, Debug)]
 pub struct Range(u32, u32);
 
 
@@ -24,7 +24,7 @@ impl Range {
 }
 
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct RangeSet(Box<[Range]>);
 
 

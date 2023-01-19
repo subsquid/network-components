@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tracing::debug;
+use tracing::{error, info};
 
 pub fn start(
     controller: Arc<Controller<Config>>,
@@ -13,16 +13,26 @@ pub fn start(
     interval: Duration,
 ) {
     tokio::task::spawn_blocking(move || {
-        debug!("started scheduling task with {:?} interval", interval);
+        info!("started scheduling task with {:?} interval", interval);
         loop {
             thread::sleep(interval);
-            debug!("started scheduling");
+            info!("started scheduling");
             controller.schedule(|dataset, next_block| {
-                debug!("downloading chunks for {}", dataset);
+                info!("downloading new chunks for {}", dataset);
                 let storage = storages.get_mut(dataset).unwrap();
-                storage.get_chunks(next_block).map_err(|_| ())
+                match storage.get_chunks(next_block) {
+                    Ok(chunks) => {
+                        info!("found new chunks in {}: {:?}", dataset, chunks);
+                        Ok(chunks)
+                    },
+                    Err(err) => {
+                        error!("failed to download new chunks for {}: {:?}", dataset, err);
+                        Err(())
+                    }
+                }
+
             });
-            debug!("finished scheduling");
+            info!("finished scheduling");
         }
     });
 }

@@ -1,5 +1,6 @@
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -44,13 +45,13 @@ struct WorkerInfo<C: Config> {
 
 
 pub trait Config {
-    type WorkerId: Clone + Eq + Hash;
-    type WorkerUrl;
-    type Dataset: Clone + Eq + Hash + DeserializeOwned;
+    type WorkerId: Clone + Eq + Hash + Debug;
+    type WorkerUrl: Debug;
+    type Dataset: Clone + Eq + Hash + DeserializeOwned + Debug;
 }
 
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct PingMessage<C: Config> {
     worker_id: C::WorkerId,
     worker_url: C::WorkerUrl,
@@ -58,6 +59,7 @@ pub struct PingMessage<C: Config> {
     #[serde(default)]
     pause: bool
 }
+
 
 type Wi = usize;
 type Ui = usize;

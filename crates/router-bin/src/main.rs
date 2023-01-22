@@ -1,16 +1,17 @@
-use archive_router::config::Config;
-use archive_router::dataset::{S3Storage, Storage};
-use archive_router::{aws_config, aws_sdk_s3};
-use archive_router_api::hyper::Error;
-use archive_router_api::Server;
-use archive_router_controller::controller::ControllerBuilder;
-use clap::Parser;
-use cli::Cli;
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
+
+use clap::Parser;
 use url::Url;
+
+use archive_router::{aws_config, aws_sdk_s3};
+use archive_router::dataset::{S3Storage, Storage};
+use archive_router_api::hyper::Error;
+use archive_router_api::Server;
+use archive_router_controller::controller::ControllerBuilder;
+use cli::Cli;
 
 mod cli;
 mod logger;
@@ -23,14 +24,14 @@ async fn main() -> Result<(), Error> {
     logger::init();
 
     let mut storages: HashMap<String, Box<dyn Storage + Send>> = HashMap::new();
-    for dataset in &args.dataset {
+    for (_name, dataset) in &args.dataset {
         let storage = create_storage(dataset).await;
         storages.insert(dataset.clone(), storage);
     }
 
-    let controller = ControllerBuilder::<Config>::new()
+    let controller = ControllerBuilder::new()
         .set_data_replication(args.replication)
-        .set_data_management_unit(args.chunk_size)
+        .set_data_management_unit(args.scheduling_unit)
         .set_workers(args.worker)
         .set_datasets(args.dataset)
         .build();

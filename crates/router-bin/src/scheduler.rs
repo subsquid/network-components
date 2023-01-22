@@ -1,4 +1,3 @@
-use archive_router::config::Config;
 use archive_router::dataset::Storage;
 use archive_router_controller::controller::Controller;
 use std::collections::HashMap;
@@ -8,7 +7,7 @@ use std::time::Duration;
 use tracing::{error, info};
 
 pub fn start(
-    controller: Arc<Controller<Config>>,
+    controller: Arc<Controller>,
     mut storages: HashMap<String, Box<dyn Storage + Send>>,
     interval: Duration,
 ) {

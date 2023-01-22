@@ -1,61 +1,46 @@
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
 use serde::Deserialize;
-use serde::de::DeserializeOwned;
 
 use crate::atom::Atom;
 use crate::data_chunk::DataChunk;
 use crate::range::{Range, RangeSet};
 
-pub type WorkerState<C> = HashMap<<C as Config>::Dataset, RangeSet>;
+pub type WorkerId = String;
+pub type Url = String;
+pub type Dataset = Url;
+pub type WorkerState = HashMap<Dataset, RangeSet>;
 
 
-struct Worker<C: Config> {
-    id: C::WorkerId,
-    desired_state: Arc<WorkerState<C>>,
-    info: Arc<Atom<WorkerInfo<C>>>,
+#[derive(Clone)]
+struct Worker {
+    id: WorkerId,
+    desired_state: Arc<WorkerState>,
+    info: Arc<Atom<WorkerInfo>>,
     is_managed: bool
 }
 
 
-// implement manually, in order to omit `Clone` bound on `C`
-impl <C: Config> Clone for Worker<C> {
-    fn clone(&self) -> Self {
-        Worker {
-            id: self.id.clone(),
-            desired_state: self.desired_state.clone(),
-            info: self.info.clone(),
-            is_managed: self.is_managed
-        }
-    }
-}
-
-
-struct WorkerInfo<C: Config> {
-    url: Arc<C::WorkerUrl>,
-    state: WorkerState<C>,
+struct WorkerInfo {
+    url: Url,
+    state: WorkerState,
     suspended: bool,
     last_ping: SystemTime
 }
 
 
-pub trait Config {
-    type WorkerId: Clone + Eq + Hash + Debug;
-    type WorkerUrl: Debug;
-    type Dataset: Clone + Eq + Hash + DeserializeOwned + Debug;
-}
-
-
 #[derive(Deserialize, Debug)]
-pub struct PingMessage<C: Config> {
-    pub worker_id: C::WorkerId,
-    pub worker_url: C::WorkerUrl,
-    pub state: WorkerState<C>,
+pub struct PingMessage {
+    pub worker_id: WorkerId,
+    pub worker_url: Url,
+    pub state: WorkerState,
     #[serde(default)]
     pub pause: bool
 }
@@ -66,30 +51,38 @@ type Ui = usize;
 type Assignment = Vec<HashSet<Ui>>;
 
 
-struct Schedule<C: Config> {
-    datasets: HashMap<C::Dataset, Vec<DataChunk>>,
-    assignment: HashMap<C::Dataset, Assignment>
+struct Schedule {
+    datasets: HashMap<Dataset, Vec<DataChunk>>,
+    assignment: HashMap<Dataset, Assignment>
 }
 
 
-pub struct Controller<C: Config> {
-    schedule: parking_lot::Mutex<Schedule<C>>,
-    workers: Atom<Vec<Worker<C>>>,
-    managed_workers: HashSet<C::WorkerId>,
+pub struct Controller {
+    schedule: parking_lot::Mutex<Schedule>,
+    workers: Atom<Vec<Worker>>,
+    managed_datasets: HashMap<String, Dataset>,
+    managed_workers: HashSet<WorkerId>,
     data_replication: usize,
     data_management_unit: usize
 }
 
 
-unsafe impl <C: Config> Send for Controller<C> {}
-unsafe impl <C: Config> Sync for Controller<C> {}
+unsafe impl Send for Controller {}
+unsafe impl Sync for Controller {}
 
 
-impl <C: Config> Controller<C> {
-    pub fn get_worker(&self, dataset: &C::Dataset, first_block: u32) -> Option<Arc<C::WorkerUrl>> {
+impl Controller {
+    pub fn get_worker(&self, dataset_name: &str, first_block: u32) -> Option<Url> {
+        let dataset = match self.managed_datasets.get(dataset_name) {
+            Some(ds) => ds,
+            None => {
+                return None
+            }
+        };
+
         let now = SystemTime::now();
 
-        let select_candidate = |w: &Worker<C>| {
+        let select_candidate = |w: &Worker| {
             if !w.desired_state.get(dataset).map_or(false, |ranges| ranges.has(first_block)) {
                 return None
             }
@@ -126,23 +119,27 @@ impl <C: Config> Controller<C> {
 
         match candidates.len() {
             0 => None,
-            1 => Some(candidates[0].url.clone()),
+            1 => Some(&candidates[0].url),
             len => {
                 let i: usize = rand::random();
-                Some(candidates[i % len].url.clone())
+                Some(&candidates[i % len].url)
             }
-        }
+        }.map(|url| Self::format_worker_url(url, dataset))
     }
 
-    pub fn ping(&self, msg: PingMessage<C>) -> Arc<WorkerState<C>> {
+    fn format_worker_url(base: &Url, dataset: &Dataset) -> String {
+        format!("{}/{}", base, URL_SAFE_NO_PAD.encode(dataset))
+    }
+
+    pub fn ping(&self, msg: PingMessage) -> Arc<WorkerState> {
         let info = Arc::new(WorkerInfo {
-            url: Arc::new(msg.worker_url),
+            url: msg.worker_url,
             state: msg.state,
             suspended: msg.pause,
             last_ping: SystemTime::now()
         });
 
-        let mut desired_state: Option<Arc<WorkerState<C>>> = None;
+        let mut desired_state: Option<Arc<WorkerState>> = None;
 
         self.workers.update(|workers| {
             if let Some(w) = workers.iter().find(|w| w.id == msg.worker_id) {
@@ -167,7 +164,7 @@ impl <C: Config> Controller<C> {
     }
 
     pub fn schedule<F>(&self, mut f: F)
-        where F: FnMut(&C::Dataset, u32) -> Result<Vec<DataChunk>, ()>
+        where F: FnMut(&Dataset, u32) -> Result<Vec<DataChunk>, ()>
     {
         let mut schedule_lock = self.schedule.lock();
         let schedule = schedule_lock.deref_mut();
@@ -181,7 +178,7 @@ impl <C: Config> Controller<C> {
             return;
         }
 
-        let mut desired_state: Vec<WorkerState<C>> = std::iter::repeat_with(HashMap::new)
+        let mut desired_state: Vec<WorkerState> = std::iter::repeat_with(HashMap::new)
             .take(managed_workers.len())
             .collect();
 
@@ -209,7 +206,7 @@ impl <C: Config> Controller<C> {
         self.workers.set(Arc::new(workers));
     }
 
-    fn remove_dead_workers(workers: &mut Vec<Worker<C>>) {
+    fn remove_dead_workers(workers: &mut Vec<Worker>) {
         let now = SystemTime::now();
         workers.retain(|w| {
             w.is_managed || {
@@ -253,9 +250,9 @@ impl <C: Config> Controller<C> {
 
     fn schedule_dataset(
         &self,
-        workers: &[Worker<C>],
-        assignment_map: &mut HashMap<C::Dataset, Assignment>,
-        dataset: &C::Dataset,
+        workers: &[Worker],
+        assignment_map: &mut HashMap<Dataset, Assignment>,
+        dataset: &Dataset,
         chunks: &Vec<DataChunk>
     ) -> Vec<RangeSet> {
         let units: Vec<Range> = chunks.chunks(self.data_management_unit).map(|unit| {
@@ -390,18 +387,18 @@ impl <C: Config> Controller<C> {
 }
 
 
-pub struct ControllerBuilder<C: Config> {
-    managed_datasets: HashSet<C::Dataset>,
-    managed_workers: HashSet<C::WorkerId>,
+pub struct ControllerBuilder {
+    managed_datasets: HashMap<String, Dataset>,
+    managed_workers: HashSet<WorkerId>,
     replication: usize,
     data_management_unit: usize,
 }
 
 
-impl <C: Config> ControllerBuilder<C> {
+impl ControllerBuilder {
     pub fn new() -> Self {
         ControllerBuilder {
-            managed_datasets: HashSet::new(),
+            managed_datasets: HashMap::new(),
             managed_workers: HashSet::new(),
             replication: 1,
             data_management_unit: 50
@@ -418,39 +415,42 @@ impl <C: Config> ControllerBuilder<C> {
         self
     }
 
-    pub fn add_worker(&mut self, worker_id: C::WorkerId) -> &mut Self {
+    pub fn add_worker(&mut self, worker_id: WorkerId) -> &mut Self {
         self.managed_workers.insert(worker_id);
         self
     }
 
     pub fn set_workers<I>(&mut self, workers: I) -> &mut Self
-        where I: IntoIterator<Item = C::WorkerId>
+        where I: IntoIterator<Item = WorkerId>
     {
         self.managed_workers.clear();
         self.managed_workers.extend(workers);
         self
     }
 
-    pub fn add_dataset(&mut self, dataset: C::Dataset) -> &mut Self {
-        self.managed_datasets.insert(dataset);
+    pub fn add_dataset(&mut self, name: String, dataset: Dataset) -> &mut Self {
+        self.managed_datasets.insert(name, dataset);
         self
     }
 
     pub fn set_datasets<I>(&mut self, datasets: I) -> &mut Self
-        where I: IntoIterator<Item = C::Dataset>
+        where I: IntoIterator<Item = (String, Dataset)>
     {
         self.managed_datasets.clear();
         self.managed_datasets.extend(datasets);
         self
     }
 
-    pub fn build(&self) -> Controller<C> {
+    pub fn build(&self) -> Controller {
         Controller {
             schedule: parking_lot::Mutex::new(Schedule {
-                datasets: self.managed_datasets.iter().cloned().map(|ds| (ds, Vec::new())).collect(),
+                datasets: self.managed_datasets.iter()
+                    .map(|(_name, ds)| (ds.clone(), Vec::new()))
+                    .collect(),
                 assignment: HashMap::new()
             }),
             workers: Atom::new(Arc::new(Vec::new())),
+            managed_datasets: self.managed_datasets.clone(),
             managed_workers: self.managed_workers.clone(),
             data_replication: self.replication,
             data_management_unit: self.data_management_unit
@@ -463,24 +463,17 @@ impl <C: Config> ControllerBuilder<C> {
 mod tests {
     use std::collections::HashMap;
     use std::ops::Deref;
-    use crate::controller::{Config, ControllerBuilder, PingMessage};
+
+    use crate::controller::{ControllerBuilder, PingMessage};
     use crate::data_chunk::DataChunk;
-
-    struct C;
-
-    impl Config for C {
-        type WorkerId = usize;
-        type WorkerUrl = usize;
-        type Dataset = usize;
-    }
 
     #[test]
     fn basic() {
-        let controller = ControllerBuilder::<C>::new()
+        let controller = ControllerBuilder::new()
             .set_data_management_unit(1)
             .set_data_replication(2)
-            .set_workers(0..8)
-            .set_datasets(0..2)
+            .set_workers((0..8).map(|i| i.to_string()))
+            .set_datasets((0..2).map(|i| (i.to_string(), i.to_string())))
             .build();
 
         let chunks = vec![
@@ -496,48 +489,48 @@ mod tests {
 
         for w in 0..8 {
             controller.ping(PingMessage {
-                worker_id: w,
-                worker_url: w,
+                worker_id: w.to_string(),
+                worker_url: w.to_string(),
                 state: HashMap::new(),
                 pause: false
             });
         }
 
         controller.schedule(|ds, _from_block| {
-            Ok(chunks[*ds].clone())
+            Ok(chunks[ds.parse::<usize>().unwrap()].clone())
         });
 
         let desired_state: Vec<_> = (0..8).map(|w| {
             controller.ping(PingMessage {
-                worker_id: w,
-                worker_url: w,
+                worker_id: w.to_string(),
+                worker_url: w.to_string(),
                 state: HashMap::new(),
                 pause: false
             })
         }).collect();
 
-        assert_eq!(controller.get_worker(&1, 5), None);
+        assert_eq!(controller.get_worker("0", 5), None);
 
         for (w, state) in desired_state.iter().enumerate() {
             controller.ping(PingMessage {
-                worker_id: w,
-                worker_url: w,
+                worker_id: w.to_string(),
+                worker_url: w.to_string(),
                 state: state.deref().clone(),
                 pause: false
             });
         }
 
-        let holders: Vec<_> = desired_state.iter().enumerate().filter_map(|(w, s)| {
-            s.get(&0).map(|range| if range.has(10) && range.has(0) {
-                Some(w)
+        let holders: Vec<_> = desired_state.iter().enumerate().filter_map(|(wi, s)| {
+            s.get("0").map(|range| if range.has(10) && range.has(0) {
+                Some(format!("{}/MA", wi))
             } else {
                 None
             }).unwrap_or(None)
         }).collect();
 
         assert_eq!(holders.len(), 2);
-        assert!(holders.contains(controller.get_worker(&0, 0).unwrap().deref()));
-        assert!(holders.contains(controller.get_worker(&0, 5).unwrap().deref()));
-        assert!(holders.contains(controller.get_worker(&0, 10).unwrap().deref()));
+        assert!(holders.contains(&controller.get_worker("0", 0).unwrap()));
+        assert!(holders.contains(&controller.get_worker("0", 5).unwrap()));
+        assert!(holders.contains(&controller.get_worker("0", 10).unwrap()));
     }
 }

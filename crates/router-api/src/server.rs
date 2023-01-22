@@ -12,7 +12,6 @@ use axum::response::{IntoResponse, Response, Result};
 use axum::routing::{get, post};
 use tracing::info;
 
-use archive_router::config::Config;
 use archive_router::prometheus::{Encoder, gather, TextEncoder};
 use archive_router_controller::controller::{Controller, PingMessage, WorkerState};
 
@@ -20,11 +19,11 @@ use crate::middleware::logging;
 
 #[axum_macros::debug_handler]
 async fn ping(
-    Json(msg): Json<PingMessage<Config>>,
-    Extension(controller): Extension<Arc<Controller<Config>>>,
-) -> Json<WorkerState<Config>> {
+    Json(msg): Json<PingMessage>,
+    Extension(controller): Extension<Arc<Controller>>,
+) -> Json<WorkerState> {
     let worker_id = msg.worker_id.clone();
-    let worker_url = msg.worker_url.to_string();
+    let worker_url = msg.worker_url.clone();
     let current_state = format!("{:?}", msg.state);
     let desired_state = controller.ping(msg);
     info!(
@@ -39,11 +38,14 @@ async fn ping(
 #[axum_macros::debug_handler]
 async fn get_worker(
     Path((dataset, start_block)): Path<(String, u32)>,
-    Extension(controller): Extension<Arc<Controller<Config>>>,
+    Extension(controller): Extension<Arc<Controller>>,
 ) -> Response {
     match controller.get_worker(&dataset, start_block) {
-        Some(url) => Json((*url).clone()).into_response(),
-        None => (StatusCode::SERVICE_UNAVAILABLE, "no suitable worker").into_response(),
+        Some(url) => url.to_string().into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("not ready to serve block {} of dataset {}", start_block, dataset)
+        ).into_response(),
     }
 }
 
@@ -62,18 +64,18 @@ async fn get_metrics() -> Response {
 }
 
 pub struct Server {
-    controller: Arc<Controller<Config>>,
+    controller: Arc<Controller>,
 }
 
 impl Server {
-    pub fn new(controller: Arc<Controller<Config>>) -> Self {
+    pub fn new(controller: Arc<Controller>) -> Self {
         Server { controller }
     }
 
     pub async fn run(&self) -> Result<(), hyper::Error> {
         let app = Router::new()
             .route("/ping", post(ping))
-            .route("/worker/:dataset/:start_block", get(get_worker))
+            .route("/network/:dataset/:start_block/worker", get(get_worker))
             .route("/metrics", get(get_metrics))
             .layer(from_fn(logging))
             .layer(Extension(self.controller.clone()));

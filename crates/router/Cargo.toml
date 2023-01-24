@@ -1,19 +1,22 @@
 [package]
-name = "archive-router"
+name = "router"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-archive-router-controller = { version = "0.1", path = "../router-controller" }
-axum = "0.5.17"
-url = { version = "2.3.1", features = ["serde"] }
-rand = "0.8.5"
-serde = { version = "1.0.147", features = ["derive"] }
 aws-sdk-s3 = "0.21.0"
 aws-config = "0.51.0"
-tracing = "0.1"
-prometheus = "0.13.3"
-lazy_static = "1.4.0"
+axum = "0.5.17"
+axum-macros = "0.2.3"
+clap = { version = "4.0.18", features = ["derive"] }
 tokio = { version = "1.21.2", features = ["full"] }
+url = "2.3.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.0", features = ["env-filter", "json"] }
+libc = "0.2"
+lazy_static = "1.4.0"
+prometheus = "0.13.3"
+
+router-controller = { version = "0.1", path = "../router-controller" }

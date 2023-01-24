@@ -1,10 +1,13 @@
-use archive_router::dataset::Storage;
-use archive_router_controller::controller::Controller;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+
 use tracing::{error, info};
+
+use router_controller::controller::Controller;
+
+use crate::dataset::Storage;
 
 pub fn start(
     controller: Arc<Controller>,
@@ -23,13 +26,12 @@ pub fn start(
                     Ok(chunks) => {
                         info!("found new chunks in {}: {:?}", dataset, chunks);
                         Ok(chunks)
-                    },
+                    }
                     Err(err) => {
                         error!("failed to download new chunks for {}: {:?}", dataset, err);
                         Err(())
                     }
                 }
-
             });
             info!("finished scheduling");
         }

@@ -1,5 +1,5 @@
 [package]
-name = "archive-router-controller"
+name = "router-controller"
 version = "0.1.0"
 edition = "2021"
 

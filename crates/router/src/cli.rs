@@ -6,13 +6,13 @@ fn parse_dataset(s: &str) -> Result<(String, String), String> {
         .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{}`", s))?;
 
     let name = s[..pos].to_string();
-    if name.len() == 0 {
-        return Err(format!("invalid KEY=value: the KEY is empty in `{}`", s))
+    if name.is_empty() {
+        return Err(format!("invalid KEY=value: the KEY is empty in `{}`", s));
     }
 
     let url = s[pos + 1..].to_string();
     if !url.starts_with("s3://") {
-        return Err(format!("invalid S3 URL: `{}`", url))
+        return Err(format!("invalid S3 URL: `{}`", url));
     }
 
     Ok((name, url))
@@ -37,6 +37,6 @@ pub struct Cli {
     pub scheduling_unit: usize,
 
     /// Scheduling interval (in seconds)
-    #[clap(short = 'i', long, default_value = "300", value_name="N")]
+    #[clap(short = 'i', long, default_value = "300", value_name = "N")]
     pub scheduling_interval: u64,
 }

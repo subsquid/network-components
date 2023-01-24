@@ -1,25 +1,25 @@
+use clap::Parser;
+use cli::Cli;
+use dataset::{S3Storage, Storage};
+use router_controller::controller::ControllerBuilder;
+use server::Server;
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
-
-use clap::Parser;
 use url::Url;
 
-use archive_router::{aws_config, aws_sdk_s3};
-use archive_router::dataset::{S3Storage, Storage};
-use archive_router_api::hyper::Error;
-use archive_router_api::Server;
-use archive_router_controller::controller::ControllerBuilder;
-use cli::Cli;
-
 mod cli;
+mod dataset;
+mod error;
 mod logger;
 mod metrics;
+mod middleware;
 mod scheduler;
+mod server;
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() {
     let args = Cli::parse();
     logger::init();
 
@@ -41,7 +41,7 @@ async fn main() -> Result<(), Error> {
     let scheduling_interval = Duration::from_secs(args.scheduling_interval);
     scheduler::start(controller.clone(), storages, scheduling_interval);
 
-    Server::new(controller).run().await
+    Server::new(controller).run().await;
 }
 
 async fn create_storage(dataset: &String) -> Box<dyn Storage + Send> {

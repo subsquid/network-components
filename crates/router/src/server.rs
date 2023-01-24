@@ -2,18 +2,18 @@ use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use axum::{Json, Router};
-use axum::body::{Body, boxed};
+use axum::body::{boxed, Body};
 use axum::extract::{Extension, Path};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::StatusCode;
 use axum::middleware::from_fn;
-use axum::response::{IntoResponse, Response, Result};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use axum::{Json, Router};
+use prometheus::{gather, Encoder, TextEncoder};
 use tracing::info;
 
-use archive_router::prometheus::{Encoder, gather, TextEncoder};
-use archive_router_controller::controller::{Controller, PingMessage, WorkerState};
+use router_controller::controller::{Controller, PingMessage, WorkerState};
 
 use crate::middleware::logging;
 
@@ -41,11 +41,15 @@ async fn get_worker(
     Extension(controller): Extension<Arc<Controller>>,
 ) -> Response {
     match controller.get_worker(&dataset, start_block) {
-        Some(url) => url.to_string().into_response(),
+        Some(url) => url.into_response(),
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
-            format!("not ready to serve block {} of dataset {}", start_block, dataset)
-        ).into_response(),
+            format!(
+                "not ready to serve block {} of dataset {}",
+                start_block, dataset
+            ),
+        )
+            .into_response(),
     }
 }
 
@@ -72,7 +76,7 @@ impl Server {
         Server { controller }
     }
 
-    pub async fn run(&self) -> Result<(), hyper::Error> {
+    pub async fn run(&self) {
         let app = Router::new()
             .route("/ping", post(ping))
             .route("/network/:dataset/:start_block/worker", get(get_worker))
@@ -83,5 +87,6 @@ impl Server {
         axum::Server::bind(&addr)
             .serve(app.into_make_service())
             .await
+            .unwrap()
     }
 }

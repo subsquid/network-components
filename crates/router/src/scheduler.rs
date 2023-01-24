@@ -8,6 +8,7 @@ use tracing::{error, info};
 use router_controller::controller::Controller;
 
 use crate::dataset::Storage;
+use crate::metrics::DATASET_SYNC_ERRORS;
 
 pub fn start(
     controller: Arc<Controller>,
@@ -29,6 +30,7 @@ pub fn start(
                     }
                     Err(err) => {
                         error!("failed to download new chunks for {}: {:?}", dataset, err);
+                        DATASET_SYNC_ERRORS.with_label_values(&[dataset]).inc();
                         Err(())
                     }
                 }

@@ -17,6 +17,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3.0", features = ["env-filter", "json"] }
 libc = "0.2"
 lazy_static = "1.4.0"
-prometheus = "0.13.3"
+prometheus = { version = "0.13.3", features = ["process"] }
 
 router-controller = { version = "0.1", path = "../router-controller" }

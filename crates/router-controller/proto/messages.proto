@@ -1,0 +1,50 @@
+syntax = "proto3";
+package worker_messages;
+
+message Envelope {
+  oneof msg {
+    Ping ping = 1;
+    WorkerState state_update = 2;
+    Query query = 3;
+    QueryResult query_result = 4;
+    QueryError query_error = 5;
+  }
+}
+
+message Range {
+  uint32 begin = 1;
+  uint32 end = 2;
+}
+
+message RangeSet {
+  repeated Range ranges = 1;
+}
+
+message WorkerState {
+  map<string, RangeSet> datasets = 1;
+}
+
+message Ping {
+  string worker_id = 1;
+  string worker_url = 2;
+  WorkerState state = 3;
+  bool pause = 4;
+}
+
+message Query {
+  string query_id = 1;
+  string dataset = 2;
+  string query = 3;
+}
+
+message QueryResult {
+  string query_id = 1;
+  uint32 last_processed_block = 2;
+  uint32 size = 3;
+  bytes data = 4;
+}
+
+message QueryError {
+  string query_id = 1;
+  string error = 2;
+}

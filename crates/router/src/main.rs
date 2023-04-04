@@ -1,8 +1,8 @@
 use clap::Parser;
 use cli::Cli;
 use dataset::{S3Storage, Storage};
+use http_server::Server;
 use router_controller::controller::ControllerBuilder;
-use server::Server;
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
@@ -12,11 +12,13 @@ use url::Url;
 mod cli;
 mod dataset;
 mod error;
+mod http_server;
+#[cfg(p2p)]
+mod libp2p_server;
 mod logger;
 mod metrics;
 mod middleware;
 mod scheduler;
-mod server;
 
 #[tokio::main]
 async fn main() {
@@ -41,6 +43,9 @@ async fn main() {
     let scheduling_interval = Duration::from_secs(args.scheduling_interval);
     scheduler::start(controller.clone(), storages, scheduling_interval);
 
+    #[cfg(p2p)]
+    libp2p_server::run_server(controller).await;
+    #[cfg(not(p2p))]
     Server::new(controller).run().await;
 }
 

@@ -13,13 +13,14 @@ use axum::{Json, Router};
 use prometheus::{gather, Encoder, TextEncoder};
 use tracing::info;
 
-use router_controller::controller::{Controller, PingMessage, WorkerState};
+use router_controller::controller::Controller;
+use router_controller::worker_messages::{Ping, WorkerState};
 
 use crate::middleware::logging;
 
 #[axum_macros::debug_handler]
 async fn ping(
-    Json(msg): Json<PingMessage>,
+    Json(msg): Json<Ping>,
     Extension(controller): Extension<Arc<Controller>>,
 ) -> Json<WorkerState> {
     let worker_id = msg.worker_id.clone();
@@ -41,7 +42,7 @@ async fn get_worker(
     Extension(controller): Extension<Arc<Controller>>,
 ) -> Response {
     match controller.get_worker(&dataset, start_block) {
-        Some(url) => url.into_response(),
+        Some((_, url)) => url.into_response(),
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
             format!(

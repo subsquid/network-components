@@ -5,6 +5,9 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+p2p = ["prost", "grpc-libp2p"]
+
 [dependencies]
 aws-sdk-s3 = "0.21.0"
 aws-config = "0.51.0"
@@ -20,3 +23,7 @@ lazy_static = "1.4.0"
 prometheus = { version = "0.13.3", features = ["process"] }
 
 router-controller = { version = "0.1", path = "../router-controller" }
+
+# Libp2p transport
+prost = { version = "0.11", optional = true }
+grpc-libp2p = { version = "0.1", path = "../../../subsquid-network/grpc-libp2p", optional = true }

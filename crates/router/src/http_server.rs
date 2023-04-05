@@ -14,9 +14,9 @@ use prometheus::{gather, Encoder, TextEncoder};
 use tracing::info;
 
 use router_controller::controller::Controller;
-use router_controller::worker_messages::{Ping, WorkerState};
+use router_controller::messages::{Ping, WorkerState};
 
-use crate::middleware::logging;
+mod middleware;
 
 #[axum_macros::debug_handler]
 async fn ping(
@@ -82,7 +82,7 @@ impl Server {
             .route("/ping", post(ping))
             .route("/network/:dataset/:start_block/worker", get(get_worker))
             .route("/metrics", get(get_metrics))
-            .layer(from_fn(logging))
+            .layer(from_fn(middleware::logging))
             .layer(Extension(self.controller.clone()));
         let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
         axum::Server::bind(&addr)

@@ -1,7 +1,6 @@
 use clap::Parser;
 use cli::Cli;
 use dataset::{S3Storage, Storage};
-use http_server::Server;
 use router_controller::controller::ControllerBuilder;
 use std::collections::HashMap;
 use std::env;
@@ -12,13 +11,19 @@ use url::Url;
 mod cli;
 mod dataset;
 mod error;
+#[cfg(feature = "http")]
 mod http_server;
-#[cfg(p2p)]
+#[cfg(feature = "p2p")]
 mod libp2p_server;
 mod logger;
 mod metrics;
-mod middleware;
 mod scheduler;
+
+#[cfg(any(
+    not(any(feature = "http", feature = "p2p")),
+    all(feature = "http", feature = "p2p")
+))]
+compile_error!("Exactly one transport should be selected ('http' or 'p2p' feature)");
 
 #[tokio::main]
 async fn main() {
@@ -43,10 +48,10 @@ async fn main() {
     let scheduling_interval = Duration::from_secs(args.scheduling_interval);
     scheduler::start(controller.clone(), storages, scheduling_interval);
 
-    #[cfg(p2p)]
-    libp2p_server::run_server(controller).await;
-    #[cfg(not(p2p))]
-    Server::new(controller).run().await;
+    #[cfg(feature = "http")]
+    http_server::Server::new(controller).run().await;
+    #[cfg(feature = "p2p")]
+    libp2p_server::Server::new(controller).await.run().await;
 }
 
 async fn create_storage(dataset: &String) -> Box<dyn Storage + Send> {

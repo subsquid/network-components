@@ -9,8 +9,8 @@ use std::time::{Duration, SystemTime};
 
 use crate::atom::Atom;
 use crate::data_chunk::DataChunk;
+use crate::messages::{Ping, WorkerState};
 use crate::range::{Range, RangeSet};
-use crate::worker_messages::{Ping, WorkerState};
 
 pub type WorkerId = String;
 pub type Url = String;

@@ -1,13 +1,21 @@
 syntax = "proto3";
-package worker_messages;
+package messages;
 
 message Envelope {
   oneof msg {
+    // router <-> worker
     Ping ping = 1;
     WorkerState state_update = 2;
-    Query query = 3;
-    QueryResult query_result = 4;
-    QueryError query_error = 5;
+
+    // router <-> client
+    GetWorker get_worker = 3;
+    GetWorkerResult get_worker_result = 4;
+    QueryError get_worker_error = 5;
+
+    // client <-> worker
+    Query query = 6;
+    QueryResult query_result = 7;
+    QueryError query_error = 8;
   }
 }
 
@@ -29,6 +37,17 @@ message Ping {
   string worker_url = 2;
   WorkerState state = 3;
   bool pause = 4;
+}
+
+message GetWorker {
+  string query_id = 1;
+  string dataset = 2;
+  uint32 start_block = 3;
+}
+
+message GetWorkerResult {
+  string query_id = 1;
+  string worker_id = 2;
 }
 
 message Query {

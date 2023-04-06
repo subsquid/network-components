@@ -3445,6 +3445,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
+name = "query-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "grpc-libp2p",
+ "log",
+ "router-controller",
+ "simple_logger",
+ "tokio",
+]
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

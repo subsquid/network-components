@@ -1,4 +1,5 @@
 use clap::Parser;
+use std::path::PathBuf;
 
 fn parse_dataset(s: &str) -> Result<(String, String), String> {
     let pos = s
@@ -39,4 +40,17 @@ pub struct Cli {
     /// Scheduling interval (in seconds)
     #[clap(short = 'i', long, default_value = "300", value_name = "N")]
     pub scheduling_interval: u64,
+
+    #[cfg(feature = "p2p")]
+    #[arg(short, long, help = "Path to libp2p key file")]
+    pub key: Option<PathBuf>,
+
+    #[cfg(feature = "p2p")]
+    #[arg(
+        short,
+        long,
+        help = "Listen addr",
+        default_value = "/ip4/0.0.0.0/tcp/0"
+    )]
+    pub listen: String,
 }

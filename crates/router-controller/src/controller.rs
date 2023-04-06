@@ -295,7 +295,7 @@ impl Controller {
 
             {
                 let mut order: Vec<Wi> = (0..goal.len()).collect();
-                let lst = goal.len() - 1;
+                let lst = goal.len() - 1; // FIXME: This sometimes panics (underflow)
                 let target_size = goal.iter().map(|a| a.len()).sum::<usize>() / goal.len();
                 loop {
                     order.sort_by_key(|i| goal[*i].len());

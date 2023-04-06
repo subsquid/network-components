@@ -1,4 +1,5 @@
 use grpc_libp2p::transport::P2PTransportBuilder;
+use grpc_libp2p::util::get_keypair;
 use grpc_libp2p::{MsgContent, PeerId};
 use prost::Message as ProstMsg;
 use router_controller::controller::Controller;
@@ -6,34 +7,56 @@ use router_controller::messages::{
     envelope::Msg, Envelope, GetWorker, GetWorkerResult, Ping, QueryError,
 };
 use std::ops::{Deref, DerefMut};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::log;
 
-#[derive(Debug)]
-struct Content(Box<[u8]>);
+type Message = grpc_libp2p::Message<Box<[u8]>>;
 
-impl From<Vec<u8>> for Content {
-    fn from(value: Vec<u8>) -> Self {
-        Self(value.into_boxed_slice())
-    }
+pub struct ServerBuilder {
+    key_path: Option<PathBuf>,
+    listen_addr: Option<String>,
 }
 
-impl MsgContent for Content {
-    fn new(size: usize) -> Self {
-        Self(vec![0; size].into_boxed_slice())
+impl ServerBuilder {
+    pub fn new() -> Self {
+        Self {
+            key_path: None,
+            listen_addr: None,
+        }
     }
 
-    fn as_slice(&self) -> &[u8] {
-        self.0.deref()
+    pub fn key_path(mut self, key_path: Option<PathBuf>) -> Self {
+        self.key_path = key_path;
+        self
     }
 
-    fn as_mut_slice(&mut self) -> &mut [u8] {
-        self.0.deref_mut()
+    pub fn listen_addr(mut self, listen_addr: String) -> Self {
+        self.listen_addr = Some(listen_addr);
+        self
+    }
+
+    pub async fn build(self, controller: Arc<Controller>) -> Server {
+        // FIXME: Unwrapping errors
+        let keypair = get_keypair(self.key_path).await.unwrap();
+        let mut transport_builder = P2PTransportBuilder::from_keypair(keypair);
+
+        if let Some(listen_addr) = self.listen_addr {
+            let listen_addr = listen_addr.parse().unwrap();
+            transport_builder.listen_on(std::iter::once(listen_addr));
+        }
+
+        transport_builder.bootstrap(false);
+
+        let (msg_receiver, msg_sender) = transport_builder.run().await.unwrap();
+        Server {
+            controller,
+            msg_receiver,
+            msg_sender,
+        }
     }
 }
-
-type Message = grpc_libp2p::Message<Content>;
 
 pub struct Server {
     controller: Arc<Controller>,
@@ -42,19 +65,6 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn new(controller: Arc<Controller>) -> Self {
-        let mut transport_builder = P2PTransportBuilder::new(); // TODO: Pass key
-        let listen_addr = "/ip4/0.0.0.0/tcp/0".parse().unwrap(); // TODO: Pass listen_addr
-        transport_builder.listen_on(std::iter::once(listen_addr));
-        let (msg_receiver, msg_sender) = transport_builder.run().await.unwrap(); // FIXME: unwrap
-
-        Self {
-            controller,
-            msg_receiver,
-            msg_sender,
-        }
-    }
-
     async fn send_msg(&mut self, peer_id: PeerId, msg: Msg) {
         let envelope = Envelope { msg: Some(msg) };
         let msg = Message {
@@ -85,12 +95,23 @@ impl Server {
     }
 
     async fn ping(&mut self, peer_id: PeerId, ping: Ping) {
+        log::info!("Ping {ping:?}");
+        if ping.worker_id != peer_id.to_string() {
+            log::warn!(
+                "Invalid peer ID in ping message: {} != {}",
+                ping.worker_id,
+                peer_id
+            );
+            return;
+        }
         let state = self.controller.ping(ping);
+        log::info!("Desired state for worker {peer_id}: {state:?}");
         self.send_msg(peer_id, Msg::StateUpdate(state.deref().clone()))
             .await
     }
 
     async fn get_worker(&mut self, peer_id: PeerId, msg: GetWorker) {
+        log::info!("GetWorker {msg:?}");
         let response = match self.controller.get_worker(&msg.dataset, msg.start_block) {
             Some((worker_id, _)) => Msg::GetWorkerResult(GetWorkerResult {
                 query_id: msg.query_id,

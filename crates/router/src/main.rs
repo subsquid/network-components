@@ -51,7 +51,13 @@ async fn main() {
     #[cfg(feature = "http")]
     http_server::Server::new(controller).run().await;
     #[cfg(feature = "p2p")]
-    libp2p_server::Server::new(controller).await.run().await;
+    libp2p_server::ServerBuilder::new()
+        .key_path(args.key)
+        .listen_addr(args.listen)
+        .build(controller)
+        .await
+        .run()
+        .await;
 }
 
 async fn create_storage(dataset: &String) -> Box<dyn Storage + Send> {

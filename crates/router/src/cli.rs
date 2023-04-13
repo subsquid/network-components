@@ -1,5 +1,4 @@
 use clap::Parser;
-use std::path::PathBuf;
 
 fn parse_dataset(s: &str) -> Result<(String, String), String> {
     let pos = s
@@ -43,7 +42,7 @@ pub struct Cli {
 
     #[cfg(feature = "p2p")]
     #[arg(short, long, help = "Path to libp2p key file")]
-    pub key: Option<PathBuf>,
+    pub key: Option<std::path::PathBuf>,
 
     #[cfg(feature = "p2p")]
     #[arg(

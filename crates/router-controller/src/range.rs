@@ -47,7 +47,7 @@ impl RangeSet {
 
 impl From<Vec<Range>> for RangeSet {
     fn from(mut ranges: Vec<Range>) -> Self {
-        if ranges.len() == 0 {
+        if ranges.is_empty() {
             return RangeSet::empty();
         }
         ranges.sort();

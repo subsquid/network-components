@@ -48,6 +48,7 @@ message GetWorker {
 message GetWorkerResult {
   string query_id = 1;
   string worker_id = 2;
+  string encoded_dataset = 3;
 }
 
 message Query {

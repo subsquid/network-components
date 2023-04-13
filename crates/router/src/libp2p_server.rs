@@ -6,7 +6,7 @@ use router_controller::controller::Controller;
 use router_controller::messages::{
     envelope::Msg, Envelope, GetWorker, GetWorkerResult, Ping, QueryError,
 };
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -37,24 +37,23 @@ impl ServerBuilder {
         self
     }
 
-    pub async fn build(self, controller: Arc<Controller>) -> Server {
-        // FIXME: Unwrapping errors
-        let keypair = get_keypair(self.key_path).await.unwrap();
+    pub async fn build(self, controller: Arc<Controller>) -> anyhow::Result<Server> {
+        let keypair = get_keypair(self.key_path).await?;
         let mut transport_builder = P2PTransportBuilder::from_keypair(keypair);
 
         if let Some(listen_addr) = self.listen_addr {
-            let listen_addr = listen_addr.parse().unwrap();
+            let listen_addr = listen_addr.parse()?;
             transport_builder.listen_on(std::iter::once(listen_addr));
         }
 
         transport_builder.bootstrap(false);
 
-        let (msg_receiver, msg_sender) = transport_builder.run().await.unwrap();
-        Server {
+        let (msg_receiver, msg_sender) = transport_builder.run().await?;
+        Ok(Server {
             controller,
             msg_receiver,
             msg_sender,
-        }
+        })
     }
 }
 
@@ -113,10 +112,15 @@ impl Server {
     async fn get_worker(&mut self, peer_id: PeerId, msg: GetWorker) {
         log::info!("GetWorker {msg:?}");
         let response = match self.controller.get_worker(&msg.dataset, msg.start_block) {
-            Some((worker_id, _)) => Msg::GetWorkerResult(GetWorkerResult {
-                query_id: msg.query_id,
-                worker_id,
-            }),
+            Some((worker_id, url)) => {
+                // TODO: Clean up this hack. get_worker could just return it
+                let encoded_dataset = url.rsplitn(2, '/').next().unwrap().to_string();
+                Msg::GetWorkerResult(GetWorkerResult {
+                    query_id: msg.query_id,
+                    worker_id,
+                    encoded_dataset,
+                })
+            }
             None => Msg::GetWorkerError(QueryError {
                 query_id: msg.query_id,
                 error: "Not ready to serve requested block".to_string(),

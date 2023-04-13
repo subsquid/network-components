@@ -95,7 +95,7 @@ impl Controller {
                 .filter(|w| w.is_managed)
                 .filter_map(select_candidate)
                 .collect();
-            if managed.len() > 0 {
+            if !managed.is_empty() {
                 managed
             } else {
                 workers
@@ -244,7 +244,7 @@ impl Controller {
         workers: &[Worker],
         assignment_map: &mut HashMap<Dataset, Assignment>,
         dataset: &Dataset,
-        chunks: &Vec<DataChunk>,
+        chunks: &[DataChunk],
     ) -> Vec<RangeSet> {
         let units: Vec<Range> = chunks
             .chunks(self.data_management_unit)
@@ -293,9 +293,9 @@ impl Controller {
                 }
             }
 
-            {
+            if !goal.is_empty() {
                 let mut order: Vec<Wi> = (0..goal.len()).collect();
-                let lst = goal.len() - 1; // FIXME: This sometimes panics (underflow)
+                let lst = goal.len() - 1;
                 let target_size = goal.iter().map(|a| a.len()).sum::<usize>() / goal.len();
                 loop {
                     order.sort_by_key(|i| goal[*i].len());
@@ -337,7 +337,7 @@ impl Controller {
 
         plan.iter()
             .map(|a| {
-                let ranges: Vec<Range> = a.iter().map(|&u| units[u].clone()).collect();
+                let ranges: Vec<Range> = a.iter().map(|&u| units[u]).collect();
                 RangeSet::from(ranges)
             })
             .collect()
@@ -437,8 +437,8 @@ impl ControllerBuilder {
             schedule: parking_lot::Mutex::new(Schedule {
                 datasets: self
                     .managed_datasets
-                    .iter()
-                    .map(|(_name, ds)| (ds.clone(), Vec::new()))
+                    .values()
+                    .map(|ds| (ds.clone(), Vec::new()))
                     .collect(),
                 assignment: HashMap::new(),
             }),

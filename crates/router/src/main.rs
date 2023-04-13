@@ -26,7 +26,7 @@ mod scheduler;
 compile_error!("Exactly one transport should be selected ('http' or 'p2p' feature)");
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
     logger::init();
 
@@ -55,9 +55,11 @@ async fn main() {
         .key_path(args.key)
         .listen_addr(args.listen)
         .build(controller)
-        .await
+        .await?
         .run()
         .await;
+
+    Ok(())
 }
 
 async fn create_storage(dataset: &String) -> Box<dyn Storage + Send> {

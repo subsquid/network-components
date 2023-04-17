@@ -478,12 +478,12 @@ mod tests {
 
         let chunks = vec![
             vec![
-                DataChunk::new(0, 0, 10),
-                DataChunk::new(0, 11, 200)
+                DataChunk::new(0, 0, 10, "".to_string()),
+                DataChunk::new(0, 11, 200, "".to_string())
             ],
             vec![
-                DataChunk::new(0, 0, 5),
-                DataChunk::new(6, 6, 20)
+                DataChunk::new(0, 0, 5, "".to_string()),
+                DataChunk::new(6, 6, 20, "".to_string())
             ]
         ];
 

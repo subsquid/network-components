@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::error::Error;
 use aws_sdk_s3::Client;
 use router_controller::data_chunk::DataChunk;
@@ -61,58 +63,28 @@ impl Storage for S3Storage {
             }
         }
 
-        let mut last_key = None;
         let mut chunks = vec![];
-        for chunk in objects.chunks_exact(3) {
-            let blocks_key = chunk[0]
-                .key()
-                .ok_or_else(|| Error::InvalidLayoutError("invalid object key".into()))?;
-            if !blocks_key.ends_with("blocks.parquet") {
-                break;
+        for object in &objects {
+            if let Some(key) = object.key() {
+                if key.ends_with("blocks.parquet") {
+                    match DataChunk::from_str(key) {
+                        Ok(chunk) => chunks.push(chunk),
+                        Err(..) => return Err(invalid_object_key(key)),
+                    }
+                }
             }
-            let logs_key = chunk[1]
-                .key()
-                .ok_or_else(|| Error::InvalidLayoutError("invalid object key".into()))?;
-            if !logs_key.ends_with("logs.parquet") {
-                break;
-            }
-            let transactions_key = chunk[2]
-                .key()
-                .ok_or_else(|| Error::InvalidLayoutError("invalid object key".into()))?;
-            if !transactions_key.ends_with("transactions.parquet") {
-                break;
-            }
-
-            let splitted = blocks_key.split('/').collect::<Vec<_>>();
-            let top = splitted
-                .first()
-                .ok_or_else(|| invalid_object_key(blocks_key))?
-                .parse()
-                .map_err(|_| invalid_object_key(blocks_key))?;
-            let folder = splitted
-                .get(1)
-                .ok_or_else(|| invalid_object_key(blocks_key))?;
-            let block_range = folder.split('-').collect::<Vec<_>>();
-
-            let from = block_range
-                .first()
-                .ok_or_else(|| invalid_object_key(blocks_key))?
-                .parse()
-                .map_err(|_| invalid_object_key(blocks_key))?;
-            let to = block_range
-                .get(1)
-                .ok_or_else(|| invalid_object_key(blocks_key))?
-                .parse()
-                .map_err(|_| invalid_object_key(blocks_key))?;
-
-            last_key = Some(transactions_key);
-
-            let data_chunk = DataChunk::new(top, from, to);
-            chunks.push(data_chunk);
         }
 
-        if last_key.is_some() {
-            self.last_key = last_key.map(|key| key.to_string());
+        if let Some(last_chunk) = chunks.last() {
+            for object in objects.iter().rev() {
+                if let Some(key) = object.key() {
+                    let chunk = DataChunk::from_str(key).unwrap();
+                    if &chunk == last_chunk {
+                        self.last_key = Some(key.to_string());
+                        break;
+                    }
+                }
+            }
         }
 
         Ok(chunks)

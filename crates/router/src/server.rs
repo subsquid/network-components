@@ -54,6 +54,21 @@ async fn get_worker(
 }
 
 #[axum_macros::debug_handler]
+async fn get_height(
+    Path(dataset): Path<String>,
+    Extension(controller): Extension<Arc<Controller>>,
+) -> Response {
+    match controller.get_height(&dataset) {
+        Some(height) => height.to_string().into_response(),
+        None => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("height for dataset {} is unknown", dataset),
+        )
+            .into_response(),
+    }
+}
+
+#[axum_macros::debug_handler]
 async fn get_metrics() -> Response {
     let encoder = TextEncoder::new();
     let mut buffer = vec![];
@@ -80,6 +95,7 @@ impl Server {
         let app = Router::new()
             .route("/ping", post(ping))
             .route("/network/:dataset/:start_block/worker", get(get_worker))
+            .route("/network/:dataset/height", get(get_height))
             .route("/metrics", get(get_metrics))
             .layer(from_fn(logging))
             .layer(Extension(self.controller.clone()));

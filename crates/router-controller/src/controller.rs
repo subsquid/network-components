@@ -127,6 +127,19 @@ impl Controller {
         }.map(|url| Self::format_worker_url(url, dataset))
     }
 
+    pub fn get_height(&self, dataset_name: &str) -> Option<u32> {
+        let dataset = match self.managed_datasets.get(dataset_name) {
+            Some(ds) => ds,
+            None => return None,
+        };
+
+        let schedule = self.schedule.lock();
+        match schedule.datasets.get(dataset) {
+            Some(chunks) => chunks.last().map(|chunk| chunk.last_block()),
+            None => None,
+        }
+    }
+
     fn format_worker_url(base: &Url, dataset: &Dataset) -> String {
         format!("{}/{}", base, URL_SAFE_NO_PAD.encode(dataset))
     }
@@ -186,22 +199,22 @@ impl Controller {
             if Self::import_new_chunks(chunks, |next_block| {
                 f(dataset, next_block)
             }) {
-                let plan = self.schedule_dataset(
-                    &managed_workers,
-                    &mut schedule.assignment,
-                    dataset,
-                    chunks
-                );
-                for (w, ranges) in plan.into_iter().enumerate() {
-                    desired_state[w].insert(dataset.clone(), ranges);
-                }
+                // let plan = self.schedule_dataset(
+                //     &managed_workers,
+                //     &mut schedule.assignment,
+                //     dataset,
+                //     chunks
+                // );
+                // for (w, ranges) in plan.into_iter().enumerate() {
+                //     desired_state[w].insert(dataset.clone(), ranges);
+                // }
             }
         }
 
-        for worker in workers.iter_mut().filter(|w| w.is_managed) {
-            let i = managed_workers.iter().position(|w| w.id == worker.id).unwrap();
-            worker.desired_state = Arc::new(desired_state[i].clone());
-        }
+        // for worker in workers.iter_mut().filter(|w| w.is_managed) {
+        //     let i = managed_workers.iter().position(|w| w.id == worker.id).unwrap();
+        //     worker.desired_state = Arc::new(desired_state[i].clone());
+        // }
 
         self.workers.set(Arc::new(workers));
     }

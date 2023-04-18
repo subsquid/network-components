@@ -48,7 +48,7 @@ impl ServerBuilder {
 
         transport_builder.bootstrap(false);
 
-        let (msg_receiver, msg_sender) = transport_builder.run().await?;
+        let (msg_receiver, msg_sender, _) = transport_builder.run().await?;
         Ok(Server {
             controller,
             msg_receiver,
@@ -67,7 +67,8 @@ impl Server {
     async fn send_msg(&mut self, peer_id: PeerId, msg: Msg) {
         let envelope = Envelope { msg: Some(msg) };
         let msg = Message {
-            peer_id,
+            peer_id: Some(peer_id),
+            topic: None,
             content: envelope.encode_to_vec().into(),
         };
         if let Err(e) = self.msg_sender.send(msg).await {
@@ -77,6 +78,13 @@ impl Server {
 
     pub async fn run(&mut self) {
         while let Some(msg) = self.msg_receiver.recv().await {
+            let peer_id = match msg.peer_id {
+                Some(peer_id) => peer_id,
+                None => {
+                    log::warn!("Dropping anonymous message");
+                    continue;
+                }
+            };
             let envelope = match Envelope::decode(msg.content.as_slice()) {
                 Ok(envelope) => envelope,
                 Err(e) => {
@@ -86,8 +94,8 @@ impl Server {
             };
 
             match envelope.msg {
-                Some(Msg::Ping(ping)) => self.ping(msg.peer_id, ping).await,
-                Some(Msg::GetWorker(get_worker)) => self.get_worker(msg.peer_id, get_worker).await,
+                Some(Msg::Ping(ping)) => self.ping(peer_id, ping).await,
+                Some(Msg::GetWorker(get_worker)) => self.get_worker(peer_id, get_worker).await,
                 _ => log::warn!("Unexpected msg received: {envelope:?}"),
             };
         }

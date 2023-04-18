@@ -16,6 +16,7 @@ message Envelope {
     Query query = 6;
     QueryResult query_result = 7;
     QueryError query_error = 8;
+    RangeSet dataset_state = 9;
   }
 }
 

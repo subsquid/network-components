@@ -2,10 +2,12 @@ use clap::Parser;
 use grpc_libp2p::transport::P2PTransportBuilder;
 use grpc_libp2p::util::{get_keypair, BootNode};
 use grpc_libp2p::{MsgContent, PeerId};
+use lazy_static::lazy_static;
 use prost::Message as ProstMsg;
+use rand::prelude::IteratorRandom;
 use router_controller::messages::envelope::Msg;
 use router_controller::messages::{
-    Envelope, GetWorker, GetWorkerResult, Query as QueryMsg, QueryError, QueryResult,
+    Envelope, GetWorker, GetWorkerResult, Query as QueryMsg, QueryError, QueryResult, RangeSet,
 };
 use simple_logger::SimpleLogger;
 use std::collections::hash_map::Entry;
@@ -17,6 +19,15 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 type Message = grpc_libp2p::Message<Box<[u8]>>;
+
+// TODO: Load this data from on-chain registry or some database
+lazy_static! {
+    static ref AVAILABLE_DATASETS: HashMap<&'static str, &'static str> = {
+        let mut map = HashMap::new();
+        map.insert("ethereum-mainnet", "czM6Ly9ldGhhLW1haW5uZXQtc2lh");
+        map
+    };
+}
 
 #[derive(Parser)]
 pub struct Cli {
@@ -39,6 +50,9 @@ pub struct Cli {
 
     #[arg(short, long, help = "Peer ID of the router")]
     pub router_id: String,
+
+    #[arg(short, long, help = "Subscribe to dataset")]
+    pub datasets: Vec<String>,
 }
 
 struct QueryClient {
@@ -46,6 +60,7 @@ struct QueryClient {
     msg_sender: Sender<Message>,
     query_receiver: Receiver<Query>,
     queries: HashMap<String, QueryState>,
+    dataset_states: HashMap<String, HashMap<PeerId, RangeSet>>,
     output_dir: PathBuf,
     router_id: PeerId,
 }
@@ -81,6 +96,7 @@ impl QueryClient {
             msg_sender,
             query_receiver,
             queries: Default::default(),
+            dataset_states: Default::default(),
             output_dir,
             router_id,
         };
@@ -109,7 +125,8 @@ impl QueryClient {
     async fn send_msg(&mut self, peer_id: PeerId, msg: Msg) -> anyhow::Result<()> {
         let envelope = Envelope { msg: Some(msg) };
         let msg = Message {
-            peer_id,
+            peer_id: Some(peer_id),
+            topic: None,
             content: envelope.encode_to_vec().into(),
         };
         self.msg_sender.send(msg).await?;
@@ -117,34 +134,86 @@ impl QueryClient {
     }
 
     async fn handle_query(&mut self, query: Query) -> anyhow::Result<()> {
-        log::info!("starting query {query:?}");
+        log::info!("Starting query {query:?}");
         let query_id = self.generate_query_id(&query);
         let Query {
             dataset,
             start_block,
             query,
         } = query;
-        let msg = Msg::GetWorker(GetWorker {
-            query_id: query_id.clone(),
-            dataset: dataset.clone(),
-            start_block,
-        });
-        self.queries
-            .insert(query_id, QueryState::LookingForWorker { dataset, query });
-        self.send_msg(self.router_id, msg).await
+
+        if let Some(worker_id) = self.find_worker(&dataset, start_block) {
+            log::info!("Found worker {worker_id} for query {query_id}");
+            let encoded_dataset = AVAILABLE_DATASETS
+                .get(dataset.as_str())
+                .expect("Worker was found so the dataset is available")
+                .to_string();
+            let msg = Msg::Query(QueryMsg {
+                query_id: query_id.clone(),
+                dataset: encoded_dataset,
+                query,
+            });
+            self.queries
+                .insert(query_id, QueryState::Processing { worker_id });
+            self.send_msg(worker_id, msg).await
+        } else {
+            log::info!("Worker not found locally. Falling back to router.");
+            let msg = Msg::GetWorker(GetWorker {
+                query_id: query_id.clone(),
+                dataset: dataset.clone(),
+                start_block,
+            });
+            self.queries
+                .insert(query_id, QueryState::LookingForWorker { dataset, query });
+            self.send_msg(self.router_id, msg).await
+        }
+    }
+
+    fn find_worker(&self, dataset: &str, start_block: u32) -> Option<PeerId> {
+        // dataset_states uses encoded dataset IDs
+        let dataset = match AVAILABLE_DATASETS.get(dataset) {
+            None => return None,
+            Some(dataset) => dataset,
+        };
+        let dataset_state = match self.dataset_states.get(*dataset) {
+            None => return None,
+            Some(state) => state,
+        };
+        // TODO: Filter by last ping time
+        dataset_state
+            .iter()
+            .filter_map(|(peer_id, range_set)| range_set.has(start_block).then(|| peer_id.clone()))
+            .choose(&mut rand::thread_rng())
     }
 
     async fn handle_message(&mut self, msg: Message) -> anyhow::Result<()> {
-        let Message { peer_id, content } = msg;
+        let Message {
+            peer_id,
+            topic,
+            content,
+        } = msg;
+        let peer_id = peer_id.ok_or_else(|| anyhow::anyhow!("Message sender ID missing"))?;
         let Envelope { msg } = Envelope::decode(content.as_slice())?;
         match msg {
             Some(Msg::GetWorkerResult(result)) => self.got_worker(peer_id, result).await?,
             Some(Msg::GetWorkerError(error)) => self.query_error(peer_id, error),
             Some(Msg::QueryResult(result)) => self.query_result(peer_id, result).await,
             Some(Msg::QueryError(error)) => self.query_error(peer_id, error),
+            Some(Msg::DatasetState(state)) => {
+                let dataset = topic.ok_or_else(|| anyhow::anyhow!("Message topic missing"))?;
+                self.update_dataset_state(peer_id, dataset, state);
+            }
             _ => log::warn!("Unexpected message received: {msg:?}"),
         }
         Ok(())
+    }
+
+    fn update_dataset_state(&mut self, peer_id: PeerId, dataset: String, state: RangeSet) {
+        log::info!("Updating dataset state. worker_id={peer_id} dataset={dataset}");
+        self.dataset_states
+            .entry(dataset)
+            .or_default()
+            .insert(peer_id, state);
     }
 
     async fn got_worker(&mut self, peer_id: PeerId, result: GetWorkerResult) -> anyhow::Result<()> {
@@ -251,7 +320,16 @@ async fn main() -> anyhow::Result<()> {
     let listen_addr = args.listen.parse()?;
     transport_builder.listen_on(std::iter::once(listen_addr));
     transport_builder.boot_nodes(args.boot_nodes);
-    let (msg_receiver, msg_sender) = transport_builder.run().await?;
+    let (msg_receiver, msg_sender, subscription_sender) = transport_builder.run().await?;
+
+    for dataset in args.datasets {
+        log::info!("Tracking dataset {dataset}");
+        let encoded_dataset = AVAILABLE_DATASETS
+            .get(dataset.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Dataset unavailable: {dataset}"))?
+            .to_string();
+        subscription_sender.send((encoded_dataset, true)).await?;
+    }
 
     let query_sender =
         QueryClient::start(args.output_dir, args.router_id, msg_receiver, msg_sender)?;

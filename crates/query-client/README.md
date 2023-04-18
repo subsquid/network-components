@@ -13,6 +13,7 @@ Options:
   -b, --boot-nodes <BOOT_NODES>  Connect to boot node '<peer_id> <address>'.
   -o, --output-dir <OUTPUT_DIR>  Path to output directory (default: temp dir)
   -r, --router-id <ROUTER_ID>    Peer ID of the router
+  -d, --datasets <DATASETS>      Subscribe to dataset
   -h, --help                     Print help
 ```
 

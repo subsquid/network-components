@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -60,6 +61,7 @@ struct Schedule {
 pub struct Controller {
     schedule: parking_lot::Mutex<Schedule>,
     workers: Atom<Vec<Worker>>,
+    datasets_height: HashMap<String, AtomicU32>,
     managed_datasets: HashMap<String, Dataset>,
     managed_workers: HashSet<WorkerId>,
     data_replication: usize,
@@ -130,14 +132,12 @@ impl Controller {
     pub fn get_height(&self, dataset_name: &str) -> Option<u32> {
         let dataset = match self.managed_datasets.get(dataset_name) {
             Some(ds) => ds,
-            None => return None,
+            None => return None
         };
 
-        let schedule = self.schedule.lock();
-        match schedule.datasets.get(dataset) {
-            Some(chunks) => chunks.last().map(|chunk| chunk.last_block()),
-            None => None,
-        }
+        self.datasets_height
+            .get(dataset)
+            .map(|height| height.load(Ordering::Relaxed))
     }
 
     fn format_worker_url(base: &Url, dataset: &Dataset) -> String {
@@ -199,22 +199,26 @@ impl Controller {
             if Self::import_new_chunks(chunks, |next_block| {
                 f(dataset, next_block)
             }) {
-                // let plan = self.schedule_dataset(
-                //     &managed_workers,
-                //     &mut schedule.assignment,
-                //     dataset,
-                //     chunks
-                // );
-                // for (w, ranges) in plan.into_iter().enumerate() {
-                //     desired_state[w].insert(dataset.clone(), ranges);
-                // }
+                let height = self.datasets_height.get(dataset).unwrap();
+                let last_block = chunks.last().unwrap().last_block();
+                height.store(last_block, Ordering::Relaxed);
+
+                let plan = self.schedule_dataset(
+                    &managed_workers,
+                    &mut schedule.assignment,
+                    dataset,
+                    chunks
+                );
+                for (w, ranges) in plan.into_iter().enumerate() {
+                    desired_state[w].insert(dataset.clone(), ranges);
+                }
             }
         }
 
-        // for worker in workers.iter_mut().filter(|w| w.is_managed) {
-        //     let i = managed_workers.iter().position(|w| w.id == worker.id).unwrap();
-        //     worker.desired_state = Arc::new(desired_state[i].clone());
-        // }
+        for worker in workers.iter_mut().filter(|w| w.is_managed) {
+            let i = managed_workers.iter().position(|w| w.id == worker.id).unwrap();
+            worker.desired_state = Arc::new(desired_state[i].clone());
+        }
 
         self.workers.set(Arc::new(workers));
     }
@@ -462,6 +466,9 @@ impl ControllerBuilder {
                     .collect(),
                 assignment: HashMap::new()
             }),
+            datasets_height: self.managed_datasets.values()
+                .map(|name| (name.clone(), AtomicU32::new(0)))
+                .collect(),
             workers: Atom::new(Arc::new(Vec::new())),
             managed_datasets: self.managed_datasets.clone(),
             managed_workers: self.managed_workers.clone(),

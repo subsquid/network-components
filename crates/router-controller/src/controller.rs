@@ -53,7 +53,12 @@ unsafe impl Send for Controller {}
 unsafe impl Sync for Controller {}
 
 impl Controller {
-    pub fn get_worker(&self, dataset_name: &str, first_block: u32) -> Option<(WorkerId, Url)> {
+    /// Get (worker_id, worker_url, encoded_dataset)
+    pub fn get_worker(
+        &self,
+        dataset_name: &str,
+        first_block: u32,
+    ) -> Option<(WorkerId, Url, String)> {
         let dataset = match self.managed_datasets.get(dataset_name) {
             Some(ds) => ds,
             None => return None,
@@ -106,13 +111,13 @@ impl Controller {
             }
         };
 
-        candidates
-            .choose(&mut rand::thread_rng())
-            .map(|info| (info.id.clone(), Self::format_worker_url(&info.url, dataset)))
-    }
-
-    fn format_worker_url(base: &Url, dataset: &Dataset) -> String {
-        format!("{}/{}", base, URL_SAFE_NO_PAD.encode(dataset))
+        candidates.choose(&mut rand::thread_rng()).map(|info| {
+            (
+                info.id.clone(),
+                info.url.clone(),
+                URL_SAFE_NO_PAD.encode(dataset),
+            )
+        })
     }
 
     pub fn ping(&self, msg: Ping) -> Arc<WorkerState> {
@@ -384,6 +389,12 @@ pub struct ControllerBuilder {
     data_management_unit: usize,
 }
 
+impl Default for ControllerBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ControllerBuilder {
     pub fn new() -> Self {
         ControllerBuilder {
@@ -512,7 +523,7 @@ mod tests {
                 s.get("0")
                     .map(|range| {
                         if range.has(10) && range.has(0) {
-                            Some((wi.to_string(), format!("{}/MA", wi)))
+                            Some((wi.to_string(), wi.to_string(), "MA".to_string()))
                         } else {
                             None
                         }

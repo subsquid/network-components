@@ -119,18 +119,19 @@ impl Server {
 
     async fn get_worker(&mut self, peer_id: PeerId, msg: GetWorker) {
         log::info!("GetWorker {msg:?}");
-        let response = match self.controller.get_worker(&msg.dataset, msg.start_block) {
-            Some((worker_id, url)) => {
-                // TODO: Clean up this hack. get_worker could just return it
-                let encoded_dataset = url.rsplitn(2, '/').next().unwrap().to_string();
-                Msg::GetWorkerResult(GetWorkerResult {
-                    query_id: msg.query_id,
-                    worker_id,
-                    encoded_dataset,
-                })
-            }
+        let GetWorker {
+            query_id,
+            dataset,
+            start_block,
+        } = msg;
+        let response = match self.controller.get_worker(&dataset, start_block) {
+            Some((worker_id, _, encoded_dataset)) => Msg::GetWorkerResult(GetWorkerResult {
+                query_id,
+                worker_id,
+                encoded_dataset,
+            }),
             None => Msg::GetWorkerError(QueryError {
-                query_id: msg.query_id,
+                query_id,
                 error: "Not ready to serve requested block".to_string(),
             }),
         };

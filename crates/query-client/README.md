@@ -12,8 +12,8 @@ Options:
   -l, --listen <LISTEN>          Listen addr [default: /ip4/0.0.0.0/tcp/0]
   -b, --boot-nodes <BOOT_NODES>  Connect to boot node '<peer_id> <address>'.
   -o, --output-dir <OUTPUT_DIR>  Path to output directory (default: temp dir)
-  -r, --router-id <ROUTER_ID>    Peer ID of the router
   -d, --datasets <DATASETS>      Subscribe to dataset
+  -c, --config <CONFIG>          Path to config file [default: config.yml]
   -h, --help                     Print help
 ```
 

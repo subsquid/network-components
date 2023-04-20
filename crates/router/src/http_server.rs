@@ -42,7 +42,7 @@ async fn get_worker(
     Extension(controller): Extension<Arc<Controller>>,
 ) -> Response {
     match controller.get_worker(&dataset, start_block) {
-        Some((_, url)) => url.into_response(),
+        Some((_, url, encoded_dataset)) => format!("{url}/{encoded_dataset}").into_response(),
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
             format!(

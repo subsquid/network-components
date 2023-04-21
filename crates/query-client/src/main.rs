@@ -1,4 +1,5 @@
 use clap::Parser;
+use duration_string::DurationString;
 use simple_logger::SimpleLogger;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -29,6 +30,9 @@ struct Cli {
 
     #[arg(short, long, help = "Path to output directory [default: temp dir]")]
     pub output_dir: Option<PathBuf>,
+
+    #[arg(short, long, help = "Query timeout", default_value = "1m")]
+    pub query_timeout: DurationString,
 
     #[arg(short, long, help = "Subscribe to dataset")]
     pub datasets: Vec<String>,
@@ -63,6 +67,7 @@ fn parse_query(line: String) -> anyhow::Result<Query> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Init logger and parse arguments and config
     SimpleLogger::new()
         .with_level(log::LevelFilter::Info)
         .env()
@@ -70,6 +75,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Cli::parse();
     let config: Config = serde_yaml::from_slice(tokio::fs::read(args.config).await?.as_slice())?;
 
+    // Build transport
     let keypair = get_keypair(args.key).await?;
     let mut transport_builder = P2PTransportBuilder::from_keypair(keypair);
     let listen_addr = args.listen.parse()?;
@@ -77,6 +83,7 @@ async fn main() -> anyhow::Result<()> {
     transport_builder.boot_nodes(args.boot_nodes);
     let (msg_receiver, msg_sender, subscription_sender) = transport_builder.run().await?;
 
+    // Subscribe to dataset updates
     for dataset in args.datasets {
         log::info!("Tracking dataset {dataset}");
         let encoded_dataset = config
@@ -87,7 +94,16 @@ async fn main() -> anyhow::Result<()> {
         subscription_sender.send((encoded_dataset, true)).await?;
     }
 
-    let query_sender = QueryClient::start(args.output_dir, config, msg_receiver, msg_sender)?;
+    // Start query client
+    let query_sender = QueryClient::start(
+        args.output_dir,
+        args.query_timeout.into(),
+        config,
+        msg_receiver,
+        msg_sender,
+    )?;
+
+    // Read queries from stdin and execute
     let mut reader = BufReader::new(tokio::io::stdin()).lines();
     while let Some(line) = reader.next_line().await? {
         let query = match parse_query(line) {

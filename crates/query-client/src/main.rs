@@ -44,6 +44,14 @@ struct Cli {
         default_value = "config.yml"
     )]
     pub config: PathBuf,
+
+    #[arg(
+        short,
+        long,
+        help = "Blockchain RPC URL",
+        default_value = "http://127.0.0.1:8545/"
+    )]
+    pub rpc_url: String,
 }
 
 fn parse_query(line: String) -> anyhow::Result<Query> {
@@ -97,11 +105,13 @@ async fn main() -> anyhow::Result<()> {
     // Start query client
     let query_sender = QueryClient::start(
         args.output_dir,
+        args.rpc_url,
         args.query_timeout.into(),
         config,
         msg_receiver,
         msg_sender,
-    )?;
+    )
+    .await?;
 
     // Read queries from stdin and execute
     let mut reader = BufReader::new(tokio::io::stdin()).lines();

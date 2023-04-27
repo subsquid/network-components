@@ -1335,7 +1335,6 @@ dependencies = [
  "simple_logger",
  "thiserror",
  "tokio",
- "tokio-stream",
  "url",
 ]
 
@@ -4829,6 +4828,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 4.2.1",
+ "contract-client",
  "duration-string",
  "grpc-libp2p",
  "log",
@@ -5206,6 +5206,7 @@ dependencies = [
  "axum",
  "axum-macros",
  "clap 4.2.1",
+ "contract-client",
  "grpc-libp2p",
  "lazy_static",
  "libc",

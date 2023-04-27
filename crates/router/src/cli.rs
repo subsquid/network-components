@@ -52,4 +52,12 @@ pub struct Cli {
         default_value = "/ip4/0.0.0.0/tcp/0"
     )]
     pub listen: String,
+
+    #[cfg(feature = "worker-registry")]
+    #[arg(
+        long,
+        help = "Blockchain RPC URL",
+        default_value = "http://127.0.0.1:8545/"
+    )]
+    pub rpc_url: String,
 }

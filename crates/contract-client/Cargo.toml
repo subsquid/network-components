@@ -14,7 +14,6 @@ libp2p = "0.50"
 log = "0.4"
 thiserror = "1"
 tokio = { version = "1", features = ["sync"] }
-tokio-stream = { version  = "0.1", features = ["sync"] }
 url = "2"
 
 [dev-dependencies]

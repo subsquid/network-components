@@ -1,6 +1,5 @@
 use contract_client::Client;
 use simple_logger::SimpleLogger;
-use tokio_stream::StreamExt;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -11,7 +10,7 @@ async fn main() -> anyhow::Result<()> {
 
     let client = Client::new("http://127.0.0.1:8545/")?;
     let mut worker_stream = client.active_workers_stream().await;
-    while let Some(workers) = worker_stream.next().await {
+    while let Some(workers) = worker_stream.recv().await {
         workers.iter().for_each(|w| println!("{w:?}"));
     }
     Ok(())

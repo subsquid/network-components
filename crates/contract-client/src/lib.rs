@@ -1,12 +1,13 @@
 use ethers::prelude::{abigen, ContractError, Middleware};
 use ethers::providers::{Http, Provider};
 use ethers::types::{Address, U256};
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use lazy_static::lazy_static;
 use libp2p::PeerId;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
+
+pub use tokio::sync::mpsc::Receiver;
 
 abigen!(
     TSQD,
@@ -108,12 +109,12 @@ impl Client {
     }
 
     /// Get a stream which yields an updated set of active workers after every change
-    pub async fn active_workers_stream(&self) -> impl Stream<Item = Vec<Worker>> + 'static {
+    pub async fn active_workers_stream(&self) -> mpsc::Receiver<Vec<Worker>> {
         let client = self.clone();
         let (tx, rx) = mpsc::channel(100);
         let updater = WorkerSetUpdater::new(client, tx);
         tokio::spawn(updater.run());
-        ReceiverStream::new(rx)
+        rx
     }
 }
 
@@ -132,7 +133,7 @@ impl WorkerSetUpdater {
         }
     }
 
-    pub async fn run(mut self) -> () {
+    pub async fn run(mut self) {
         let raw_client = self.client.worker_registration.client();
         let mut block_stream = match raw_client.watch_blocks().await {
             Ok(stream) => stream,

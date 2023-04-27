@@ -18,6 +18,8 @@ mod libp2p_server;
 mod logger;
 mod metrics;
 mod scheduler;
+#[cfg(feature = "worker-registry")]
+mod worker_registry;
 
 #[cfg(any(
     not(any(feature = "http", feature = "p2p")),
@@ -47,6 +49,9 @@ async fn main() -> anyhow::Result<()> {
 
     let scheduling_interval = Duration::from_secs(args.scheduling_interval);
     scheduler::start(controller.clone(), storages, scheduling_interval);
+
+    #[cfg(feature = "worker-registry")]
+    worker_registry::start(controller.clone(), &args.rpc_url)?;
 
     #[cfg(feature = "http")]
     http_server::Server::new(controller).run().await;

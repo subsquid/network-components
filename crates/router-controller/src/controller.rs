@@ -20,7 +20,7 @@ pub type Dataset = Url;
 struct Worker {
     desired_state: Arc<WorkerState>,
     info: Arc<Atom<WorkerInfo>>,
-    is_managed: bool,
+    is_managed: Atom<bool>,
 }
 
 struct WorkerInfo {
@@ -44,7 +44,7 @@ pub struct Controller {
     schedule: parking_lot::Mutex<Schedule>,
     workers: Atom<Vec<Worker>>,
     managed_datasets: HashMap<String, Dataset>,
-    managed_workers: HashSet<WorkerId>,
+    managed_workers: parking_lot::RwLock<HashSet<WorkerId>>,
     data_replication: usize,
     data_management_unit: usize,
 }
@@ -97,7 +97,7 @@ impl Controller {
         let candidates = {
             let managed: Vec<_> = workers
                 .iter()
-                .filter(|w| w.is_managed)
+                .filter(|w| *w.is_managed.get())
                 .filter_map(select_candidate)
                 .collect();
             if !managed.is_empty() {
@@ -105,7 +105,7 @@ impl Controller {
             } else {
                 workers
                     .iter()
-                    .filter(|w| !w.is_managed)
+                    .filter(|w| !*w.is_managed.get())
                     .filter_map(select_candidate)
                     .collect()
             }
@@ -120,6 +120,10 @@ impl Controller {
         })
     }
 
+    pub fn update_managed_workers<T: IntoIterator<Item = WorkerId>>(&self, workers: T) {
+        *self.managed_workers.write() = workers.into_iter().collect();
+    }
+
     pub fn ping(&self, msg: Ping) -> Arc<WorkerState> {
         let info = Arc::new(WorkerInfo {
             id: msg.worker_id.clone(),
@@ -130,17 +134,19 @@ impl Controller {
         });
 
         let mut desired_state: Option<Arc<WorkerState>> = None;
+        let is_managed = Arc::new(self.managed_workers.read().contains(&msg.worker_id));
 
         self.workers.update(|workers| {
             if let Some(w) = workers.iter().find(|w| w.info.get().id == msg.worker_id) {
                 w.info.set(info.clone());
+                w.is_managed.set(is_managed.clone()); // Set of managed workers can change
                 desired_state = Some(w.desired_state.clone());
                 None
             } else {
                 let new_worker = Worker {
                     desired_state: Arc::new(info.state.clone()),
                     info: Arc::new(Atom::new(info.clone())),
-                    is_managed: self.managed_workers.contains(&msg.worker_id),
+                    is_managed: Atom::new(is_managed.clone()),
                 };
                 desired_state = Some(new_worker.desired_state.clone());
                 Some(Arc::new(
@@ -166,8 +172,12 @@ impl Controller {
 
         Self::remove_dead_workers(&mut workers);
 
-        let managed_workers: Vec<_> = workers.iter().filter(|w| w.is_managed).cloned().collect();
-        if managed_workers.len() < self.managed_workers.len() {
+        let managed_workers: Vec<_> = workers
+            .iter()
+            .filter(|w| *w.is_managed.get())
+            .cloned()
+            .collect();
+        if managed_workers.len() < self.managed_workers.read().len() {
             self.workers.set(Arc::new(workers));
             return;
         }
@@ -190,7 +200,7 @@ impl Controller {
             }
         }
 
-        for worker in workers.iter_mut().filter(|w| w.is_managed) {
+        for worker in workers.iter_mut().filter(|w| *w.is_managed.get()) {
             let i = managed_workers
                 .iter()
                 .position(|w| w.info.get().id == worker.info.get().id)
@@ -204,7 +214,7 @@ impl Controller {
     fn remove_dead_workers(workers: &mut Vec<Worker>) {
         let now = SystemTime::now();
         workers.retain(|w| {
-            w.is_managed || {
+            *w.is_managed.get() || {
                 let since_last_ping = now
                     .duration_since(w.info.get().last_ping)
                     .unwrap_or(Duration::from_secs(0));
@@ -455,7 +465,7 @@ impl ControllerBuilder {
             }),
             workers: Atom::new(Arc::new(Vec::new())),
             managed_datasets: self.managed_datasets.clone(),
-            managed_workers: self.managed_workers.clone(),
+            managed_workers: parking_lot::RwLock::new(self.managed_workers.clone()),
             data_replication: self.replication,
             data_management_unit: self.data_management_unit,
         }

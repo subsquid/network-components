@@ -1,7 +1,8 @@
+use contract_client::Worker;
 use prost::Message as ProstMsg;
 use rand::prelude::IteratorRandom;
 use serde::{Deserialize, Deserializer};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -188,24 +189,30 @@ pub struct QueryClient {
     query_receiver: Receiver<Query>,
     timeout_sender: Sender<String>,
     timeout_receiver: Receiver<String>,
+    worker_updates: Receiver<Vec<Worker>>,
     tasks: HashMap<String, Task>,
     dataset_states: HashMap<DatasetId, HashMap<PeerId, RangeSet>>,
     last_pings: HashMap<PeerId, Instant>,
     worker_greylist: HashMap<PeerId, Instant>,
+    registered_workers: HashSet<PeerId>,
     output_dir: PathBuf,
     query_timeout: Duration,
     config: Config,
 }
 
 impl QueryClient {
-    pub fn start(
+    pub async fn start(
         output_dir: Option<PathBuf>,
+        rpc_url: String,
         query_timeout: Duration,
         config: Config,
         msg_receiver: Receiver<Message>,
         msg_sender: Sender<Message>,
     ) -> anyhow::Result<Sender<Query>> {
         let output_dir = output_dir.unwrap_or_else(std::env::temp_dir);
+        let worker_updates = contract_client::Client::new(&rpc_url)?
+            .active_workers_stream()
+            .await;
         let (query_sender, query_receiver) = mpsc::channel(100);
         let (timeout_sender, timeout_receiver) = mpsc::channel(100);
         let client = Self {
@@ -214,10 +221,12 @@ impl QueryClient {
             query_receiver,
             timeout_sender,
             timeout_receiver,
+            worker_updates,
             tasks: Default::default(),
             dataset_states: Default::default(),
             last_pings: Default::default(),
             worker_greylist: Default::default(),
+            registered_workers: Default::default(),
             output_dir,
             query_timeout,
             config,
@@ -238,6 +247,7 @@ impl QueryClient {
                 Some(msg) = self.msg_receiver.recv() => self.handle_message(msg)
                     .await
                     .map_err(|e| log::error!("Error handling incoming message: {e:?}")),
+                Some(workers) = self.worker_updates.recv() => self.handle_worker_update(workers),
                 else => break
             };
         }
@@ -305,6 +315,11 @@ impl QueryClient {
     }
 
     fn worker_is_active(&self, worker_id: &PeerId) -> bool {
+        // Check if worker is registered on chain
+        if !self.registered_workers.contains(worker_id) {
+            return false;
+        }
+
         let now = Instant::now();
 
         // Check if the last ping wasn't too long ago
@@ -449,5 +464,10 @@ impl QueryClient {
         self.tasks
             .get_mut(query_id)
             .ok_or_else(|| anyhow::anyhow!("Unknown query: {query_id}"))
+    }
+
+    fn handle_worker_update(&mut self, workers: Vec<Worker>) -> Result<(), ()> {
+        self.registered_workers = workers.into_iter().map(|w| w.peer_id).collect();
+        Ok(())
     }
 }

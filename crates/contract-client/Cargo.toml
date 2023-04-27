@@ -8,11 +8,16 @@ edition = "2021"
 [dependencies]
 
 ethers = "2"
+futures = "0.3"
 lazy_static = "1"
 libp2p = "0.50"
+log = "0.4"
 thiserror = "1"
+tokio = { version = "1", features = ["sync"] }
+tokio-stream = { version  = "0.1", features = ["sync"] }
 url = "2"
 
 [dev-dependencies]
 anyhow = "1"
+simple_logger = "4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

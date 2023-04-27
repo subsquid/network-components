@@ -1328,10 +1328,14 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ethers",
+ "futures",
  "lazy_static",
  "libp2p",
+ "log",
+ "simple_logger",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "url",
 ]
 

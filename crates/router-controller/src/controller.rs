@@ -199,9 +199,11 @@ impl Controller {
             if Self::import_new_chunks(chunks, |next_block| {
                 f(dataset, next_block)
             }) {
-                let height = self.datasets_height.get(dataset).unwrap();
-                let last_block = chunks.last().unwrap().last_block();
-                height.store(last_block, Ordering::Relaxed);
+                if let Some(chunk) = chunks.last() {
+                    let height = self.datasets_height.get(dataset).unwrap();
+                    let last_block = chunk.last_block();
+                    height.store(last_block, Ordering::Relaxed);
+                }
 
                 let plan = self.schedule_dataset(
                     &managed_workers,

@@ -247,7 +247,7 @@ impl Controller {
                 new_chunks.sort();
                 // check, that the new chunks are non-overlapping and span a continuous range
                 for (i, c) in new_chunks.iter().enumerate() {
-                    if next_block != c.first_block() {
+                    if next_block != c.first_block() && next_block != 0 {
                         let p = if i > 0 {
                             &new_chunks[i - 1]
                         } else {

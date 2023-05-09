@@ -1,5 +1,6 @@
-use ethers::prelude::{abigen, ContractError, Middleware};
-use ethers::providers::{Http, Provider};
+use async_trait::async_trait;
+use ethers::prelude::{abigen, ContractError, Http, JsonRpcClient, Middleware};
+use ethers::providers::{Provider, Ws};
 use ethers::types::{Address, U256};
 use futures::StreamExt;
 use lazy_static::lazy_static;
@@ -9,33 +10,19 @@ use tokio::sync::mpsc;
 
 pub use tokio::sync::mpsc::Receiver;
 
-abigen!(
-    TSQD,
-    "../../../subsquid-network-contracts/deployments/localhost/tSQD.json"
-);
-
-abigen!(
-    WorkerRegistration,
-    "../../../subsquid-network-contracts/deployments/localhost/WorkerRegistration.json"
-);
+abigen!(TSQD, "abi/tSQD.json");
+abigen!(WorkerRegistration, "abi/WorkerRegistration.json");
 
 lazy_static! {
     pub static ref TSQD_CONTRACT_ADDR: Address = std::env::var("TSQD_CONTRACT_ADDR")
-        .unwrap_or("0x5fbdb2315678afecb367f032d93f642f64180aa3".to_string())
+        .unwrap_or("0x6a117CBe9Bfab42151396FC54ddb588151a8Aac7".to_string())
         .parse()
         .expect("Invalid tSQD contract address");
     pub static ref WORKER_REGISTRATION_CONTRACT_ADDR: Address =
         std::env::var("WORKER_REGISTRATION_CONTRACT_ADDR")
-            .unwrap_or("0x6a220ec0269e695f3788e03a9c34dacdd4227784".to_string())
+            .unwrap_or("0xE49f913608F296584d92c2e176e2e68156A96A12".to_string())
             .parse()
             .expect("Invalid WorkerRegistration contract address");
-}
-
-#[allow(dead_code)]
-#[derive(Clone)]
-pub struct Client {
-    tsqd: TSQD<Provider<Http>>,
-    worker_registration: WorkerRegistration<Provider<Http>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -44,10 +31,18 @@ pub enum ClientError {
     InvalidRpcUrl(#[from] url::ParseError),
     #[error("Invalid Peer ID: {0:?}")]
     InvalidPeerId(#[from] libp2p::multihash::Error),
-    #[error("Contract error: {0:?}")]
-    Contract(#[from] ContractError<Provider<Http>>),
-    #[error("RPC provider error: {0:?}")]
+    #[error("Contract error: {0}")]
+    Contract(String),
+    #[error("RPC provider error: {0}")]
     Provider(#[from] ethers::providers::ProviderError),
+    #[error("Unsupported RPC protocol")]
+    InvalidProtocol,
+}
+
+impl<T: JsonRpcClient> From<ContractError<Provider<T>>> for ClientError {
+    fn from(err: ContractError<Provider<T>>) -> Self {
+        Self::Contract(err.to_string())
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -63,14 +58,14 @@ impl TryFrom<worker_registration::Worker> for Worker {
     type Error = ClientError;
 
     fn try_from(worker: worker_registration::Worker) -> Result<Self, Self::Error> {
-        // Strip the padding – all but last trailing zeros
+        // Strip the padding – all but last leading zeros
         let peer_id_bytes: Vec<u8> = worker.peer_id.concat();
-        let last_trailing_zero = peer_id_bytes
+        let last_leading_zero = peer_id_bytes
             .iter()
             .position(|x| *x != 0)
             .ok_or(libp2p::multihash::Error::InvalidSize(0))?
             .saturating_sub(1);
-        let peer_id = PeerId::from_bytes(&peer_id_bytes[last_trailing_zero..])?;
+        let peer_id = PeerId::from_bytes(&peer_id_bytes[last_leading_zero..])?;
 
         let deregistered_at = (worker.deregistered_at > 0.into()).then_some(worker.deregistered_at);
 
@@ -84,21 +79,53 @@ impl TryFrom<worker_registration::Worker> for Worker {
     }
 }
 
-impl Client {
-    pub fn new(rpc_url: &str) -> Result<Self, ClientError> {
+#[async_trait]
+pub trait Client: Send + Sync {
+    /// Get current active worker set
+    async fn active_workers(&self) -> Result<Vec<Worker>, ClientError>;
+
+    /// Get a stream which yields an updated set of active workers after every change
+    async fn active_workers_stream(&self) -> Receiver<Vec<Worker>>;
+}
+
+pub async fn get_client(rpc_url: &str) -> Result<Box<dyn Client>, ClientError> {
+    if rpc_url.starts_with("http") {
         let provider = Provider::<Http>::try_from(rpc_url)?;
+        Ok(Box::new(EthersClient::new(provider)))
+    } else if rpc_url.starts_with("ws") {
+        let provider = Provider::<Ws>::connect(rpc_url).await?;
+        Ok(Box::new(EthersClient::new(provider)))
+    } else {
+        Err(ClientError::InvalidProtocol)
+    }
+}
+
+trait RawClient: JsonRpcClient + Clone + 'static {}
+impl<T: JsonRpcClient + Clone + 'static> RawClient for T {}
+
+#[allow(dead_code)]
+#[derive(Clone)]
+struct EthersClient<T: RawClient> {
+    tsqd: TSQD<Provider<T>>,
+    worker_registration: WorkerRegistration<Provider<T>>,
+}
+
+impl<T: RawClient> EthersClient<T> {
+    pub fn new(provider: Provider<T>) -> Self {
         let client = Arc::new(provider);
         let tsqd = TSQD::new(*TSQD_CONTRACT_ADDR, client.clone());
         let worker_registration =
             WorkerRegistration::new(*WORKER_REGISTRATION_CONTRACT_ADDR, client);
-        Ok(Self {
+        Self {
             tsqd,
             worker_registration,
-        })
+        }
     }
+}
 
-    /// Get current active worker set
-    pub async fn active_workers(&self) -> Result<Vec<Worker>, ClientError> {
+#[async_trait]
+impl<T: RawClient> Client for EthersClient<T> {
+    async fn active_workers(&self) -> Result<Vec<Worker>, ClientError> {
         self.worker_registration
             .get_active_workers()
             .call()
@@ -108,9 +135,8 @@ impl Client {
             .collect()
     }
 
-    /// Get a stream which yields an updated set of active workers after every change
-    pub async fn active_workers_stream(&self) -> mpsc::Receiver<Vec<Worker>> {
-        let client = self.clone();
+    async fn active_workers_stream(&self) -> mpsc::Receiver<Vec<Worker>> {
+        let client = (*self).clone();
         let (tx, rx) = mpsc::channel(100);
         let updater = WorkerSetUpdater::new(client, tx);
         tokio::spawn(updater.run());
@@ -118,14 +144,14 @@ impl Client {
     }
 }
 
-struct WorkerSetUpdater {
-    client: Client,
+struct WorkerSetUpdater<T: RawClient> {
+    client: EthersClient<T>,
     result_sender: mpsc::Sender<Vec<Worker>>,
     last_worker_set: Option<Vec<Worker>>,
 }
 
-impl WorkerSetUpdater {
-    pub fn new(client: Client, result_sender: mpsc::Sender<Vec<Worker>>) -> Self {
+impl<T: RawClient> WorkerSetUpdater<T> {
+    pub fn new(client: EthersClient<T>, result_sender: mpsc::Sender<Vec<Worker>>) -> Self {
         Self {
             client,
             result_sender,

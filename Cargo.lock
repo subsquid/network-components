@@ -1327,6 +1327,7 @@ name = "contract-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "ethers",
  "futures",
  "lazy_static",
@@ -2202,6 +2203,7 @@ dependencies = [
  "bytes",
  "enr",
  "ethers-core",
+ "futures-channel",
  "futures-core",
  "futures-timer",
  "futures-util",

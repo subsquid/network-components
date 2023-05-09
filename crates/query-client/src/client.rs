@@ -210,7 +210,8 @@ impl QueryClient {
         msg_sender: Sender<Message>,
     ) -> anyhow::Result<Sender<Query>> {
         let output_dir = output_dir.unwrap_or_else(std::env::temp_dir);
-        let worker_updates = contract_client::Client::new(&rpc_url)?
+        let worker_updates = contract_client::get_client(&rpc_url)
+            .await?
             .active_workers_stream()
             .await;
         let (query_sender, query_receiver) = mpsc::channel(100);

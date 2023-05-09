@@ -51,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     scheduler::start(controller.clone(), storages, scheduling_interval);
 
     #[cfg(feature = "worker-registry")]
-    worker_registry::start(controller.clone(), &args.rpc_url)?;
+    worker_registry::start(controller.clone(), &args.rpc_url).await?;
 
     #[cfg(feature = "http")]
     http_server::Server::new(controller).run().await;

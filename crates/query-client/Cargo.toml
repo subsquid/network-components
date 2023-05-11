@@ -5,15 +5,16 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+axum = "0.6"
 clap = { version = "4", features = ["derive"] }
-duration-string = "0.3"
+duration-string = { version = "0.3", features = ["serde"] }
 log = "0.4"
 prost = "0.11"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 simple_logger = "4"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "io-std"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 uuid = { version = "1", features = ["v4", "fast-rng"] }
 
 grpc-libp2p = { version = "0.1", path = "../../../subsquid-network/grpc-libp2p"}

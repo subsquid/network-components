@@ -1,41 +1,26 @@
 use contract_client::Worker;
 use prost::Message as ProstMsg;
 use rand::prelude::IteratorRandom;
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
+use std::collections::hash_map::{Entry, OccupiedEntry};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
-use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 
 use grpc_libp2p::{MsgContent, PeerId};
 
 use router_controller::messages::{
-    envelope::Msg, Envelope, GetWorker, GetWorkerResult, Query as QueryMsg, QueryError,
-    QueryResult, RangeSet,
+    envelope::Msg, Envelope, Query as QueryMsg, QueryError, QueryResult as QueryResultMsg, RangeSet,
 };
 
 type Message = grpc_libp2p::Message<Box<[u8]>>;
 
 const WORKER_INACTIVE_THRESHOLD: Duration = Duration::from_secs(30);
 const WORKER_GREYLIST_TIME: Duration = Duration::from_secs(600);
-
-/// This struct exists because `PeerId` doesn't implement `Deserialize`
-#[derive(Debug, Clone, Copy)]
-pub struct RouterId(PeerId);
-
-impl<'de> Deserialize<'de> for RouterId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let peer_id = String::deserialize(deserializer)?
-            .parse()
-            .map_err(|_| serde::de::Error::custom("Invalid peer ID"))?;
-        Ok(Self(peer_id))
-    }
-}
+const DEFAULT_QUERY_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// This struct exists not to confuse dataset name with it's encoded ID
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize)]
@@ -53,256 +38,69 @@ impl From<String> for DatasetId {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct Config {
-    pub router_id: RouterId,
-    pub available_datasets: HashMap<String, DatasetId>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Query {
-    pub dataset: String,
-    pub start_block: u32,
+#[derive(Debug)]
+struct Query {
+    pub dataset_id: DatasetId,
     pub query: String,
+    pub worker_id: PeerId,
+    pub timeout: Duration,
+    pub result_sender: oneshot::Sender<QueryResult>,
 }
 
 #[derive(Debug)]
 struct Task {
-    query: Query,
-    state: TaskState,
+    worker_id: PeerId,
+    result_sender: oneshot::Sender<QueryResult>,
+    timeout_handle: JoinHandle<()>,
 }
 
-impl Task {
-    pub fn new(query: Query) -> Self {
-        Self {
-            query,
-            state: TaskState::LookingForWorker,
-        }
-    }
-
-    pub fn start_processing(
-        &mut self,
-        worker_id: PeerId,
-        timeout_handle: JoinHandle<()>,
-    ) -> anyhow::Result<()> {
-        match self.state {
-            TaskState::LookingForWorker => {}
-            _ => anyhow::bail!("start_processing: unexpected task state"),
-        }
-        self.state = TaskState::Processing {
-            worker_id,
-            timeout_handle,
-        };
-        Ok(())
-    }
-
-    pub fn timeout(&mut self) -> anyhow::Result<(PeerId, Query)> {
-        let worker_id = match self.state {
-            TaskState::Processing { worker_id, .. } => worker_id,
-            _ => anyhow::bail!("timeout: unexpected task state"),
-        };
-        self.state = TaskState::Timeout;
-        Ok((worker_id, self.query.clone()))
-    }
-
-    pub fn get_worker_error(&mut self, error: String) -> anyhow::Result<()> {
-        match self.state {
-            TaskState::LookingForWorker => {}
-            _ => anyhow::bail!("get_worker_error: unexpected task state"),
-        };
-        self.state = TaskState::Error { error };
-        Ok(())
-    }
-
-    pub fn query_error(&mut self, error: String, peer_id: &PeerId) -> anyhow::Result<()> {
-        match &self.state {
-            TaskState::Processing {
-                worker_id,
-                timeout_handle,
-            } => {
-                anyhow::ensure!(worker_id == peer_id, "Invalid message sender");
-                timeout_handle.abort();
-            }
-            TaskState::Timeout => anyhow::bail!("Task already timed out"),
-            _ => anyhow::bail!("query_error: unexpected task state"),
-        };
-        self.state = TaskState::Error { error };
-        Ok(())
-    }
-
-    pub fn result_received(&mut self, peer_id: &PeerId) -> anyhow::Result<()> {
-        match &self.state {
-            TaskState::Processing {
-                worker_id,
-                timeout_handle,
-            } => {
-                anyhow::ensure!(worker_id == peer_id, "Invalid message sender");
-                timeout_handle.abort();
-            }
-            TaskState::Timeout => anyhow::bail!("Task already timed out"),
-            _ => anyhow::bail!("result_received: unexpected task state"),
-        };
-        self.state = TaskState::ResultReceived;
-        Ok(())
-    }
-
-    pub fn result_saved(&mut self, result_path: PathBuf) -> anyhow::Result<()> {
-        match self.state {
-            TaskState::ResultReceived => (),
-            _ => anyhow::bail!("result_saved: unexpected task state"),
-        };
-        self.state = TaskState::Success { result_path };
-        Ok(())
-    }
-
-    pub fn result_save_error(&mut self, error: String) -> anyhow::Result<()> {
-        match self.state {
-            TaskState::ResultReceived => (),
-            _ => anyhow::bail!("result_save_error: unexpected task state"),
-        };
-        self.state = TaskState::Error { error };
-        Ok(())
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-enum TaskState {
-    LookingForWorker,
-    Processing {
-        worker_id: PeerId,
-        timeout_handle: JoinHandle<()>,
-    },
-    ResultReceived,
-    Success {
-        result_path: PathBuf,
-    },
-    Error {
-        error: String,
-    },
+#[derive(Debug, Clone)]
+pub enum QueryResult {
+    Ok(Vec<u8>),
+    Error(String),
     Timeout,
 }
 
-pub struct QueryClient {
-    msg_receiver: Receiver<Message>,
-    msg_sender: Sender<Message>,
-    query_receiver: Receiver<Query>,
-    timeout_sender: Sender<String>,
-    timeout_receiver: Receiver<String>,
-    worker_updates: Receiver<Vec<Worker>>,
-    tasks: HashMap<String, Task>,
+impl Task {
+    pub fn timeout(self) {
+        let _ = self.result_sender.send(QueryResult::Timeout);
+    }
+
+    pub fn query_error(self, error: String) {
+        self.timeout_handle.abort();
+        let _ = self.result_sender.send(QueryResult::Error(error));
+    }
+
+    pub fn result_received(self, data: Vec<u8>) {
+        self.timeout_handle.abort();
+        let _ = self.result_sender.send(QueryResult::Ok(data));
+    }
+}
+
+#[derive(Default)]
+struct NetworkState {
     dataset_states: HashMap<DatasetId, HashMap<PeerId, RangeSet>>,
     last_pings: HashMap<PeerId, Instant>,
     worker_greylist: HashMap<PeerId, Instant>,
     registered_workers: HashSet<PeerId>,
-    output_dir: PathBuf,
-    query_timeout: Duration,
-    config: Config,
+    available_datasets: HashMap<String, DatasetId>,
 }
 
-impl QueryClient {
-    pub async fn start(
-        output_dir: Option<PathBuf>,
-        rpc_url: String,
-        query_timeout: Duration,
-        config: Config,
-        msg_receiver: Receiver<Message>,
-        msg_sender: Sender<Message>,
-    ) -> anyhow::Result<Sender<Query>> {
-        let output_dir = output_dir.unwrap_or_else(std::env::temp_dir);
-        let worker_updates = contract_client::get_client(&rpc_url)
-            .await?
-            .active_workers_stream()
-            .await;
-        let (query_sender, query_receiver) = mpsc::channel(100);
-        let (timeout_sender, timeout_receiver) = mpsc::channel(100);
-        let client = Self {
-            msg_receiver,
-            msg_sender,
-            query_receiver,
-            timeout_sender,
-            timeout_receiver,
-            worker_updates,
-            tasks: Default::default(),
-            dataset_states: Default::default(),
-            last_pings: Default::default(),
-            worker_greylist: Default::default(),
-            registered_workers: Default::default(),
-            output_dir,
-            query_timeout,
-            config,
-        };
-        tokio::spawn(client.run());
-        Ok(query_sender)
-    }
-
-    async fn run(mut self) {
-        loop {
-            let _ = tokio::select! {
-                Some(query) = self.query_receiver.recv() => self.handle_query(query)
-                    .await
-                    .map_err(|e| log::error!("Error handling query: {e:?}")),
-                Some(query_id) = self.timeout_receiver.recv() => self.handle_timeout(query_id)
-                    .await
-                    .map_err(|e| log::error!("Error handling query timeout: {e:?}")),
-                Some(msg) = self.msg_receiver.recv() => self.handle_message(msg)
-                    .await
-                    .map_err(|e| log::error!("Error handling incoming message: {e:?}")),
-                Some(workers) = self.worker_updates.recv() => self.handle_worker_update(workers),
-                else => break
-            };
+impl NetworkState {
+    pub fn new(available_datasets: HashMap<String, DatasetId>) -> Self {
+        Self {
+            available_datasets,
+            ..Default::default()
         }
     }
 
-    fn generate_query_id(&self, _query: &Query) -> String {
-        uuid::Uuid::new_v4().to_string()
+    pub fn get_dataset_id(&self, dataset: &str) -> Option<DatasetId> {
+        self.available_datasets.get(dataset).cloned()
     }
 
-    async fn send_msg(&mut self, peer_id: PeerId, msg: Msg) -> anyhow::Result<()> {
-        let envelope = Envelope { msg: Some(msg) };
-        let msg = Message {
-            peer_id: Some(peer_id),
-            topic: None,
-            content: envelope.encode_to_vec().into(),
-        };
-        self.msg_sender.send(msg).await?;
-        Ok(())
-    }
-
-    async fn handle_query(&mut self, query: Query) -> anyhow::Result<()> {
-        log::info!("Starting query {query:?}");
-        let query_id = self.generate_query_id(&query);
-        self.tasks
-            .insert(query_id.clone(), Task::new(query.clone()));
-
-        if let Some(worker_id) = self.find_worker(&query.dataset, query.start_block) {
-            log::info!("Found worker {worker_id} for query {query_id}");
-            let dataset_id = self
-                .config
-                .available_datasets
-                .get(query.dataset.as_str())
-                .expect("Worker was found so the dataset is available")
-                .to_owned();
-            self.start_query(query_id, dataset_id, worker_id).await
-        } else {
-            log::info!("Worker not found locally. Falling back to router.");
-            let msg = Msg::GetWorker(GetWorker {
-                query_id,
-                dataset: query.dataset,
-                start_block: query.start_block,
-            });
-            self.send_msg(self.config.router_id.0, msg).await
-        }
-    }
-
-    fn find_worker(&self, dataset: &str, start_block: u32) -> Option<PeerId> {
-        log::debug!("Looking for worker dataset={dataset}, start_block={start_block}");
-        // dataset_states uses encoded dataset IDs
-        let dataset = match self.config.available_datasets.get(dataset) {
-            None => return None,
-            Some(dataset) => dataset,
-        };
-        let dataset_state = match self.dataset_states.get(dataset) {
+    pub fn find_worker(&self, dataset_id: &DatasetId, start_block: u32) -> Option<PeerId> {
+        log::debug!("Looking for worker dataset_id={dataset_id}, start_block={start_block}");
+        let dataset_state = match self.dataset_states.get(dataset_id) {
             None => return None,
             Some(state) => state,
         };
@@ -337,43 +135,105 @@ impl QueryClient {
         )
     }
 
-    async fn start_query(
-        &mut self,
-        query_id: String,
-        dataset_id: DatasetId,
-        worker_id: PeerId,
-    ) -> anyhow::Result<()> {
-        let task = self
-            .tasks
-            .get_mut(&query_id)
-            .ok_or_else(|| anyhow::anyhow!("Unknown query: {query_id}"))?;
-        log::debug!("Starting query {query_id}");
+    fn update_dataset_state(&mut self, peer_id: PeerId, dataset_id: DatasetId, state: RangeSet) {
+        self.last_pings.insert(peer_id, Instant::now());
+        self.dataset_states
+            .entry(dataset_id)
+            .or_default()
+            .insert(peer_id, state);
+    }
 
-        let timeout = self.query_timeout;
+    fn update_registered_workers(&mut self, workers: Vec<Worker>) {
+        self.registered_workers = workers.into_iter().map(|w| w.peer_id).collect();
+    }
+
+    pub fn greylist_worker(&mut self, worker_id: PeerId) {
+        self.worker_greylist.insert(worker_id, Instant::now());
+    }
+}
+
+struct QueryHandler {
+    msg_receiver: mpsc::Receiver<Message>,
+    msg_sender: mpsc::Sender<Message>,
+    query_receiver: mpsc::Receiver<Query>,
+    timeout_sender: mpsc::Sender<String>,
+    timeout_receiver: mpsc::Receiver<String>,
+    worker_updates: mpsc::Receiver<Vec<Worker>>,
+    tasks: HashMap<String, Task>,
+    network_state: Arc<RwLock<NetworkState>>,
+}
+
+impl QueryHandler {
+    async fn run(mut self) {
+        loop {
+            let _ = tokio::select! {
+                Some(query) = self.query_receiver.recv() => self.handle_query(query)
+                    .await
+                    .map_err(|e| log::error!("Error handling query: {e:?}")),
+                Some(query_id) = self.timeout_receiver.recv() => self.handle_timeout(query_id)
+                    .await
+                    .map_err(|e| log::error!("Error handling query timeout: {e:?}")),
+                Some(msg) = self.msg_receiver.recv() => self.handle_message(msg)
+                    .await
+                    .map_err(|e| log::error!("Error handling incoming message: {e:?}")),
+                Some(workers) = self.worker_updates.recv() => self.handle_worker_update(workers).await,
+                else => break
+            };
+        }
+    }
+
+    fn generate_query_id(&self, _query: &Query) -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
+
+    async fn send_msg(&mut self, peer_id: PeerId, msg: Msg) -> anyhow::Result<()> {
+        let envelope = Envelope { msg: Some(msg) };
+        let msg = Message {
+            peer_id: Some(peer_id),
+            topic: None,
+            content: envelope.encode_to_vec().into(),
+        };
+        self.msg_sender.send(msg).await?;
+        Ok(())
+    }
+
+    async fn handle_query(&mut self, query: Query) -> anyhow::Result<()> {
+        log::info!("Starting query {query:?}");
+        let query_id = self.generate_query_id(&query);
+
         let query_id2 = query_id.clone();
         let timeout_sender = self.timeout_sender.clone();
         let timeout_handle = tokio::spawn(async move {
-            tokio::time::sleep(timeout).await;
+            tokio::time::sleep(query.timeout).await;
             if timeout_sender.send(query_id2).await.is_err() {
                 log::error!("Error sending query timeout")
             }
         });
 
+        let task = Task {
+            worker_id: query.worker_id,
+            result_sender: query.result_sender,
+            timeout_handle,
+        };
+        self.tasks.insert(query_id.clone(), task);
+
         let msg = Msg::Query(QueryMsg {
             query_id,
-            dataset: dataset_id.0,
-            query: task.query.query.clone(),
+            dataset: query.dataset_id.0,
+            query: query.query,
         });
-        task.start_processing(worker_id, timeout_handle)?;
-        self.send_msg(worker_id, msg).await
+        self.send_msg(query.worker_id, msg).await
     }
 
     async fn handle_timeout(&mut self, query_id: String) -> anyhow::Result<()> {
-        let task = self.get_task(&query_id)?;
-        let (worker_id, query) = task.timeout()?;
         log::info!("Query {query_id} execution timed out");
-        self.worker_greylist.insert(worker_id, Instant::now());
-        self.handle_query(query).await
+        let task = self.get_task(query_id)?.remove();
+        self.network_state
+            .write()
+            .await
+            .greylist_worker(task.worker_id);
+        task.timeout();
+        Ok(())
     }
 
     async fn handle_message(&mut self, msg: Message) -> anyhow::Result<()> {
@@ -385,90 +245,144 @@ impl QueryClient {
         let peer_id = peer_id.ok_or_else(|| anyhow::anyhow!("Message sender ID missing"))?;
         let Envelope { msg } = Envelope::decode(content.as_slice())?;
         match msg {
-            Some(Msg::GetWorkerResult(result)) => self.got_worker(peer_id, result).await?,
-            Some(Msg::GetWorkerError(error)) => self.get_worker_error(peer_id, error)?,
             Some(Msg::QueryResult(result)) => self.query_result(peer_id, result).await?,
             Some(Msg::QueryError(error)) => self.query_error(peer_id, error).await?,
             Some(Msg::DatasetState(state)) => {
                 let dataset_id = topic.ok_or_else(|| anyhow::anyhow!("Message topic missing"))?;
-                self.update_dataset_state(peer_id, dataset_id.into(), state);
+                self.update_dataset_state(peer_id, dataset_id.into(), state)
+                    .await;
             }
             _ => log::warn!("Unexpected message received: {msg:?}"),
         }
         Ok(())
     }
 
-    fn update_dataset_state(&mut self, peer_id: PeerId, dataset_id: DatasetId, state: RangeSet) {
+    async fn update_dataset_state(
+        &mut self,
+        peer_id: PeerId,
+        dataset_id: DatasetId,
+        state: RangeSet,
+    ) {
         log::debug!("Updating dataset state. worker_id={peer_id} dataset_id={dataset_id}");
-        self.last_pings.insert(peer_id, Instant::now());
-        self.dataset_states
-            .entry(dataset_id)
-            .or_default()
-            .insert(peer_id, state);
-    }
-
-    async fn got_worker(&mut self, peer_id: PeerId, result: GetWorkerResult) -> anyhow::Result<()> {
-        log::info!("Got worker: {result:?}");
-        anyhow::ensure!(peer_id == self.config.router_id.0, "Invalid message sender");
-
-        let GetWorkerResult {
-            query_id,
-            worker_id,
-            encoded_dataset,
-        } = result;
-        let worker_id = worker_id.parse()?;
-        let dataset_id = DatasetId(encoded_dataset);
-
-        if self.worker_is_active(&worker_id) {
-            self.start_query(query_id, dataset_id, worker_id).await
-        } else {
-            let error = "Got inactive/greylisted worker from router".to_owned();
-            log::error!("{error}");
-            self.get_task(&query_id)?.get_worker_error(error)
-        }
-    }
-
-    fn get_worker_error(&mut self, peer_id: PeerId, error: QueryError) -> anyhow::Result<()> {
-        log::error!("GetWorker error: {error:?}");
-        anyhow::ensure!(peer_id == self.config.router_id.0, "Invalid message sender");
-        let QueryError { query_id, error } = error;
-        self.get_task(&query_id)?.get_worker_error(error)
+        self.network_state
+            .write()
+            .await
+            .update_dataset_state(peer_id, dataset_id, state)
     }
 
     async fn query_error(&mut self, peer_id: PeerId, error: QueryError) -> anyhow::Result<()> {
         log::error!("Query error: {error:?}");
         let QueryError { query_id, error } = error;
-        self.get_task(&query_id)?.query_error(error, &peer_id)?;
+        let task_entry = self.get_task(query_id)?;
+        anyhow::ensure!(
+            peer_id == task_entry.get().worker_id,
+            "Invalid message sender"
+        );
+        task_entry.remove().query_error(error);
         Ok(())
     }
 
-    async fn query_result(&mut self, peer_id: PeerId, result: QueryResult) -> anyhow::Result<()> {
-        let QueryResult { query_id, data, .. } = result;
+    async fn query_result(
+        &mut self,
+        peer_id: PeerId,
+        result: QueryResultMsg,
+    ) -> anyhow::Result<()> {
+        let QueryResultMsg { query_id, data, .. } = result;
         log::info!("Got result for query {query_id}");
-
-        let result_path = self.output_dir.join(format!("{query_id}.zip"));
-        let task = self.get_task(&query_id)?;
-        task.result_received(&peer_id)?;
-
-        log::info!("Saving query results to {}", result_path.display());
-        if let Ok(true) = tokio::fs::try_exists(&result_path).await {
-            log::warn!("Result file {} will be overwritten", result_path.display());
-        }
-        match tokio::fs::write(&result_path, data).await {
-            Ok(_) => task.result_saved(result_path),
-            Err(e) => task.result_save_error(e.to_string()),
-        }
+        let task_entry = self.get_task(query_id)?;
+        anyhow::ensure!(
+            peer_id == task_entry.get().worker_id,
+            "Invalid message sender"
+        );
+        task_entry.remove().result_received(data);
+        Ok(())
     }
 
     #[inline(always)]
-    fn get_task(&mut self, query_id: &str) -> anyhow::Result<&mut Task> {
-        self.tasks
-            .get_mut(query_id)
-            .ok_or_else(|| anyhow::anyhow!("Unknown query: {query_id}"))
+    fn get_task(&mut self, query_id: String) -> anyhow::Result<OccupiedEntry<String, Task>> {
+        match self.tasks.entry(query_id) {
+            Entry::Occupied(entry) => Ok(entry),
+            Entry::Vacant(entry) => anyhow::bail!("Unknown query: {}", entry.key()),
+        }
     }
 
-    fn handle_worker_update(&mut self, workers: Vec<Worker>) -> Result<(), ()> {
-        self.registered_workers = workers.into_iter().map(|w| w.peer_id).collect();
+    async fn handle_worker_update(&self, workers: Vec<Worker>) -> Result<(), ()> {
+        self.network_state
+            .write()
+            .await
+            .update_registered_workers(workers);
         Ok(())
     }
+}
+
+pub struct QueryClient {
+    network_state: Arc<RwLock<NetworkState>>,
+    query_sender: mpsc::Sender<Query>,
+}
+
+impl QueryClient {
+    pub async fn get_dataset_id(&self, dataset: &str) -> Option<DatasetId> {
+        self.network_state.read().await.get_dataset_id(dataset)
+    }
+
+    pub async fn find_worker(&self, dataset_id: &DatasetId, start_block: u32) -> Option<PeerId> {
+        self.network_state
+            .read()
+            .await
+            .find_worker(dataset_id, start_block)
+    }
+
+    pub async fn execute_query(
+        &self,
+        dataset_id: DatasetId,
+        query: String,
+        worker_id: PeerId,
+        timeout: Option<impl Into<Duration>>,
+    ) -> anyhow::Result<QueryResult> {
+        let timeout = timeout.map(Into::into).unwrap_or(DEFAULT_QUERY_TIMEOUT);
+        let (result_sender, result_receiver) = oneshot::channel();
+        let query = Query {
+            dataset_id,
+            query,
+            worker_id,
+            timeout,
+            result_sender,
+        };
+        self.query_sender
+            .send(query)
+            .await
+            .map_err(|_| anyhow::anyhow!("Query handler closed"))?;
+        result_receiver
+            .await
+            .map_err(|_| anyhow::anyhow!("Query dropped"))
+    }
+}
+
+pub async fn get_client(
+    available_datasets: HashMap<String, DatasetId>,
+    msg_receiver: mpsc::Receiver<Message>,
+    msg_sender: mpsc::Sender<Message>,
+    worker_updates: mpsc::Receiver<Vec<Worker>>,
+) -> anyhow::Result<QueryClient> {
+    let (query_sender, query_receiver) = mpsc::channel(100);
+    let (timeout_sender, timeout_receiver) = mpsc::channel(100);
+    let network_state = Arc::new(RwLock::new(NetworkState::new(available_datasets)));
+
+    let handler = QueryHandler {
+        msg_receiver,
+        msg_sender,
+        query_receiver,
+        timeout_sender,
+        timeout_receiver,
+        worker_updates,
+        tasks: Default::default(),
+        network_state: network_state.clone(),
+    };
+    tokio::spawn(handler.run());
+
+    let client = QueryClient {
+        network_state,
+        query_sender,
+    };
+    Ok(client)
 }

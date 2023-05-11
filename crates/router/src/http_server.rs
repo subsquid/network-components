@@ -20,8 +20,8 @@ mod middleware;
 
 #[axum_macros::debug_handler]
 async fn ping(
-    Json(msg): Json<Ping>,
     Extension(controller): Extension<Arc<Controller>>,
+    Json(msg): Json<Ping>,
 ) -> Json<WorkerState> {
     let worker_id = msg.worker_id.clone();
     let worker_url = msg.worker_url.clone();

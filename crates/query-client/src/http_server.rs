@@ -73,7 +73,8 @@ async fn execute_query(
             StatusCode::INTERNAL_SERVER_ERROR,
             err.to_string().into_bytes(),
         ),
-        Ok(QueryResult::Error(err)) => (StatusCode::INTERNAL_SERVER_ERROR, err.into_bytes()),
+        Ok(QueryResult::BadRequest(err)) => (StatusCode::BAD_REQUEST, err.into_bytes()),
+        Ok(QueryResult::ServerError(err)) => (StatusCode::INTERNAL_SERVER_ERROR, err.into_bytes()),
         Ok(QueryResult::Timeout) => (
             StatusCode::GATEWAY_TIMEOUT,
             "Query execution timed out".to_string().into_bytes(),

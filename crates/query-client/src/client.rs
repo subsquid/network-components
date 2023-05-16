@@ -13,7 +13,8 @@ use tokio::task::JoinHandle;
 use grpc_libp2p::{MsgContent, PeerId};
 
 use router_controller::messages::{
-    envelope::Msg, Envelope, Query as QueryMsg, QueryError, QueryResult as QueryResultMsg, RangeSet,
+    envelope::Msg, query_result, Envelope, Query as QueryMsg, QueryResult as QueryResultMsg,
+    RangeSet,
 };
 
 type Message = grpc_libp2p::Message<Box<[u8]>>;
@@ -57,8 +58,19 @@ struct Task {
 #[derive(Debug, Clone)]
 pub enum QueryResult {
     Ok(Vec<u8>),
-    Error(String),
+    BadRequest(String),
+    ServerError(String),
     Timeout,
+}
+
+impl From<query_result::Result> for QueryResult {
+    fn from(result: query_result::Result) -> Self {
+        match result {
+            query_result::Result::OkData(data) => Self::Ok(data),
+            query_result::Result::BadRequest(err) => Self::BadRequest(err),
+            query_result::Result::ServerError(err) => Self::ServerError(err),
+        }
+    }
 }
 
 impl Task {
@@ -66,14 +78,9 @@ impl Task {
         let _ = self.result_sender.send(QueryResult::Timeout);
     }
 
-    pub fn query_error(self, error: String) {
+    pub fn result_received(self, result: query_result::Result) {
         self.timeout_handle.abort();
-        let _ = self.result_sender.send(QueryResult::Error(error));
-    }
-
-    pub fn result_received(self, data: Vec<u8>) {
-        self.timeout_handle.abort();
-        let _ = self.result_sender.send(QueryResult::Ok(data));
+        let _ = self.result_sender.send(result.into());
     }
 }
 
@@ -246,7 +253,6 @@ impl QueryHandler {
         let Envelope { msg } = Envelope::decode(content.as_slice())?;
         match msg {
             Some(Msg::QueryResult(result)) => self.query_result(peer_id, result).await?,
-            Some(Msg::QueryError(error)) => self.query_error(peer_id, error).await?,
             Some(Msg::DatasetState(state)) => {
                 let dataset_id = topic.ok_or_else(|| anyhow::anyhow!("Message topic missing"))?;
                 self.update_dataset_state(peer_id, dataset_id.into(), state)
@@ -270,31 +276,20 @@ impl QueryHandler {
             .update_dataset_state(peer_id, dataset_id, state)
     }
 
-    async fn query_error(&mut self, peer_id: PeerId, error: QueryError) -> anyhow::Result<()> {
-        log::error!("Query error: {error:?}");
-        let QueryError { query_id, error } = error;
-        let task_entry = self.get_task(query_id)?;
-        anyhow::ensure!(
-            peer_id == task_entry.get().worker_id,
-            "Invalid message sender"
-        );
-        task_entry.remove().query_error(error);
-        Ok(())
-    }
-
     async fn query_result(
         &mut self,
         peer_id: PeerId,
         result: QueryResultMsg,
     ) -> anyhow::Result<()> {
-        let QueryResultMsg { query_id, data, .. } = result;
+        let QueryResultMsg { query_id, result } = result;
+        let result = result.ok_or_else(|| anyhow::anyhow!("Result missing"))?;
         log::info!("Got result for query {query_id}");
         let task_entry = self.get_task(query_id)?;
         anyhow::ensure!(
             peer_id == task_entry.get().worker_id,
             "Invalid message sender"
         );
-        task_entry.remove().result_received(data);
+        task_entry.remove().result_received(result);
         Ok(())
     }
 

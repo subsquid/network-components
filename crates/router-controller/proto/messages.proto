@@ -10,13 +10,11 @@ message Envelope {
     // router <-> client
     GetWorker get_worker = 3;
     GetWorkerResult get_worker_result = 4;
-    QueryError get_worker_error = 5;
 
     // client <-> worker
-    Query query = 6;
-    QueryResult query_result = 7;
-    QueryError query_error = 8;
-    RangeSet dataset_state = 9;
+    Query query = 5;
+    QueryResult query_result = 6;
+    RangeSet dataset_state = 7;
   }
 }
 
@@ -48,8 +46,10 @@ message GetWorker {
 
 message GetWorkerResult {
   string query_id = 1;
-  string worker_id = 2;
-  string encoded_dataset = 3;
+  oneof result {
+    string worker_id = 2;
+    string error = 3;
+  }
 }
 
 message Query {
@@ -60,12 +60,9 @@ message Query {
 
 message QueryResult {
   string query_id = 1;
-  uint32 last_processed_block = 2;
-  uint32 size = 3;
-  bytes data = 4;
-}
-
-message QueryError {
-  string query_id = 1;
-  string error = 2;
+  oneof result {
+    bytes ok_data = 2;
+    string bad_request = 3;
+    string server_error = 4;
+  }
 }

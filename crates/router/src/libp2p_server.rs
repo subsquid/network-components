@@ -4,7 +4,7 @@ use grpc_libp2p::{MsgContent, PeerId};
 use prost::Message as ProstMsg;
 use router_controller::controller::Controller;
 use router_controller::messages::{
-    envelope::Msg, Envelope, GetWorker, GetWorkerResult, Ping, QueryError,
+    envelope::Msg, get_worker_result::Result, Envelope, GetWorker, GetWorkerResult, Ping,
 };
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -124,17 +124,14 @@ impl Server {
             dataset,
             start_block,
         } = msg;
-        let response = match self.controller.get_worker(&dataset, start_block) {
-            Some((worker_id, _, encoded_dataset)) => Msg::GetWorkerResult(GetWorkerResult {
-                query_id,
-                worker_id,
-                encoded_dataset,
-            }),
-            None => Msg::GetWorkerError(QueryError {
-                query_id,
-                error: "Not ready to serve requested block".to_string(),
-            }),
+        let result = match self.controller.get_worker(&dataset, start_block) {
+            Some((worker_id, _, _)) => Result::WorkerId(worker_id),
+            None => Result::Error("Not ready to serve requested block".to_string()),
         };
+        let response = Msg::GetWorkerResult(GetWorkerResult {
+            query_id,
+            result: Some(result),
+        });
         self.send_msg(peer_id, response).await;
     }
 }

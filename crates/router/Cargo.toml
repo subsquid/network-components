@@ -7,7 +7,7 @@ edition = "2021"
 
 [features]
 http = ["axum", "axum-macros"]
-p2p = ["prost", "grpc-libp2p"]
+p2p = ["prost", "serde", "serde_json", "grpc-libp2p"]
 worker-registry = ["contract-client"]
 
 [dependencies]
@@ -31,6 +31,8 @@ axum-macros = { version = "0.3", optional = true }
 
 # Libp2p transport
 prost = { version = "0.11", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
 grpc-libp2p = { version = "0.1", path = "../../../subsquid-network/grpc-libp2p", optional = true }
 
 # Worker registry

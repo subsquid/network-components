@@ -1,5 +1,6 @@
 syntax = "proto3";
 package messages;
+import "google/protobuf/empty.proto";
 
 message Envelope {
   oneof msg {
@@ -15,6 +16,11 @@ message Envelope {
     Query query = 5;
     QueryResult query_result = 6;
     RangeSet dataset_state = 7;
+
+    // metrics
+    QuerySubmitted query_submitted = 8;
+    QueryFinished query_finished = 9;
+    QueryExecuted query_executed = 10;
   }
 }
 
@@ -65,4 +71,42 @@ message QueryResult {
     string bad_request = 3;
     string server_error = 4;
   }
+}
+
+message QuerySubmitted {
+  Query query = 1;
+  string worker_id = 2;
+}
+
+message QueryFinished {
+  string query_id = 1;
+  string worker_id = 2;
+  uint32 exec_time_ms = 3;
+  oneof result {
+    SizeAndHash ok = 4;
+    string bad_request = 5;
+    string server_error = 6;
+    google.protobuf.Empty timeout = 7;
+  }
+}
+
+message QueryExecuted {
+  Query query = 1;
+  string client_id = 2;
+  uint32 exec_time_ms = 3;
+  oneof result {
+    InputAndOutput ok = 4;
+    string bad_request = 5;
+    string server_error = 6;
+  }
+}
+
+message InputAndOutput {
+  SizeAndHash input = 1;
+  SizeAndHash output = 2;
+}
+
+message SizeAndHash {
+  uint32 size = 1;
+  bytes sha3_256 = 2;
 }

@@ -1,3 +1,6 @@
+mod metrics;
+
+use crate::libp2p_server::metrics::{Metrics, MetricsEvent};
 use grpc_libp2p::transport::P2PTransportBuilder;
 use grpc_libp2p::util::get_keypair;
 use grpc_libp2p::{MsgContent, PeerId};
@@ -9,6 +12,8 @@ use router_controller::messages::{
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::fs::{File, OpenOptions};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::log;
 
@@ -17,6 +22,7 @@ type Message = grpc_libp2p::Message<Box<[u8]>>;
 pub struct ServerBuilder {
     key_path: Option<PathBuf>,
     listen_addr: Option<String>,
+    metrics_path: Option<PathBuf>,
 }
 
 impl ServerBuilder {
@@ -24,6 +30,7 @@ impl ServerBuilder {
         Self {
             key_path: None,
             listen_addr: None,
+            metrics_path: None,
         }
     }
 
@@ -34,6 +41,11 @@ impl ServerBuilder {
 
     pub fn listen_addr(mut self, listen_addr: String) -> Self {
         self.listen_addr = Some(listen_addr);
+        self
+    }
+
+    pub fn metrics_path(mut self, metrics_path: PathBuf) -> Self {
+        self.metrics_path = Some(metrics_path);
         self
     }
 
@@ -48,11 +60,19 @@ impl ServerBuilder {
 
         transport_builder.bootstrap(false);
 
+        let metrics_path = self.metrics_path.unwrap_or("metrics.jsonl".into());
+        let metrics_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(metrics_path)
+            .await?;
+
         let (msg_receiver, msg_sender, _) = transport_builder.run().await?;
         Ok(Server {
             controller,
             msg_receiver,
             msg_sender,
+            metrics_file,
         })
     }
 }
@@ -61,6 +81,7 @@ pub struct Server {
     controller: Arc<Controller>,
     msg_receiver: Receiver<Message>,
     msg_sender: Sender<Message>,
+    metrics_file: File,
 }
 
 impl Server {
@@ -96,6 +117,9 @@ impl Server {
             match envelope.msg {
                 Some(Msg::Ping(ping)) => self.ping(peer_id, ping).await,
                 Some(Msg::GetWorker(get_worker)) => self.get_worker(peer_id, get_worker).await,
+                Some(Msg::QuerySubmitted(msg)) => self.save_metrics(peer_id, msg).await,
+                Some(Msg::QueryFinished(msg)) => self.save_metrics(peer_id, msg).await,
+                Some(Msg::QueryExecuted(msg)) => self.save_metrics(peer_id, msg).await,
                 _ => log::warn!("Unexpected msg received: {envelope:?}"),
             };
         }
@@ -133,5 +157,18 @@ impl Server {
             result: Some(result),
         });
         self.send_msg(peer_id, response).await;
+    }
+
+    async fn save_metrics(&mut self, peer_id: PeerId, msg: impl Into<MetricsEvent>) {
+        let metrics = Metrics::new(peer_id, msg);
+        let json_line = match metrics.to_json_line() {
+            Err(e) => return log::error!("Invalid metrics: {e:?}"),
+            Ok(line) => line,
+        };
+        let _ = self
+            .metrics_file
+            .write_all(json_line.as_slice())
+            .await
+            .map_err(|e| log::error!("Error saving metrics: {e:?}"));
     }
 }

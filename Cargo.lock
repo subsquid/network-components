@@ -5215,6 +5215,8 @@ dependencies = [
  "prometheus",
  "prost",
  "router-controller",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -5231,6 +5233,7 @@ dependencies = [
  "prost-build",
  "rand 0.8.5",
  "serde",
+ "sha3",
 ]
 
 [[package]]

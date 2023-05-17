@@ -4,11 +4,12 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Router, Server};
 use duration_string::DurationString;
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::client::{DatasetId, QueryClient, QueryResult};
+use crate::client::{QueryClient, QueryResult};
+use crate::config::{DatasetId, PeerId};
 
 async fn get_worker(
     Host(host): Host,
@@ -35,22 +36,6 @@ async fn get_worker(
         StatusCode::OK,
         format!("{host}/query/{dataset_id}/{worker_id}"),
     )
-}
-
-/// This struct exists because `PeerId` doesn't implement `Deserialize`
-#[derive(Debug, Clone, Copy)]
-struct PeerId(grpc_libp2p::PeerId);
-
-impl<'de> Deserialize<'de> for PeerId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let peer_id = String::deserialize(deserializer)?
-            .parse()
-            .map_err(|_| serde::de::Error::custom("Invalid peer ID"))?;
-        Ok(Self(peer_id))
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

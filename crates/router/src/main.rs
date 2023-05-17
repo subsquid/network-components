@@ -59,6 +59,7 @@ async fn main() -> anyhow::Result<()> {
     libp2p_server::ServerBuilder::new()
         .key_path(args.key)
         .listen_addr(args.listen)
+        .metrics_path(args.metrics)
         .build(controller)
         .await?
         .run()

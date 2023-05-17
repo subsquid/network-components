@@ -1,14 +1,12 @@
+use crate::config::Config;
 use clap::Parser;
 use grpc_libp2p::transport::P2PTransportBuilder;
 use grpc_libp2p::util::{get_keypair, BootNode};
-use serde::Deserialize;
 use simple_logger::SimpleLogger;
-use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::client::DatasetId;
-
 mod client;
+mod config;
 mod http_server;
 
 #[derive(Parser)]
@@ -46,11 +44,6 @@ struct Cli {
     rpc_url: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct Config {
-    available_datasets: HashMap<String, DatasetId>,
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Init logger and parse arguments and config
@@ -85,13 +78,7 @@ async fn main() -> anyhow::Result<()> {
         .await;
 
     // Start query client
-    let query_client = client::get_client(
-        config.available_datasets,
-        msg_receiver,
-        msg_sender,
-        worker_updates,
-    )
-    .await?;
+    let query_client = client::get_client(config, msg_receiver, msg_sender, worker_updates).await?;
 
     // Start HTTP server
     http_server::run_server(query_client, &http_listen_addr).await

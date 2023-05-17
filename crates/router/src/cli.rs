@@ -53,6 +53,10 @@ pub struct Cli {
     )]
     pub listen: String,
 
+    #[cfg(feature = "p2p")]
+    #[arg(long, help = "Path to save metrics", default_value = "metrics.jsonl")]
+    pub metrics: std::path::PathBuf,
+
     #[cfg(feature = "worker-registry")]
     #[arg(
         long,

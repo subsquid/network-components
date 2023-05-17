@@ -1,10 +1,8 @@
 use contract_client::Worker;
 use prost::Message as ProstMsg;
 use rand::prelude::IteratorRandom;
-use serde::Deserialize;
 use std::collections::hash_map::{Entry, OccupiedEntry};
 use std::collections::{HashMap, HashSet};
-use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, RwLock};
@@ -12,9 +10,10 @@ use tokio::task::JoinHandle;
 
 use grpc_libp2p::{MsgContent, PeerId};
 
+use crate::config::{Config, DatasetId};
 use router_controller::messages::{
-    envelope::Msg, query_result, Envelope, Query as QueryMsg, QueryResult as QueryResultMsg,
-    RangeSet,
+    envelope::Msg, query_finished, query_result, Envelope, Query as QueryMsg, QueryFinished,
+    QueryResult as QueryResultMsg, QuerySubmitted, RangeSet,
 };
 
 type Message = grpc_libp2p::Message<Box<[u8]>>;
@@ -22,22 +21,6 @@ type Message = grpc_libp2p::Message<Box<[u8]>>;
 const WORKER_INACTIVE_THRESHOLD: Duration = Duration::from_secs(30);
 const WORKER_GREYLIST_TIME: Duration = Duration::from_secs(600);
 const DEFAULT_QUERY_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// This struct exists not to confuse dataset name with it's encoded ID
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Deserialize)]
-pub struct DatasetId(String);
-
-impl Display for DatasetId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl From<String> for DatasetId {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
 
 #[derive(Debug)]
 struct Query {
@@ -53,6 +36,7 @@ struct Task {
     worker_id: PeerId,
     result_sender: oneshot::Sender<QueryResult>,
     timeout_handle: JoinHandle<()>,
+    start_time: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +58,27 @@ impl From<query_result::Result> for QueryResult {
 }
 
 impl Task {
+    pub fn new(
+        worker_id: PeerId,
+        result_sender: oneshot::Sender<QueryResult>,
+        timeout_handle: JoinHandle<()>,
+    ) -> Self {
+        Self {
+            worker_id,
+            result_sender,
+            timeout_handle,
+            start_time: Instant::now(),
+        }
+    }
+
+    pub fn exec_time_ms(&self) -> u32 {
+        self.start_time
+            .elapsed()
+            .as_millis()
+            .try_into()
+            .expect("Tasks do not take that long")
+    }
+
     pub fn timeout(self) {
         let _ = self.result_sender.send(QueryResult::Timeout);
     }
@@ -168,6 +173,7 @@ struct QueryHandler {
     worker_updates: mpsc::Receiver<Vec<Worker>>,
     tasks: HashMap<String, Task>,
     network_state: Arc<RwLock<NetworkState>>,
+    router_id: PeerId,
 }
 
 impl QueryHandler {
@@ -189,7 +195,7 @@ impl QueryHandler {
         }
     }
 
-    fn generate_query_id(&self, _query: &Query) -> String {
+    fn generate_query_id() -> String {
         uuid::Uuid::new_v4().to_string()
     }
 
@@ -204,41 +210,72 @@ impl QueryHandler {
         Ok(())
     }
 
+    async fn send_metrics(&mut self, msg: Msg) {
+        let _ = self
+            .send_msg(self.router_id, msg)
+            .await
+            .map_err(|e| log::error!("Failed to send metrics: {e:?}"));
+    }
+
     async fn handle_query(&mut self, query: Query) -> anyhow::Result<()> {
         log::info!("Starting query {query:?}");
-        let query_id = self.generate_query_id(&query);
+        let query_id = Self::generate_query_id();
+        let Query {
+            dataset_id,
+            query,
+            worker_id,
+            timeout,
+            result_sender,
+        } = query;
 
-        let query_id2 = query_id.clone();
-        let timeout_sender = self.timeout_sender.clone();
-        let timeout_handle = tokio::spawn(async move {
-            tokio::time::sleep(query.timeout).await;
-            if timeout_sender.send(query_id2).await.is_err() {
-                log::error!("Error sending query timeout")
-            }
-        });
-
-        let task = Task {
-            worker_id: query.worker_id,
-            result_sender: query.result_sender,
-            timeout_handle,
-        };
+        let timeout_handle = self.spawn_timeout_task(&query_id, timeout);
+        let task = Task::new(worker_id, result_sender, timeout_handle);
         self.tasks.insert(query_id.clone(), task);
 
-        let msg = Msg::Query(QueryMsg {
+        let query = QueryMsg {
             query_id,
-            dataset: query.dataset_id.0,
-            query: query.query,
+            dataset: dataset_id.0,
+            query,
+        };
+        let metrics_msg = Msg::QuerySubmitted(QuerySubmitted {
+            query: Some(query.clone()),
+            worker_id: worker_id.to_string(),
         });
-        self.send_msg(query.worker_id, msg).await
+        let worker_msg = Msg::Query(query);
+
+        self.send_msg(worker_id, worker_msg).await?;
+        self.send_metrics(metrics_msg).await;
+        Ok(())
+    }
+
+    fn spawn_timeout_task(&self, query_id: &str, timeout: Duration) -> JoinHandle<()> {
+        let query_id = query_id.to_string();
+        let timeout_sender = self.timeout_sender.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(timeout).await;
+            if timeout_sender.send(query_id).await.is_err() {
+                log::error!("Error sending query timeout")
+            }
+        })
     }
 
     async fn handle_timeout(&mut self, query_id: String) -> anyhow::Result<()> {
         log::info!("Query {query_id} execution timed out");
-        let task = self.get_task(query_id)?.remove();
+        let (query_id, task) = self.get_task(query_id)?.remove_entry();
+
         self.network_state
             .write()
             .await
             .greylist_worker(task.worker_id);
+
+        let metrics_msg = Msg::QueryFinished(QueryFinished {
+            query_id,
+            worker_id: task.worker_id.to_string(),
+            exec_time_ms: task.exec_time_ms(),
+            result: Some(query_finished::Result::Timeout(())),
+        });
+        self.send_metrics(metrics_msg).await;
+
         task.timeout();
         Ok(())
     }
@@ -284,12 +321,23 @@ impl QueryHandler {
         let QueryResultMsg { query_id, result } = result;
         let result = result.ok_or_else(|| anyhow::anyhow!("Result missing"))?;
         log::info!("Got result for query {query_id}");
+
         let task_entry = self.get_task(query_id)?;
         anyhow::ensure!(
             peer_id == task_entry.get().worker_id,
             "Invalid message sender"
         );
-        task_entry.remove().result_received(result);
+        let (query_id, task) = task_entry.remove_entry();
+
+        let metrics_msg = Msg::QueryFinished(QueryFinished {
+            query_id,
+            worker_id: peer_id.to_string(),
+            exec_time_ms: task.exec_time_ms(),
+            result: Some((&result).into()),
+        });
+        self.send_metrics(metrics_msg).await;
+
+        task.result_received(result);
         Ok(())
     }
 
@@ -354,14 +402,14 @@ impl QueryClient {
 }
 
 pub async fn get_client(
-    available_datasets: HashMap<String, DatasetId>,
+    config: Config,
     msg_receiver: mpsc::Receiver<Message>,
     msg_sender: mpsc::Sender<Message>,
     worker_updates: mpsc::Receiver<Vec<Worker>>,
 ) -> anyhow::Result<QueryClient> {
     let (query_sender, query_receiver) = mpsc::channel(100);
     let (timeout_sender, timeout_receiver) = mpsc::channel(100);
-    let network_state = Arc::new(RwLock::new(NetworkState::new(available_datasets)));
+    let network_state = Arc::new(RwLock::new(NetworkState::new(config.available_datasets)));
 
     let handler = QueryHandler {
         msg_receiver,
@@ -372,6 +420,7 @@ pub async fn get_client(
         worker_updates,
         tasks: Default::default(),
         network_state: network_state.clone(),
+        router_id: config.router_id.0,
     };
     tokio::spawn(handler.run());
 

@@ -38,5 +38,6 @@ impl<'de> Deserialize<'de> for PeerId {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub router_id: PeerId,
+    pub send_metrics: bool,
     pub available_datasets: HashMap<String, DatasetId>,
 }

@@ -174,6 +174,7 @@ struct QueryHandler {
     tasks: HashMap<String, Task>,
     network_state: Arc<RwLock<NetworkState>>,
     router_id: PeerId,
+    send_metrics: bool,
 }
 
 impl QueryHandler {
@@ -237,14 +238,17 @@ impl QueryHandler {
             dataset: dataset_id.0,
             query,
         };
-        let metrics_msg = Msg::QuerySubmitted(QuerySubmitted {
-            query: Some(query.clone()),
-            worker_id: worker_id.to_string(),
-        });
-        let worker_msg = Msg::Query(query);
-
+        let worker_msg = Msg::Query(query.clone());
         self.send_msg(worker_id, worker_msg).await?;
-        self.send_metrics(metrics_msg).await;
+
+        if self.send_metrics {
+            let metrics_msg = Msg::QuerySubmitted(QuerySubmitted {
+                query: Some(query),
+                worker_id: worker_id.to_string(),
+            });
+            self.send_metrics(metrics_msg).await;
+        }
+
         Ok(())
     }
 
@@ -268,13 +272,15 @@ impl QueryHandler {
             .await
             .greylist_worker(task.worker_id);
 
-        let metrics_msg = Msg::QueryFinished(QueryFinished {
-            query_id,
-            worker_id: task.worker_id.to_string(),
-            exec_time_ms: task.exec_time_ms(),
-            result: Some(query_finished::Result::Timeout(())),
-        });
-        self.send_metrics(metrics_msg).await;
+        if self.send_metrics {
+            let metrics_msg = Msg::QueryFinished(QueryFinished {
+                query_id,
+                worker_id: task.worker_id.to_string(),
+                exec_time_ms: task.exec_time_ms(),
+                result: Some(query_finished::Result::Timeout(())),
+            });
+            self.send_metrics(metrics_msg).await;
+        }
 
         task.timeout();
         Ok(())
@@ -329,13 +335,15 @@ impl QueryHandler {
         );
         let (query_id, task) = task_entry.remove_entry();
 
-        let metrics_msg = Msg::QueryFinished(QueryFinished {
-            query_id,
-            worker_id: peer_id.to_string(),
-            exec_time_ms: task.exec_time_ms(),
-            result: Some((&result).into()),
-        });
-        self.send_metrics(metrics_msg).await;
+        if self.send_metrics {
+            let metrics_msg = Msg::QueryFinished(QueryFinished {
+                query_id,
+                worker_id: peer_id.to_string(),
+                exec_time_ms: task.exec_time_ms(),
+                result: Some((&result).into()),
+            });
+            self.send_metrics(metrics_msg).await;
+        }
 
         task.result_received(result);
         Ok(())
@@ -421,6 +429,7 @@ pub async fn get_client(
         tasks: Default::default(),
         network_state: network_state.clone(),
         router_id: config.router_id.0,
+        send_metrics: config.send_metrics,
     };
     tokio::spawn(handler.run());
 

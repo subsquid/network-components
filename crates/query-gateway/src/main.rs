@@ -1,9 +1,9 @@
 use crate::config::Config;
 use clap::Parser;
-use grpc_libp2p::transport::P2PTransportBuilder;
-use grpc_libp2p::util::{get_keypair, BootNode};
 use simple_logger::SimpleLogger;
 use std::path::PathBuf;
+use subsquid_network_transport::transport::P2PTransportBuilder;
+use subsquid_network_transport::util::{get_keypair, BootNode};
 
 mod client;
 mod config;

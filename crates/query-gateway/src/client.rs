@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 
-use grpc_libp2p::{MsgContent, PeerId};
+use subsquid_network_transport::{MsgContent, PeerId};
 
 use crate::config::{Config, DatasetId};
 use router_controller::messages::{
@@ -16,7 +16,7 @@ use router_controller::messages::{
     QueryResult as QueryResultMsg, QuerySubmitted, RangeSet,
 };
 
-type Message = grpc_libp2p::Message<Box<[u8]>>;
+type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
 const WORKER_INACTIVE_THRESHOLD: Duration = Duration::from_secs(30);
 const WORKER_GREYLIST_TIME: Duration = Duration::from_secs(600);

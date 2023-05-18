@@ -1,11 +1,11 @@
-# Query client
+# Query gateway
 
-This is an application that connects to the worker network and executes queries.
+This is an application that connects to the worker network and executes queries submitted via HTTP.
 
 ## Running
 
 ```
-Usage: query-client [OPTIONS]
+Usage: query-gateway [OPTIONS]
 
 Options:
   -k, --key <KEY>                  Path to libp2p key file

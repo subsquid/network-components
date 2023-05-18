@@ -19,9 +19,8 @@ impl From<String> for DatasetId {
 }
 
 /// This struct exists because `PeerId` doesn't implement `Deserialize`
-/// TODO: Should be moved to `grpc_libp2p` crate
 #[derive(Debug, Clone, Copy)]
-pub struct PeerId(pub grpc_libp2p::PeerId);
+pub struct PeerId(pub subsquid_network_transport::PeerId);
 
 impl<'de> Deserialize<'de> for PeerId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

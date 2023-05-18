@@ -1,9 +1,6 @@
 mod metrics;
 
 use crate::libp2p_server::metrics::{Metrics, MetricsEvent};
-use grpc_libp2p::transport::P2PTransportBuilder;
-use grpc_libp2p::util::get_keypair;
-use grpc_libp2p::{MsgContent, PeerId};
 use prost::Message as ProstMsg;
 use router_controller::controller::Controller;
 use router_controller::messages::{
@@ -12,12 +9,15 @@ use router_controller::messages::{
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
+use subsquid_network_transport::transport::P2PTransportBuilder;
+use subsquid_network_transport::util::get_keypair;
+use subsquid_network_transport::{MsgContent, PeerId};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::log;
 
-type Message = grpc_libp2p::Message<Box<[u8]>>;
+type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
 pub struct ServerBuilder {
     key_path: Option<PathBuf>,

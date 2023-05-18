@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use router_controller::controller::Controller;
 
@@ -25,7 +25,7 @@ pub fn start(
                 let storage = storages.get_mut(dataset).unwrap();
                 match storage.get_chunks(next_block) {
                     Ok(chunks) => {
-                        info!("found new chunks in {}: {:?}", dataset, chunks);
+                        debug!("found new chunks in {}: {:?}", dataset, chunks);
                         Ok(chunks)
                     }
                     Err(err) => {

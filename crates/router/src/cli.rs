@@ -39,4 +39,29 @@ pub struct Cli {
     /// Scheduling interval (in seconds)
     #[clap(short = 'i', long, default_value = "300", value_name = "N")]
     pub scheduling_interval: u64,
+
+    #[cfg(feature = "p2p")]
+    #[arg(short, long, help = "Path to libp2p key file")]
+    pub key: Option<std::path::PathBuf>,
+
+    #[cfg(feature = "p2p")]
+    #[arg(
+        short,
+        long,
+        help = "Listen addr",
+        default_value = "/ip4/0.0.0.0/tcp/0"
+    )]
+    pub listen: String,
+
+    #[cfg(feature = "p2p")]
+    #[arg(long, help = "Path to save metrics", default_value = "metrics.jsonl")]
+    pub metrics: std::path::PathBuf,
+
+    #[cfg(feature = "worker-registry")]
+    #[arg(
+        long,
+        help = "Blockchain RPC URL",
+        default_value = "http://127.0.0.1:8545/"
+    )]
+    pub rpc_url: String,
 }

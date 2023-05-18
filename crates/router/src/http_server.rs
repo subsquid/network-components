@@ -13,14 +13,15 @@ use axum::{Json, Router};
 use prometheus::{gather, Encoder, TextEncoder};
 use tracing::info;
 
-use router_controller::controller::{Controller, PingMessage, WorkerState};
+use router_controller::controller::Controller;
+use router_controller::messages::{Ping, WorkerState};
 
-use crate::middleware::logging;
+mod middleware;
 
 #[axum_macros::debug_handler]
 async fn ping(
-    Json(msg): Json<PingMessage>,
     Extension(controller): Extension<Arc<Controller>>,
+    Json(msg): Json<Ping>,
 ) -> Json<WorkerState> {
     let worker_id = msg.worker_id.clone();
     let worker_url = msg.worker_url.clone();
@@ -41,7 +42,7 @@ async fn get_worker(
     Extension(controller): Extension<Arc<Controller>>,
 ) -> Response {
     match controller.get_worker(&dataset, start_block) {
-        Some(url) => url.into_response(),
+        Some((_, url, encoded_dataset)) => format!("{url}/{encoded_dataset}").into_response(),
         None => (
             StatusCode::SERVICE_UNAVAILABLE,
             format!(
@@ -97,7 +98,7 @@ impl Server {
             .route("/network/:dataset/:start_block/worker", get(get_worker))
             .route("/network/:dataset/height", get(get_height))
             .route("/metrics", get(get_metrics))
-            .layer(from_fn(logging))
+            .layer(from_fn(middleware::logging))
             .layer(Extension(self.controller.clone()));
         let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
         axum::Server::bind(&addr)

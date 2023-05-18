@@ -1,0 +1,112 @@
+syntax = "proto3";
+package messages;
+import "google/protobuf/empty.proto";
+
+message Envelope {
+  oneof msg {
+    // router <-> worker
+    Ping ping = 1;
+    WorkerState state_update = 2;
+
+    // router <-> client
+    GetWorker get_worker = 3;
+    GetWorkerResult get_worker_result = 4;
+
+    // client <-> worker
+    Query query = 5;
+    QueryResult query_result = 6;
+    RangeSet dataset_state = 7;
+
+    // metrics
+    QuerySubmitted query_submitted = 8;
+    QueryFinished query_finished = 9;
+    QueryExecuted query_executed = 10;
+  }
+}
+
+message Range {
+  uint32 begin = 1;
+  uint32 end = 2;
+}
+
+message RangeSet {
+  repeated Range ranges = 1;
+}
+
+message WorkerState {
+  map<string, RangeSet> datasets = 1;
+}
+
+message Ping {
+  string worker_id = 1;
+  string worker_url = 2;
+  WorkerState state = 3;
+  bool pause = 4;
+}
+
+message GetWorker {
+  string query_id = 1;
+  string dataset = 2;
+  uint32 start_block = 3;
+}
+
+message GetWorkerResult {
+  string query_id = 1;
+  oneof result {
+    string worker_id = 2;
+    string error = 3;
+  }
+}
+
+message Query {
+  string query_id = 1;
+  string dataset = 2;
+  string query = 3;
+}
+
+message QueryResult {
+  string query_id = 1;
+  oneof result {
+    bytes ok_data = 2;
+    string bad_request = 3;
+    string server_error = 4;
+  }
+}
+
+message QuerySubmitted {
+  Query query = 1;
+  string worker_id = 2;
+}
+
+message QueryFinished {
+  string query_id = 1;
+  string worker_id = 2;
+  uint32 exec_time_ms = 3;
+  oneof result {
+    SizeAndHash ok = 4;
+    string bad_request = 5;
+    string server_error = 6;
+    google.protobuf.Empty timeout = 7;
+  }
+}
+
+message QueryExecuted {
+  Query query = 1;
+  string client_id = 2;
+  uint32 exec_time_ms = 3;
+  oneof result {
+    InputAndOutput ok = 4;
+    string bad_request = 5;
+    string server_error = 6;
+  }
+}
+
+message InputAndOutput {
+  SizeAndHash input = 1;
+  SizeAndHash output = 2;
+}
+
+message SizeAndHash {
+  uint32 size = 1;
+  bytes sha3_256 = 2;
+}

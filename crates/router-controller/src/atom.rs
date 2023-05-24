@@ -2,23 +2,23 @@
 // Attempt to develop analog of
 // https://docs.oracle.com/javase/8/docs/api/java/util/concurrent/atomic/AtomicReference.html
 //
+use parking_lot::RwLock;
+use std::fmt::{Debug, Formatter};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use parking_lot::RwLock;
-
 
 pub struct Atom<T: ?Sized> {
-    inner: RwLock<Arc<T>>
+    inner: RwLock<Arc<T>>,
 }
-
 
 unsafe impl<T: ?Sized + Send> Send for Atom<T> {}
 unsafe impl<T: ?Sized + Send> Sync for Atom<T> {}
 
-
-impl <T: ?Sized> Atom<T> {
+impl<T: ?Sized> Atom<T> {
     pub fn new(val: Arc<T>) -> Self {
-        Atom { inner: RwLock::new(val) }
+        Atom {
+            inner: RwLock::new(val),
+        }
     }
 
     pub fn get(&self) -> Arc<T> {
@@ -47,9 +47,14 @@ impl <T: ?Sized> Atom<T> {
     }
 }
 
-
-impl <T: ?Sized> Clone for Atom<T> {
+impl<T: ?Sized> Clone for Atom<T> {
     fn clone(&self) -> Self {
         Atom::new(self.get())
+    }
+}
+
+impl<T: Debug> Debug for Atom<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.get().fmt(f)
     }
 }

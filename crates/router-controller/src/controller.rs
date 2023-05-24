@@ -17,13 +17,14 @@ pub type WorkerId = String;
 pub type Url = String;
 pub type Dataset = Url;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Worker {
     desired_state: Arc<WorkerState>,
     info: Arc<Atom<WorkerInfo>>,
     is_managed: Atom<bool>,
 }
 
+#[derive(Clone, Debug)]
 struct WorkerInfo {
     id: WorkerId,
     url: Url,
@@ -36,6 +37,7 @@ type Wi = usize;
 type Ui = usize;
 type Assignment = Vec<HashSet<Ui>>;
 
+#[derive(Clone, Debug)]
 struct Schedule {
     datasets: HashMap<Dataset, Vec<DataChunk>>,
     assignment: HashMap<Dataset, Assignment>,
@@ -190,10 +192,14 @@ impl Controller {
             .filter(|w| *w.is_managed.get())
             .cloned()
             .collect();
-        if managed_workers.len() < self.managed_workers.read().len() {
-            self.workers.set(Arc::new(workers));
-            return;
-        }
+
+        // FIXME: Temporarily disabled for the decentralized worker network to work properly.
+        //        It needs a separate scheduling algorithm though.
+        // if managed_workers.len() < self.managed_workers.read().len() {
+        //     log::info!("Exit");
+        //     self.workers.set(Arc::new(workers));
+        //     return;
+        // }
 
         let mut desired_state: Vec<WorkerState> = std::iter::repeat_with(Default::default)
             .take(managed_workers.len())

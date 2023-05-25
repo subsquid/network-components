@@ -2,10 +2,11 @@ use async_trait::async_trait;
 use ethers::prelude::{abigen, ContractError, Http, JsonRpcClient, Middleware};
 use ethers::providers::{Provider, Ws};
 use ethers::types::{Address, U256};
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use lazy_static::lazy_static;
 use libp2p::PeerId;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 pub use tokio::sync::mpsc::Receiver;
@@ -85,7 +86,7 @@ pub trait Client: Send + Sync {
     async fn active_workers(&self) -> Result<Vec<Worker>, ClientError>;
 
     /// Get a stream which yields an updated set of active workers after every change
-    async fn active_workers_stream(&self) -> Receiver<Vec<Worker>>;
+    async fn active_workers_stream(&self) -> Result<Receiver<Vec<Worker>>, ClientError>;
 }
 
 pub async fn get_client(rpc_url: &str) -> Result<Box<dyn Client>, ClientError> {
@@ -135,63 +136,85 @@ impl<T: RawClient> Client for EthersClient<T> {
             .collect()
     }
 
-    async fn active_workers_stream(&self) -> mpsc::Receiver<Vec<Worker>> {
+    async fn active_workers_stream(&self) -> Result<Receiver<Vec<Worker>>, ClientError> {
+        let workers = self.active_workers().await?;
         let client = (*self).clone();
         let (tx, rx) = mpsc::channel(100);
-        let updater = WorkerSetUpdater::new(client, tx);
+        let updater = WorkerSetUpdater::new(client, workers, tx);
         tokio::spawn(updater.run());
-        rx
+        Ok(rx)
     }
 }
 
 struct WorkerSetUpdater<T: RawClient> {
     client: EthersClient<T>,
     result_sender: mpsc::Sender<Vec<Worker>>,
-    last_worker_set: Option<Vec<Worker>>,
+    last_worker_set: Vec<Worker>,
 }
 
 impl<T: RawClient> WorkerSetUpdater<T> {
-    pub fn new(client: EthersClient<T>, result_sender: mpsc::Sender<Vec<Worker>>) -> Self {
+    pub fn new(
+        client: EthersClient<T>,
+        workers: Vec<Worker>,
+        result_sender: mpsc::Sender<Vec<Worker>>,
+    ) -> Self {
         Self {
             client,
             result_sender,
-            last_worker_set: None,
+            last_worker_set: workers,
         }
     }
 
     pub async fn run(mut self) {
-        let raw_client = self.client.worker_registration.client();
-        let mut block_stream = match raw_client.watch_blocks().await {
-            Ok(stream) => stream,
-            Err(e) => return log::error!("Cannot get blocks: {e:?}"),
-        };
-
         // Send active worker set immediately and then check for updates every new block
+        if self
+            .result_sender
+            .send(self.last_worker_set.clone())
+            .await
+            .is_err()
+        {
+            return; // Stream receiver was dropped
+        }
+
+        let raw_client = self.client.worker_registration.client();
+        let mut block_stream = get_block_stream(&raw_client).await;
+
         loop {
+            if block_stream.next().await.is_none() {
+                // Block stream ended -> reconnect
+                block_stream = get_block_stream(&raw_client).await;
+            }
             if self.next_update().await.is_err() {
                 break; // Stream receiver was dropped
-            }
-            if block_stream.next().await.is_none() {
-                break; // Block stream ended -> connection error(?)
             }
         }
     }
 
     async fn next_update(&mut self) -> Result<(), mpsc::error::SendError<Vec<Worker>>> {
-        match (
-            self.client.active_workers().await,
-            &mut self.last_worker_set,
-        ) {
-            (Err(e), _) => log::error!("Error getting workers: {e:?}"),
-            (Ok(new_workers), Some(old_workers)) if &new_workers == old_workers => {
+        match self.client.active_workers().await {
+            Err(e) => log::error!("Error getting workers: {e:?}"),
+            Ok(new_workers) if new_workers == self.last_worker_set => {
                 log::debug!("Active worker set unchanged")
             }
-            (Ok(new_workers), last_worker_set) => {
+            Ok(new_workers) => {
                 log::debug!("New set of active workers");
-                *last_worker_set = Some(new_workers.clone());
+                self.last_worker_set = new_workers.clone();
                 self.result_sender.send(new_workers).await?;
             }
         }
         Ok(())
+    }
+}
+
+async fn get_block_stream(raw_client: &impl Middleware) -> impl Stream + '_ {
+    loop {
+        match raw_client.watch_blocks().await {
+            Ok(stream) => return stream,
+            Err(e) => {
+                // Wait a bit and try to connect again
+                log::error!("Cannot get blocks: {e:?}");
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        }
     }
 }

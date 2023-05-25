@@ -75,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
     let worker_updates = contract_client::get_client(&args.rpc_url)
         .await?
         .active_workers_stream()
-        .await;
+        .await?;
 
     // Start query client
     let query_client = client::get_client(config, msg_receiver, msg_sender, worker_updates).await?;

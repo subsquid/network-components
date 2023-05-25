@@ -1,4 +1,5 @@
 use clap::Parser;
+use subsquid_network_transport::util::BootNode;
 
 fn parse_dataset(s: &str) -> Result<(String, String), String> {
     let pos = s
@@ -52,6 +53,14 @@ pub struct Cli {
         default_value = "/ip4/0.0.0.0/tcp/0"
     )]
     pub listen: String,
+
+    #[cfg(feature = "p2p")]
+    #[arg(long, help = "Connect to boot node '<peer_id> <address>'.")]
+    pub boot_nodes: Vec<BootNode>,
+
+    #[cfg(feature = "p2p")]
+    #[arg(long, help = "Bootstrap kademlia. Makes node discoverable by others.")]
+    pub bootstrap: bool,
 
     #[cfg(feature = "p2p")]
     #[arg(long, help = "Path to save metrics", default_value = "metrics.jsonl")]

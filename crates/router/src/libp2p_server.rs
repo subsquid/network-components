@@ -10,7 +10,7 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 use subsquid_network_transport::transport::P2PTransportBuilder;
-use subsquid_network_transport::util::get_keypair;
+use subsquid_network_transport::util::{get_keypair, BootNode};
 use subsquid_network_transport::{MsgContent, PeerId};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
@@ -19,19 +19,18 @@ use tracing::log;
 
 type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
+#[derive(Default)]
 pub struct ServerBuilder {
     key_path: Option<PathBuf>,
     listen_addr: Option<String>,
     metrics_path: Option<PathBuf>,
+    boot_nodes: Vec<BootNode>,
+    bootstrap: bool,
 }
 
 impl ServerBuilder {
     pub fn new() -> Self {
-        Self {
-            key_path: None,
-            listen_addr: None,
-            metrics_path: None,
-        }
+        Default::default()
     }
 
     pub fn key_path(mut self, key_path: Option<PathBuf>) -> Self {
@@ -41,6 +40,16 @@ impl ServerBuilder {
 
     pub fn listen_addr(mut self, listen_addr: String) -> Self {
         self.listen_addr = Some(listen_addr);
+        self
+    }
+
+    pub fn boot_nodes(mut self, boot_nodes: Vec<BootNode>) -> Self {
+        self.boot_nodes = boot_nodes;
+        self
+    }
+
+    pub fn bootstrap(mut self, bootstrap: bool) -> Self {
+        self.bootstrap = bootstrap;
         self
     }
 
@@ -58,7 +67,8 @@ impl ServerBuilder {
             transport_builder.listen_on(std::iter::once(listen_addr));
         }
 
-        transport_builder.bootstrap(false);
+        transport_builder.boot_nodes(self.boot_nodes);
+        transport_builder.bootstrap(self.bootstrap);
 
         let metrics_path = self.metrics_path.unwrap_or("metrics.jsonl".into());
         let metrics_file = OpenOptions::new()

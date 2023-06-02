@@ -1,0 +1,5 @@
+schedule_interval_sec: 180
+replication_factor: 2
+s3_endpoint: 'https://s3.filebase.com'
+buckets:
+  - 'etha-mainnet'

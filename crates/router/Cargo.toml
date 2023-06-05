@@ -3,17 +3,12 @@ name = "router"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[features]
-http = ["axum", "axum-macros"]
-p2p = ["prost", "serde", "serde_json", "subsquid-network-transport"]
-worker-registry = ["contract-client"]
-
 [dependencies]
 anyhow = "1"
 aws-sdk-s3 = "0.21.0"
 aws-config = "0.51.0"
+axum = "0.6"
+axum-macros = "0.3"
 clap = { version = "4.0.18", features = ["derive"] }
 tokio = { version = "1.21.2", features = ["full"] }
 url = "2.3.1"
@@ -24,16 +19,3 @@ lazy_static = "1.4.0"
 prometheus = { version = "0.13.3", features = ["process"] }
 
 router-controller = { version = "0.1", path = "../router-controller" }
-
-# Http tranport
-axum = { version = "0.6", optional = true }
-axum-macros = { version = "0.3", optional = true }
-
-# Libp2p transport
-prost = { version = "0.11", optional = true }
-serde = { version = "1", features = ["derive"], optional = true }
-serde_json = { version = "1", optional = true }
-subsquid-network-transport = { version = "0.1", path = "../../../subsquid-network/transport", optional = true }
-
-# Worker registry
-contract-client = { version = "0.1", path = "../contract-client", optional = true }

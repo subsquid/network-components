@@ -1,31 +1,22 @@
-use clap::Parser;
-use cli::Cli;
-use dataset::{S3Storage, Storage};
-use router_controller::controller::ControllerBuilder;
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
+
+use clap::Parser;
 use url::Url;
+
+use cli::Cli;
+use dataset::{S3Storage, Storage};
+use router_controller::controller::ControllerBuilder;
 
 mod cli;
 mod dataset;
 mod error;
-#[cfg(feature = "http")]
 mod http_server;
-#[cfg(feature = "p2p")]
-mod libp2p_server;
 mod logger;
 mod metrics;
 mod scheduler;
-#[cfg(feature = "worker-registry")]
-mod worker_registry;
-
-#[cfg(any(
-    not(any(feature = "http", feature = "p2p")),
-    all(feature = "http", feature = "p2p")
-))]
-compile_error!("Exactly one transport should be selected ('http' or 'p2p' feature)");
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -50,22 +41,7 @@ async fn main() -> anyhow::Result<()> {
     let scheduling_interval = Duration::from_secs(args.scheduling_interval);
     scheduler::start(controller.clone(), storages, scheduling_interval);
 
-    #[cfg(feature = "worker-registry")]
-    worker_registry::start(controller.clone(), &args.rpc_url).await?;
-
-    #[cfg(feature = "http")]
     http_server::Server::new(controller).run().await;
-    #[cfg(feature = "p2p")]
-    libp2p_server::ServerBuilder::new()
-        .key_path(args.key)
-        .listen_addr(args.listen)
-        .boot_nodes(args.boot_nodes)
-        .bootstrap(args.bootstrap)
-        .metrics_path(args.metrics)
-        .build(controller)
-        .await?
-        .run()
-        .await;
 
     Ok(())
 }

@@ -204,3 +204,74 @@ pub async fn get_incoming_chunks(
     }
     Ok(receiver)
 }
+
+#[cfg(test)]
+mod tests {
+    use subsquid_network_transport::PeerId;
+
+    use router_controller::range::RangeSet;
+
+    use super::*;
+
+    #[test]
+    fn test_chunk() {
+        let chunk = DataChunk {
+            dataset_url: "s3://squidnet".to_string(),
+            block_range: Range::new(0, 1000),
+        };
+        assert_eq!(chunk.to_string(), "s3://squidnet/0-1000");
+        assert_eq!(
+            chunk.id(),
+            ChunkId([
+                0xcd, 0x62, 0xa3, 0xf1, 0xf2, 0x48, 0x5b, 0x3d, 0x88, 0x0d, 0x77, 0x03, 0x75, 0xe4,
+                0x52, 0x3e, 0x63, 0x8f, 0x08, 0xdf, 0xf0, 0x98, 0x89, 0x9c, 0xbf, 0xbc, 0x02, 0xf3,
+                0x52, 0xea, 0x53, 0x90
+            ])
+        );
+    }
+
+    #[test]
+    fn test_distance() {
+        let peer_id: PeerId = "12D3KooWQER7HEpwsvqSzqzaiV36d3Bn6DZrnwEunnzS76pgZkMU"
+            .parse()
+            .unwrap();
+        let chunk = DataChunk {
+            dataset_url: "s3://squidnet".to_string(),
+            block_range: Range::new(0, 1000),
+        };
+        assert_eq!(
+            chunk.id().distance(&peer_id),
+            [
+                0x1b, 0x4e, 0x42, 0x76, 0x72, 0x9c, 0x4b, 0xab, 0x9f, 0x86, 0x7c, 0xc3, 0xb4, 0xcd,
+                0xe6, 0x01, 0x05, 0x18, 0x16, 0x62, 0x8b, 0x1d, 0x00, 0x25, 0x41, 0x2f, 0x8a, 0xe0,
+                0xed, 0xa9, 0xc2, 0x2f
+            ]
+        )
+    }
+
+    #[test]
+    #[rustfmt::skip]
+    fn test_worker_state() {
+        let chunks = vec![
+            DataChunk {
+                dataset_url: "s3://squidnet".to_string(),
+                block_range: Range::new(0, 1000),
+            },
+            DataChunk {
+                dataset_url: "s3://squidnet".to_string(),
+                block_range: Range::new(500, 1500),
+            },
+            DataChunk {
+                dataset_url: "s3://pepenet".to_string(),
+                block_range: Range::new(1234, 5678),
+            },
+        ];
+
+        assert_eq!(chunks_to_worker_state(chunks), WorkerState {
+            datasets: vec![
+                ("s3://squidnet".to_string(), RangeSet { ranges: vec![Range::new(0, 1500)] }),
+                ("s3://pepenet".to_string(), RangeSet { ranges: vec![Range::new(1234, 5678)] }),
+            ].into_iter().collect()
+        })
+    }
+}

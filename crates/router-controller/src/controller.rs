@@ -193,13 +193,10 @@ impl Controller {
             .cloned()
             .collect();
 
-        // FIXME: Temporarily disabled for the decentralized worker network to work properly.
-        //        It needs a separate scheduling algorithm though.
-        // if managed_workers.len() < self.managed_workers.read().len() {
-        //     log::info!("Exit");
-        //     self.workers.set(Arc::new(workers));
-        //     return;
-        // }
+        if managed_workers.len() < self.managed_workers.read().len() {
+            self.workers.set(Arc::new(workers));
+            return;
+        }
 
         let mut desired_state: Vec<WorkerState> = std::iter::repeat_with(Default::default)
             .take(managed_workers.len())

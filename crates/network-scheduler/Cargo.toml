@@ -1,0 +1,23 @@
+[package]
+name = "network-scheduler"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+aws-config = "0.55"
+aws-sdk-s3 = "0.28"
+clap = { version = "4.0.18", features = ["derive"] }
+hex = "0.4"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha3 = "0.10"
+simple_logger = "4"
+tokio = { version = "1.21.2", features = ["full"] }
+
+contract-client = { version = "0.1", path = "../contract-client" }
+router-controller = { version = "0.1", path = "../router-controller" }
+subsquid-network-transport = { version = "0.1", path = "../../../subsquid-network/transport" }

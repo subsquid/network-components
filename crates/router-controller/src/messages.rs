@@ -1,6 +1,8 @@
 use sha3::{Digest, Sha3_256};
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
+
+pub use prost::Message as ProstMsg;
 include!(concat!(env!("OUT_DIR"), "/messages.rs"));
 
 impl Deref for WorkerState {

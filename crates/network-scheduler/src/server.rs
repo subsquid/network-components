@@ -1,12 +1,3 @@
-use crate::chunks::DataChunk;
-
-use crate::metrics::{Metrics, MetricsEvent};
-use crate::scheduler::Scheduler;
-use crate::worker_registry::WorkerRegistry;
-use contract_client::Worker;
-use router_controller::messages::envelope::Msg;
-use router_controller::messages::{Envelope, ProstMsg};
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,12 +8,21 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
+use contract_client::Worker;
+use router_controller::messages::envelope::Msg;
+use router_controller::messages::{Envelope, ProstMsg};
+
+use crate::metrics::{Metrics, MetricsEvent};
+use crate::scheduler::Scheduler;
+use crate::scheduling_unit::SchedulingUnit;
+use crate::worker_registry::WorkerRegistry;
+
 type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
 pub struct Server {
     incoming_messages: Receiver<Message>,
     worker_updates: Receiver<Vec<Worker>>,
-    incoming_chunks: Receiver<DataChunk>,
+    incoming_units: Receiver<SchedulingUnit>,
     message_sender: Sender<Message>,
     worker_registry: Arc<RwLock<WorkerRegistry>>,
     scheduler: Arc<RwLock<Scheduler>>,
@@ -34,7 +34,7 @@ impl Server {
     pub fn new(
         incoming_messages: Receiver<Message>,
         worker_updates: Receiver<Vec<Worker>>,
-        incoming_chunks: Receiver<DataChunk>,
+        incoming_units: Receiver<SchedulingUnit>,
         message_sender: Sender<Message>,
         schedule_interval: Duration,
         replication_factor: usize,
@@ -45,7 +45,7 @@ impl Server {
         Self {
             incoming_messages,
             worker_updates,
-            incoming_chunks,
+            incoming_units,
             message_sender,
             worker_registry,
             scheduler,
@@ -61,7 +61,7 @@ impl Server {
             tokio::select! {
                 Some(msg) = self.incoming_messages.recv() => self.handle_message(msg).await,
                 Some(workers) = self.worker_updates.recv() => self.update_workers(workers).await,
-                Some(chunk) = self.incoming_chunks.recv() => self.new_chunk(chunk).await,
+                Some(unit) = self.incoming_units.recv() => self.new_unit(unit).await,
                 else => break
             }
         }
@@ -115,8 +115,8 @@ impl Server {
             .await;
     }
 
-    async fn new_chunk(&self, chunk: DataChunk) {
-        self.scheduler.write().await.new_chunk(chunk)
+    async fn new_unit(&self, unit: SchedulingUnit) {
+        self.scheduler.write().await.new_unit(unit)
     }
 
     async fn send_msg(&mut self, peer_id: PeerId, msg: Msg) {

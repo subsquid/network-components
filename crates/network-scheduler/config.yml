@@ -1,5 +1,6 @@
-schedule_interval_sec: 180
+schedule_interval_sec: 300
 replication_factor: 2
+scheduling_unit_size: 10
 s3_endpoint: 'https://s3.filebase.com'
 buckets:
   - 'etha-mainnet'

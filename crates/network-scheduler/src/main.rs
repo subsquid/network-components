@@ -13,6 +13,7 @@ mod chunks;
 mod cli;
 mod metrics;
 mod scheduler;
+mod scheduling_unit;
 mod server;
 mod worker_registry;
 
@@ -48,13 +49,18 @@ async fn main() -> anyhow::Result<()> {
     let client = contract_client::get_client(&args.rpc_url).await?;
     let worker_updates = client.active_workers_stream().await?;
 
-    // Get data chunks
-    let incoming_chunks = chunks::get_incoming_chunks(config.s3_endpoint, config.buckets).await?;
+    // Get scheduling units
+    let incoming_units = chunks::get_incoming_units(
+        config.s3_endpoint,
+        config.buckets,
+        config.scheduling_unit_size,
+    )
+    .await?;
 
     Server::new(
         incoming_messages,
         worker_updates,
-        incoming_chunks,
+        incoming_units,
         message_sender,
         schedule_interval,
         config.replication_factor,

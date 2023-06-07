@@ -45,25 +45,30 @@ impl RangeSet {
     }
 }
 
-impl From<Vec<Range>> for RangeSet {
-    fn from(mut ranges: Vec<Range>) -> Self {
-        if ranges.is_empty() {
-            return RangeSet::empty();
-        }
-        ranges.sort();
+impl<T: IntoIterator<Item = Range>> From<T> for RangeSet {
+    fn from(iter: T) -> Self {
+        let mut range_set = RangeSet::empty();
+        range_set.extend(iter);
+        range_set
+    }
+}
+
+impl Extend<Range> for RangeSet {
+    fn extend<T: IntoIterator<Item = Range>>(&mut self, iter: T) {
+        self.ranges.extend(iter);
+        self.ranges.sort();
         let mut pi = 0;
-        for i in 1..ranges.len() {
-            let c = ranges[i];
-            let p = ranges[pi];
+        for i in 1..self.ranges.len() {
+            let c = self.ranges[i];
+            let p = self.ranges[pi];
             if c.begin > p.end + 1 {
                 pi += 1;
-                ranges[pi] = c;
+                self.ranges[pi] = c;
             } else {
-                ranges[pi] = Range::new(p.begin, max(c.end, p.end));
+                self.ranges[pi] = Range::new(p.begin, max(c.end, p.end));
             }
         }
-        ranges.truncate(pi + 1);
-        RangeSet { ranges }
+        self.ranges.truncate(pi + 1);
     }
 }
 

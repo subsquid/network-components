@@ -9,12 +9,13 @@ use tokio::fs::OpenOptions;
 use crate::cli::Cli;
 use crate::server::Server;
 
-mod chunks;
 mod cli;
+mod data_chunk;
 mod metrics;
 mod scheduler;
 mod scheduling_unit;
 mod server;
+mod storage;
 mod worker_registry;
 
 #[tokio::main]
@@ -50,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     let worker_updates = client.active_workers_stream().await?;
 
     // Get scheduling units
-    let incoming_units = chunks::get_incoming_units(
+    let incoming_units = storage::get_incoming_units(
         config.s3_endpoint,
         config.buckets,
         config.scheduling_unit_size,

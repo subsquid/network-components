@@ -1,7 +1,7 @@
 use nonempty::NonEmpty;
 use tokio::sync::mpsc::{Receiver, Sender};
 
-use crate::chunks::{ChunkId, DataChunk};
+use crate::data_chunk::{ChunkId, DataChunk};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchedulingUnit {
@@ -21,7 +21,7 @@ impl SchedulingUnit {
     }
 
     pub fn id(&self) -> UnitId {
-        // ID of the unit is just ID of the first chunk. This way, when a incomplete unit is filled
+        // ID of the unit is just ID of the first chunk. This way, when an incomplete unit is filled
         // later, it will still have the same ID.
         self.chunks.first().id()
     }

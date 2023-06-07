@@ -4,7 +4,7 @@ use subsquid_network_transport::PeerId;
 
 use router_controller::messages::WorkerState;
 
-use crate::chunks::chunks_to_worker_state;
+use crate::data_chunk::chunks_to_worker_state;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 
 pub struct Scheduler {

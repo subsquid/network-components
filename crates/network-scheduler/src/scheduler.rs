@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use subsquid_network_transport::PeerId;
-
 use router_controller::messages::WorkerState;
+use subsquid_network_transport::PeerId;
 
 use crate::data_chunk::chunks_to_worker_state;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
@@ -32,12 +31,12 @@ impl Scheduler {
         }
     }
 
-    pub fn get_worker_state(&self, worker_id: &PeerId) -> WorkerState {
+    pub fn get_worker_state(&self, worker_id: &PeerId) -> Option<WorkerState> {
         let chunks = match self.worker_states.get(worker_id) {
-            None => return Default::default(),
+            None => return None,
             Some(units) => units.iter().map(|unit_id| self.get_unit(unit_id)).flatten(),
         };
-        chunks_to_worker_state(chunks)
+        Some(chunks_to_worker_state(chunks))
     }
 
     fn get_unit(&self, unit_id: &UnitId) -> SchedulingUnit {

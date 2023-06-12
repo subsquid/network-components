@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use subsquid_network_transport::{MsgContent, PeerId};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -11,6 +10,7 @@ use tokio::task::JoinHandle;
 use contract_client::Worker;
 use router_controller::messages::envelope::Msg;
 use router_controller::messages::{Envelope, ProstMsg};
+use subsquid_network_transport::{MsgContent, PeerId};
 
 use crate::metrics::{Metrics, MetricsEvent};
 use crate::scheduler::Scheduler;
@@ -90,7 +90,9 @@ impl Server {
     async fn ping(&mut self, peer_id: PeerId) {
         self.worker_registry.write().await.ping(peer_id).await;
         let worker_state = self.scheduler.read().await.get_worker_state(&peer_id);
-        self.send_msg(peer_id, Msg::StateUpdate(worker_state)).await
+        if let Some(worker_state) = worker_state {
+            self.send_msg(peer_id, Msg::StateUpdate(worker_state)).await
+        }
     }
 
     async fn save_metrics(&mut self, peer_id: PeerId, msg: impl Into<MetricsEvent>) {

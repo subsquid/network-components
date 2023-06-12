@@ -36,8 +36,8 @@ impl Display for ChunkId {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DataChunk {
-    dataset_url: String,
-    block_range: Range,
+    pub dataset_url: String,
+    pub block_range: Range,
 }
 
 impl Display for DataChunk {

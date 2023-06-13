@@ -21,8 +21,8 @@ impl ChunkId {
         result[..num_bytes].copy_from_slice(&peer_id[(peer_id.len() - num_bytes)..]);
 
         // Compute XOR with chunk ID bytes
-        for i in 0..32 {
-            result[i] ^= self.0[i];
+        for (i, result_byte) in result.iter_mut().enumerate() {
+            *result_byte ^= self.0[i];
         }
         result
     }

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
+
 use subsquid_network_transport::PeerId;
 use tokio::time::Instant;
 
@@ -22,7 +23,7 @@ impl WorkerRegistry {
     pub async fn update_workers(&mut self, new_workers: impl IntoIterator<Item = PeerId>) {
         self.workers = new_workers.into_iter().collect();
         log::info!("Registered workers set updated: {:?}", self.workers);
-        self.pings.retain(|id, _| self.workers.contains(&id));
+        self.pings.retain(|id, _| self.workers.contains(id));
     }
 
     pub async fn active_workers(&self) -> Vec<PeerId> {

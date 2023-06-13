@@ -1,6 +1,8 @@
-use router_controller::messages::{QueryExecuted, QueryFinished, QuerySubmitted};
-use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+
+use router_controller::messages::{QueryExecuted, QueryFinished, QuerySubmitted};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Metrics {
@@ -32,6 +34,7 @@ impl Metrics {
     }
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event")]
 pub enum MetricsEvent {

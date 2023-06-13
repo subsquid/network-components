@@ -58,7 +58,7 @@ pub fn bundle_chunks(
                 if unit.size() < unit_size {
                     incomplete_unit = Some(unit.clone())
                 }
-                if let Err(_) = unit_sender.send(unit).await {
+                if unit_sender.send(unit).await.is_err() {
                     log::info!("Scheduling unit receiver dropped");
                     return;
                 }

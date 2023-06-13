@@ -91,11 +91,8 @@ impl S3Storage {
 
     async fn list_all_new_chunks(&mut self) -> Vec<DataChunk> {
         let mut result = Vec::new();
-        loop {
-            match self.list_next_chunks().await {
-                Some(chunks) => result.extend(chunks),
-                None => break,
-            }
+        while let Some(chunks) = self.list_next_chunks().await {
+            result.extend(chunks)
         }
         result
     }

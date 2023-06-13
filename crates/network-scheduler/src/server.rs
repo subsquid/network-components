@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use subsquid_network_transport::{MsgContent, PeerId};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -10,7 +11,6 @@ use tokio::task::JoinHandle;
 use contract_client::Worker;
 use router_controller::messages::envelope::Msg;
 use router_controller::messages::{Envelope, ProstMsg};
-use subsquid_network_transport::{MsgContent, PeerId};
 
 use crate::metrics::{Metrics, MetricsEvent};
 use crate::scheduler::Scheduler;
@@ -136,7 +136,7 @@ impl Server {
     fn spawn_scheduling_task(&self) -> JoinHandle<()> {
         let worker_registry = self.worker_registry.clone();
         let scheduler = self.scheduler.clone();
-        let schedule_interval = self.schedule_interval.clone();
+        let schedule_interval = self.schedule_interval;
         tokio::spawn(async move {
             log::info!("Starting scheduling task");
             loop {

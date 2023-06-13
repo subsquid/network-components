@@ -1,20 +1,22 @@
-use contract_client::Worker;
-use prost::Message as ProstMsg;
-use rand::prelude::IteratorRandom;
+use std::cmp::max;
 use std::collections::hash_map::{Entry, OccupiedEntry};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use prost::Message as ProstMsg;
+use rand::prelude::IteratorRandom;
+use subsquid_network_transport::{MsgContent, PeerId};
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 
-use subsquid_network_transport::{MsgContent, PeerId};
-
-use crate::config::{Config, DatasetId};
+use contract_client::Worker;
 use router_controller::messages::{
     envelope::Msg, query_finished, query_result, Envelope, Query as QueryMsg, QueryFinished,
     QueryResult as QueryResultMsg, QuerySubmitted, RangeSet,
 };
+
+use crate::config::{Config, DatasetId};
 
 type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
@@ -90,8 +92,29 @@ impl Task {
 }
 
 #[derive(Default)]
+struct DatasetState {
+    worker_ranges: HashMap<PeerId, RangeSet>,
+    height: u32,
+}
+
+impl DatasetState {
+    pub fn get_workers_with_block(&self, block: u32) -> impl Iterator<Item = PeerId> + '_ {
+        self.worker_ranges
+            .iter()
+            .filter_map(move |(peer_id, range_set)| range_set.has(block).then_some(*peer_id))
+    }
+
+    pub fn update(&mut self, peer_id: PeerId, state: RangeSet) {
+        if let Some(range) = state.ranges.last() {
+            self.height = max(self.height, range.end)
+        }
+        self.worker_ranges.insert(peer_id, state);
+    }
+}
+
+#[derive(Default)]
 struct NetworkState {
-    dataset_states: HashMap<DatasetId, HashMap<PeerId, RangeSet>>,
+    dataset_states: HashMap<DatasetId, DatasetState>,
     last_pings: HashMap<PeerId, Instant>,
     worker_greylist: HashMap<PeerId, Instant>,
     registered_workers: HashSet<PeerId>,
@@ -119,9 +142,8 @@ impl NetworkState {
 
         // Choose a random active worker having the requested start_block
         dataset_state
-            .iter()
-            .filter(|(peer_id, _)| self.worker_is_active(peer_id))
-            .filter_map(|(peer_id, range_set)| range_set.has(start_block).then_some(*peer_id))
+            .get_workers_with_block(start_block)
+            .filter(|peer_id| self.worker_is_active(peer_id))
             .choose(&mut rand::thread_rng())
     }
 
@@ -152,7 +174,7 @@ impl NetworkState {
         self.dataset_states
             .entry(dataset_id)
             .or_default()
-            .insert(peer_id, state);
+            .update(peer_id, state);
     }
 
     fn update_registered_workers(&mut self, workers: Vec<Worker>) {
@@ -161,6 +183,12 @@ impl NetworkState {
 
     pub fn greylist_worker(&mut self, worker_id: PeerId) {
         self.worker_greylist.insert(worker_id, Instant::now());
+    }
+
+    pub fn get_height(&self, dataset_id: &DatasetId) -> Option<u32> {
+        self.dataset_states
+            .get(dataset_id)
+            .map(|state| state.height)
     }
 }
 
@@ -374,6 +402,10 @@ pub struct QueryClient {
 impl QueryClient {
     pub async fn get_dataset_id(&self, dataset: &str) -> Option<DatasetId> {
         self.network_state.read().await.get_dataset_id(dataset)
+    }
+
+    pub async fn get_height(&self, dataset_id: &DatasetId) -> Option<u32> {
+        self.network_state.read().await.get_height(dataset_id)
     }
 
     pub async fn find_worker(&self, dataset_id: &DatasetId, start_block: u32) -> Option<PeerId> {

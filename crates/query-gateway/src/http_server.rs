@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use axum::extract::{Extension, Host, Path, Query};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Router, Server};
 use duration_string::DurationString;
@@ -68,7 +68,7 @@ async fn execute_query(
     Query(QueryTimeout { timeout }): Query<QueryTimeout>,
     Extension(client): Extension<Arc<QueryClient>>,
     query: String, // request body
-) -> impl IntoResponse {
+) -> Response {
     log::info!("Execute query dataset_id={dataset_id} worker_id={worker_id}");
     match client
         .execute_query(dataset_id, query, worker_id, timeout)
@@ -77,14 +77,22 @@ async fn execute_query(
         Err(err) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             err.to_string().into_bytes(),
-        ),
-        Ok(QueryResult::BadRequest(err)) => (StatusCode::BAD_REQUEST, err.into_bytes()),
-        Ok(QueryResult::ServerError(err)) => (StatusCode::INTERNAL_SERVER_ERROR, err.into_bytes()),
+        )
+            .into_response(),
+        Ok(QueryResult::BadRequest(err)) => {
+            (StatusCode::BAD_REQUEST, err.into_bytes()).into_response()
+        }
+        Ok(QueryResult::ServerError(err)) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, err.into_bytes()).into_response()
+        }
         Ok(QueryResult::Timeout) => (
             StatusCode::GATEWAY_TIMEOUT,
             "Query execution timed out".to_string().into_bytes(),
-        ),
-        Ok(QueryResult::Ok(data)) => (StatusCode::OK, data),
+        )
+            .into_response(),
+        Ok(QueryResult::Ok(data)) => {
+            (StatusCode::OK, [("Content-Type", "application/json")], data).into_response()
+        }
     }
 }
 

@@ -10,3 +10,4 @@ base64 = "0.21.0"
 parking_lot = "0.12.1"
 rand = "0.8.5"
 serde = { version = "1.0.147", features = ["derive"] }
+log = "0.4"

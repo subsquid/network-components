@@ -11,7 +11,6 @@ use url::Url;
 
 mod cli;
 mod dataset;
-mod error;
 mod logger;
 mod metrics;
 mod middleware;

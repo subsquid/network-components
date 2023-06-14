@@ -12,7 +12,6 @@ use router_controller::controller::ControllerBuilder;
 
 mod cli;
 mod dataset;
-mod error;
 mod http_server;
 mod logger;
 mod metrics;

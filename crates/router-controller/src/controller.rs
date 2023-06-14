@@ -262,9 +262,11 @@ impl Controller {
                             chunks.last().unwrap()
                         };
                         if next_block > c.first_block() {
-                            panic!("Received overlapping chunks: {} and {}", p, c)
+                            log::error!("Received overlapping chunks: {} and {}", p, c);
+                            return false
                         } else {
-                            panic!("There is a gap between {} and {}", p, c)
+                            log::error!("There is a gap between {} and {}", p, c);
+                            return false
                         }
                     }
                     next_block = c.last_block() + 1

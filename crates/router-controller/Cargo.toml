@@ -12,6 +12,7 @@ prost = "0.11"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 sha3 = "0.10"
+log = "0.4"
 
 [build-dependencies]
 prost-build = "0.11"

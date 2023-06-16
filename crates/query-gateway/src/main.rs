@@ -1,9 +1,12 @@
-use crate::config::Config;
+use std::path::PathBuf;
+
 use clap::Parser;
 use simple_logger::SimpleLogger;
-use std::path::PathBuf;
+
 use subsquid_network_transport::transport::P2PTransportBuilder;
 use subsquid_network_transport::util::{get_keypair, BootNode};
+
+use crate::config::Config;
 
 mod client;
 mod config;
@@ -49,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
     // Init logger and parse arguments and config
     SimpleLogger::new()
         .with_level(log::LevelFilter::Info)
+        .with_module_level("ethers_providers", log::LevelFilter::Warn)
         .env()
         .init()?;
     let args = Cli::parse();

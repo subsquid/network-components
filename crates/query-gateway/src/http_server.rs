@@ -1,12 +1,14 @@
+use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::{Extension, Host, Path, Query};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Router, Server};
 use duration_string::DurationString;
+use flate2::write::GzDecoder;
 use serde::Deserialize;
 
 use crate::client::{QueryClient, QueryResult};
@@ -67,6 +69,7 @@ async fn execute_query(
     Path((dataset_id, PeerId(worker_id))): Path<(DatasetId, PeerId)>,
     Query(QueryTimeout { timeout }): Query<QueryTimeout>,
     Extension(client): Extension<Arc<QueryClient>>,
+    headers: HeaderMap,
     query: String, // request body
 ) -> Response {
     log::info!("Execute query dataset_id={dataset_id} worker_id={worker_id}");
@@ -74,26 +77,54 @@ async fn execute_query(
         .execute_query(dataset_id, query, worker_id, timeout)
         .await
     {
-        Err(err) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            err.to_string().into_bytes(),
-        )
-            .into_response(),
-        Ok(QueryResult::BadRequest(err)) => {
-            (StatusCode::BAD_REQUEST, err.into_bytes()).into_response()
-        }
-        Ok(QueryResult::ServerError(err)) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, err.into_bytes()).into_response()
-        }
-        Ok(QueryResult::Timeout) => (
-            StatusCode::GATEWAY_TIMEOUT,
-            "Query execution timed out".to_string().into_bytes(),
-        )
-            .into_response(),
-        Ok(QueryResult::Ok(data)) => {
-            (StatusCode::OK, [("Content-Type", "application/json")], data).into_response()
+        Err(err) => server_error(err.to_string()),
+        Ok(QueryResult::ServerError(err)) => server_error(err),
+        Ok(QueryResult::BadRequest(err)) => bad_request(err),
+        Ok(QueryResult::Timeout) => query_timeout(),
+        Ok(QueryResult::Ok(data)) => ok_response(data, headers),
+    }
+}
+
+fn server_error(err: String) -> Response {
+    (StatusCode::INTERNAL_SERVER_ERROR, err.into_bytes()).into_response()
+}
+
+fn bad_request(err: String) -> Response {
+    (StatusCode::BAD_REQUEST, err.into_bytes()).into_response()
+}
+
+fn query_timeout() -> Response {
+    let msg = "Query execution timed out".to_string().into_bytes();
+    (StatusCode::GATEWAY_TIMEOUT, msg).into_response()
+}
+
+fn ok_response(mut data: Vec<u8>, request_headers: HeaderMap) -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert("content-type", "application/json".parse().unwrap());
+
+    // If client accepts gzip compressed data, return it as-is. Otherwise, decompress.
+    let gzip_accepted = request_headers
+        .get_all("accept-encoding")
+        .iter()
+        .filter_map(|x| x.to_str().ok())
+        .any(|x| x.contains("gzip"));
+    if gzip_accepted {
+        headers.insert("content-encoding", "gzip".parse().unwrap());
+    } else {
+        data = match decode_gzip(data) {
+            Ok(data) => data,
+            Err(err) => return server_error(err.to_string()),
         }
     }
+
+    (StatusCode::OK, headers, data).into_response()
+}
+
+fn decode_gzip(data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+    let buffer = Vec::new();
+    let mut decoder = GzDecoder::new(buffer);
+    decoder.write_all(data.as_slice())?;
+    Ok(decoder.finish()?)
 }
 
 pub async fn run_server(query_client: QueryClient, addr: &SocketAddr) -> anyhow::Result<()> {

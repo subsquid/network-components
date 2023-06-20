@@ -11,6 +11,8 @@ use duration_string::DurationString;
 use flate2::write::GzDecoder;
 use serde::Deserialize;
 
+use router_controller::messages::OkResult;
+
 use crate::client::{QueryClient, QueryResult};
 use crate::config::{DatasetId, PeerId};
 
@@ -61,27 +63,29 @@ async fn get_worker(
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct QueryTimeout {
+struct ExecuteParams {
     timeout: Option<DurationString>,
+    #[serde(default)]
+    profiling: bool,
 }
 
 async fn execute_query(
     Path((dataset_id, PeerId(worker_id))): Path<(DatasetId, PeerId)>,
-    Query(QueryTimeout { timeout }): Query<QueryTimeout>,
+    Query(ExecuteParams { timeout, profiling }): Query<ExecuteParams>,
     Extension(client): Extension<Arc<QueryClient>>,
     headers: HeaderMap,
     query: String, // request body
 ) -> Response {
     log::info!("Execute query dataset_id={dataset_id} worker_id={worker_id}");
     match client
-        .execute_query(dataset_id, query, worker_id, timeout)
+        .execute_query(dataset_id, query, worker_id, timeout, profiling)
         .await
     {
         Err(err) => server_error(err.to_string()),
         Ok(QueryResult::ServerError(err)) => server_error(err),
         Ok(QueryResult::BadRequest(err)) => bad_request(err),
         Ok(QueryResult::Timeout) => query_timeout(),
-        Ok(QueryResult::Ok(data)) => ok_response(data, headers),
+        Ok(QueryResult::Ok(result)) => ok_response(result, headers),
     }
 }
 
@@ -98,7 +102,13 @@ fn query_timeout() -> Response {
     (StatusCode::GATEWAY_TIMEOUT, msg).into_response()
 }
 
-fn ok_response(mut data: Vec<u8>, request_headers: HeaderMap) -> Response {
+fn ok_response(result: OkResult, request_headers: HeaderMap) -> Response {
+    let OkResult {
+        mut data,
+        exec_plan,
+    } = result;
+    exec_plan.map(save_exec_plan);
+
     let mut headers = HeaderMap::new();
     headers.insert("content-type", "application/json".parse().unwrap());
 
@@ -118,6 +128,19 @@ fn ok_response(mut data: Vec<u8>, request_headers: HeaderMap) -> Response {
     }
 
     (StatusCode::OK, headers, data).into_response()
+}
+
+fn save_exec_plan(exec_plan: Vec<u8>) {
+    tokio::spawn(async move {
+        let mut output_path = std::env::temp_dir();
+        let now = chrono::Utc::now();
+        output_path.extend([format!("exec_plan_{}.json.gz", now.to_rfc3339())]);
+        if let Err(e) = tokio::fs::write(&output_path, exec_plan).await {
+            log::error!("Error saving exec_plan: {e:?}");
+        } else {
+            log::info!("Exec plan saved to {}", output_path.display());
+        }
+    });
 }
 
 fn decode_gzip(data: Vec<u8>) -> anyhow::Result<Vec<u8>> {

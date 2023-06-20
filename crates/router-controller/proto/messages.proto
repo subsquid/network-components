@@ -8,10 +8,6 @@ message Envelope {
     Ping ping = 1;
     WorkerState state_update = 2;
 
-    // router <-> client
-    GetWorker get_worker = 3;
-    GetWorkerResult get_worker_result = 4;
-
     // client <-> worker
     Query query = 5;
     QueryResult query_result = 6;
@@ -44,33 +40,25 @@ message Ping {
   bool pause = 4;
 }
 
-message GetWorker {
-  string query_id = 1;
-  string dataset = 2;
-  uint32 start_block = 3;
-}
-
-message GetWorkerResult {
-  string query_id = 1;
-  oneof result {
-    string worker_id = 2;
-    string error = 3;
-  }
-}
-
 message Query {
   string query_id = 1;
   string dataset = 2;
   string query = 3;
+  bool profiling = 4;
 }
 
 message QueryResult {
   string query_id = 1;
   oneof result {
-    bytes ok_data = 2;
+    OkResult ok = 2;
     string bad_request = 3;
     string server_error = 4;
   }
+}
+
+message OkResult {
+  bytes data = 1;
+  optional bytes exec_plan = 2;
 }
 
 message QuerySubmitted {
@@ -102,7 +90,7 @@ message QueryExecuted {
 }
 
 message InputAndOutput {
-  SizeAndHash input = 1;
+  uint32 num_read_chunks = 1;
   SizeAndHash output = 2;
 }
 

@@ -4,17 +4,18 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use derivative::Derivative;
 use prost::Message as ProstMsg;
 use rand::prelude::IteratorRandom;
-use subsquid_network_transport::{MsgContent, PeerId};
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 
 use contract_client::Worker;
 use router_controller::messages::{
-    envelope::Msg, query_finished, query_result, Envelope, Query as QueryMsg, QueryFinished,
-    QueryResult as QueryResultMsg, QuerySubmitted, RangeSet,
+    envelope::Msg, query_finished, query_result, Envelope, OkResult, Query as QueryMsg,
+    QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, RangeSet,
 };
+use subsquid_network_transport::{MsgContent, PeerId};
 
 use crate::config::{Config, DatasetId};
 
@@ -24,12 +25,14 @@ const WORKER_INACTIVE_THRESHOLD: Duration = Duration::from_secs(30);
 const WORKER_GREYLIST_TIME: Duration = Duration::from_secs(600);
 const DEFAULT_QUERY_TIMEOUT: Duration = Duration::from_secs(60);
 
-#[derive(Debug)]
+#[derive(Derivative, Debug)]
 struct Query {
     pub dataset_id: DatasetId,
     pub query: String,
     pub worker_id: PeerId,
     pub timeout: Duration,
+    pub profiling: bool,
+    #[derivative(Debug = "ignore")]
     pub result_sender: oneshot::Sender<QueryResult>,
 }
 
@@ -43,7 +46,7 @@ struct Task {
 
 #[derive(Debug, Clone)]
 pub enum QueryResult {
-    Ok(Vec<u8>),
+    Ok(OkResult),
     BadRequest(String),
     ServerError(String),
     Timeout,
@@ -52,7 +55,7 @@ pub enum QueryResult {
 impl From<query_result::Result> for QueryResult {
     fn from(result: query_result::Result) -> Self {
         match result {
-            query_result::Result::OkData(data) => Self::Ok(data),
+            query_result::Result::Ok(ok) => Self::Ok(ok),
             query_result::Result::BadRequest(err) => Self::BadRequest(err),
             query_result::Result::ServerError(err) => Self::ServerError(err),
         }
@@ -254,6 +257,7 @@ impl QueryHandler {
             query,
             worker_id,
             timeout,
+            profiling,
             result_sender,
         } = query;
 
@@ -265,6 +269,7 @@ impl QueryHandler {
             query_id,
             dataset: dataset_id.0,
             query,
+            profiling,
         };
         let worker_msg = Msg::Query(query.clone());
         self.send_msg(worker_id, worker_msg).await?;
@@ -421,6 +426,7 @@ impl QueryClient {
         query: String,
         worker_id: PeerId,
         timeout: Option<impl Into<Duration>>,
+        profiling: bool,
     ) -> anyhow::Result<QueryResult> {
         let timeout = timeout.map(Into::into).unwrap_or(DEFAULT_QUERY_TIMEOUT);
         let (result_sender, result_receiver) = oneshot::channel();
@@ -429,6 +435,7 @@ impl QueryClient {
             query,
             worker_id,
             timeout,
+            profiling,
             result_sender,
         };
         self.query_sender

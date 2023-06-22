@@ -1,8 +1,9 @@
-use sha3::{Digest, Sha3_256};
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
 pub use prost::Message as ProstMsg;
+use sha3::{Digest, Sha3_256};
+
 include!(concat!(env!("OUT_DIR"), "/messages.rs"));
 
 impl Deref for WorkerState {
@@ -28,7 +29,7 @@ impl From<HashMap<String, RangeSet>> for WorkerState {
 impl From<&query_result::Result> for query_finished::Result {
     fn from(result: &query_result::Result) -> Self {
         match result {
-            query_result::Result::OkData(data) => Self::Ok(SizeAndHash::compute(data)),
+            query_result::Result::Ok(OkResult { data, .. }) => Self::Ok(SizeAndHash::compute(data)),
             query_result::Result::BadRequest(err) => Self::BadRequest(err.clone()),
             query_result::Result::ServerError(err) => Self::ServerError(err.clone()),
         }

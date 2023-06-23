@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use subsquid_network_transport::PeerId;
-
 use router_controller::messages::WorkerState;
+use subsquid_network_transport::PeerId;
 
 use crate::data_chunk::chunks_to_worker_state;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};

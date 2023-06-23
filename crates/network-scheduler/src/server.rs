@@ -1,9 +1,8 @@
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use subsquid_network_transport::{MsgContent, PeerId};
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
@@ -11,6 +10,7 @@ use tokio::task::JoinHandle;
 use contract_client::Worker;
 use router_controller::messages::envelope::Msg;
 use router_controller::messages::{Envelope, ProstMsg};
+use subsquid_network_transport::{MsgContent, PeerId};
 
 use crate::metrics::{Metrics, MetricsEvent};
 use crate::scheduler::Scheduler;
@@ -27,7 +27,7 @@ pub struct Server {
     worker_registry: Arc<RwLock<WorkerRegistry>>,
     scheduler: Arc<RwLock<Scheduler>>,
     schedule_interval: Duration,
-    metrics_file: File,
+    metrics_output: Pin<Box<dyn AsyncWrite>>,
 }
 
 impl Server {
@@ -38,7 +38,7 @@ impl Server {
         message_sender: Sender<Message>,
         schedule_interval: Duration,
         replication_factor: usize,
-        metrics_file: File,
+        metrics_output: Pin<Box<dyn AsyncWrite>>,
     ) -> Self {
         let worker_registry = Arc::new(Default::default());
         let scheduler = Arc::new(RwLock::new(Scheduler::new(replication_factor)));
@@ -50,7 +50,7 @@ impl Server {
             worker_registry,
             scheduler,
             schedule_interval,
-            metrics_file,
+            metrics_output,
         }
     }
 
@@ -102,7 +102,7 @@ impl Server {
             Ok(line) => line,
         };
         let _ = self
-            .metrics_file
+            .metrics_output
             .write_all(json_line.as_slice())
             .await
             .map_err(|e| log::error!("Error saving metrics: {e:?}"));

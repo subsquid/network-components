@@ -28,8 +28,8 @@ impl Metrics {
     }
 
     pub fn to_json_line(&self) -> anyhow::Result<Vec<u8>> {
-        let mut vec = serde_json::to_vec(self)?;
-        vec.push(b'\n');
+        let json_str = serde_json::to_string(self)?;
+        let vec = format!("metrics: {json_str}\n").into_bytes();
         Ok(vec)
     }
 }

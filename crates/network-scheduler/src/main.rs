@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use clap::Parser;
 use simple_logger::SimpleLogger;
+
 use subsquid_network_transport::transport::P2PTransportBuilder;
 use subsquid_network_transport::util::get_keypair;
-use tokio::fs::OpenOptions;
 
 use crate::cli::Cli;
 use crate::server::Server;
@@ -23,6 +23,7 @@ async fn main() -> anyhow::Result<()> {
     // Init logger and parse arguments and config
     SimpleLogger::new()
         .with_level(log::LevelFilter::Info)
+        .with_module_level("ethers_providers", log::LevelFilter::Warn)
         .env()
         .init()?;
     let args = Cli::parse();
@@ -30,12 +31,7 @@ async fn main() -> anyhow::Result<()> {
     let schedule_interval = Duration::from_secs(config.schedule_interval_sec);
 
     // Open file for writing metrics
-    let metrics_path = args.metrics;
-    let metrics_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(metrics_path)
-        .await?;
+    let metrics_output = args.metrics_output().await?;
 
     // Build P2P transport
     let keypair = get_keypair(args.key).await?;
@@ -65,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
         message_sender,
         schedule_interval,
         config.replication_factor,
-        metrics_file,
+        metrics_output,
     )
     .run()
     .await;

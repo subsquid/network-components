@@ -1,6 +1,6 @@
 schedule_interval_sec: 300
 replication_factor: 2
 scheduling_unit_size: 10
-s3_endpoint: 'https://s3.filebase.com'
+s3_endpoint: 'https://7a28e49ec5f4a60c66f216392792ac38.r2.cloudflarestorage.com/'
 buckets:
-  - 'etha-mainnet'
+  - 'ethereum-mainnet'

@@ -101,37 +101,6 @@ impl S3Storage {
             .collect()
     }
 
-    // async fn list_next_chunks(&mut self) -> Option<impl Iterator<Item = DataChunk> + '_> {
-    //     let objects = match self.list_next_objects().await {
-    //         Ok(objects) => objects,
-    //         Err(e) => {
-    //             log::error!("Error listing objects: {e:?}");
-    //             return None;
-    //         }
-    //     };
-    //
-    //     chunks.peek().is_some().then_some(chunks)
-    // }
-
-    // async fn chunk_size(&self, key: &str) -> anyhow::Result<u64> {
-    //     let prefix = match key.rsplit_once('/') {
-    //         Some((prefix, _)) => prefix,
-    //         None => anyhow::bail!("Invalid key"),
-    //     };
-    //     Ok(self
-    //         .client
-    //         .list_objects_v2()
-    //         .bucket(&self.bucket)
-    //         .prefix(prefix)
-    //         .send()
-    //         .await?
-    //         .contents()
-    //         .ok_or_else(|| anyhow::anyhow!("Empty response from storage"))?
-    //         .iter()
-    //         .map(|o| o.size() as u64)
-    //         .sum())
-    // }
-
     fn objects_to_chunk(
         &mut self,
         objs: impl IntoIterator<Item = S3Object>,
@@ -171,14 +140,6 @@ impl S3Storage {
         self.last_block = Some(chunk.block_range.end);
         Ok(chunk)
     }
-
-    // async fn list_all_new_chunks(&mut self) -> Vec<DataChunk> {
-    //     let mut result = Vec::new();
-    //     while let Some(chunks) = self.list_next_chunks().await {
-    //         result.extend(chunks)
-    //     }
-    //     result
-    // }
 
     pub fn get_incoming_chunks(mut self) -> Receiver<NonEmpty<DataChunk>> {
         let (sender, receiver) = mpsc::channel(100);

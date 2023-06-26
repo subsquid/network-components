@@ -31,6 +31,7 @@ pub struct Server {
 }
 
 impl Server {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         incoming_messages: Receiver<Message>,
         worker_updates: Receiver<Vec<Worker>>,
@@ -38,10 +39,14 @@ impl Server {
         message_sender: Sender<Message>,
         schedule_interval: Duration,
         replication_factor: usize,
+        worker_storage_bytes: u64,
         metrics_output: Pin<Box<dyn AsyncWrite>>,
     ) -> Self {
         let worker_registry = Arc::new(Default::default());
-        let scheduler = Arc::new(RwLock::new(Scheduler::new(replication_factor)));
+        let scheduler = Arc::new(RwLock::new(Scheduler::new(
+            replication_factor,
+            worker_storage_bytes,
+        )));
         Self {
             incoming_messages,
             worker_updates,

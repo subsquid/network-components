@@ -61,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
         message_sender,
         schedule_interval,
         config.replication_factor,
+        config.worker_storage_bytes,
         metrics_output,
     )
     .run()

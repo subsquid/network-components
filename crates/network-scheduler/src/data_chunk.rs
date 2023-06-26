@@ -4,10 +4,10 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use sha3::{Digest, Sha3_256};
-use subsquid_network_transport::PeerId;
 
 use router_controller::messages::WorkerState;
 use router_controller::range::Range;
+use subsquid_network_transport::PeerId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkId([u8; 32]);
@@ -38,6 +38,7 @@ impl Display for ChunkId {
 pub struct DataChunk {
     pub dataset_url: String,
     pub block_range: Range,
+    pub size_bytes: u64,
 }
 
 impl Display for DataChunk {
@@ -51,12 +52,13 @@ impl Display for DataChunk {
 }
 
 impl DataChunk {
-    pub fn new(bucket: &str, chunk_str: &str) -> anyhow::Result<Self> {
+    pub fn new(bucket: &str, chunk_str: &str, size_bytes: u64) -> anyhow::Result<Self> {
         let chunk = router_controller::data_chunk::DataChunk::from_str(chunk_str)
             .map_err(|_| anyhow::anyhow!("Invalid chunk: {chunk_str}"))?;
         Ok(Self {
             dataset_url: format!("s3://{bucket}"),
             block_range: chunk.into(),
+            size_bytes,
         })
     }
 
@@ -80,9 +82,8 @@ pub fn chunks_to_worker_state(chunks: impl IntoIterator<Item = DataChunk>) -> Wo
 
 #[cfg(test)]
 mod tests {
-    use subsquid_network_transport::PeerId;
-
     use router_controller::range::RangeSet;
+    use subsquid_network_transport::PeerId;
 
     use super::*;
 
@@ -91,6 +92,7 @@ mod tests {
         let chunk = DataChunk {
             dataset_url: "s3://squidnet".to_string(),
             block_range: Range::new(0, 1000),
+            size_bytes: 0,
         };
         assert_eq!(chunk.to_string(), "s3://squidnet/0-1000");
         assert_eq!(
@@ -111,6 +113,7 @@ mod tests {
         let chunk = DataChunk {
             dataset_url: "s3://squidnet".to_string(),
             block_range: Range::new(0, 1000),
+            size_bytes: 0,
         };
         assert_eq!(
             chunk.id().distance(&peer_id),
@@ -129,14 +132,17 @@ mod tests {
             DataChunk {
                 dataset_url: "s3://squidnet".to_string(),
                 block_range: Range::new(0, 1000),
+                size_bytes: 0,
             },
             DataChunk {
                 dataset_url: "s3://squidnet".to_string(),
                 block_range: Range::new(500, 1500),
+                size_bytes: 0,
             },
             DataChunk {
                 dataset_url: "s3://pepenet".to_string(),
                 block_range: Range::new(1234, 5678),
+                size_bytes: 0,
             },
         ];
 

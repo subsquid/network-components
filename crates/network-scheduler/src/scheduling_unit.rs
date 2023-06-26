@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 use nonempty::NonEmpty;
 use tokio::sync::mpsc::{Receiver, Sender};
 
@@ -16,8 +18,12 @@ impl SchedulingUnit {
         Self { chunks }
     }
 
-    pub fn size(&self) -> usize {
+    pub fn num_chunks(&self) -> usize {
         self.chunks.len()
+    }
+
+    pub fn size_bytes(&self) -> u64 {
+        self.chunks.iter().map(|x| x.size_bytes).sum()
     }
 
     pub fn id(&self) -> UnitId {
@@ -33,6 +39,19 @@ impl IntoIterator for SchedulingUnit {
 
     fn into_iter(self) -> Self::IntoIter {
         self.chunks.into_iter()
+    }
+}
+
+impl Display for SchedulingUnit {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}/{}-{} ({} chunks)",
+            self.chunks.first().dataset_url,
+            self.chunks.first().block_range.begin,
+            self.chunks.last().block_range.end,
+            self.chunks.len()
+        )
     }
 }
 
@@ -55,7 +74,7 @@ pub fn bundle_chunks(
             let chunks: Vec<DataChunk> = chunks.into();
             for chunks in chunks.chunks(unit_size) {
                 let unit = SchedulingUnit::from_slice(chunks);
-                if unit.size() < unit_size {
+                if unit.num_chunks() < unit_size {
                     incomplete_unit = Some(unit.clone())
                 }
                 if unit_sender.send(unit).await.is_err() {

@@ -14,13 +14,17 @@ pub struct WorkerRegistry {
 }
 
 impl WorkerRegistry {
-    pub async fn new(rpc_url: &str) -> anyhow::Result<Self> {
+    pub async fn init(rpc_url: &str) -> anyhow::Result<Self> {
         let client = contract_client::get_client(rpc_url).await?;
-        Ok(Self {
+        let mut registry = Self {
             client,
             workers: Default::default(),
             pings: Default::default(),
-        })
+        };
+        // Need to get new workers immediately, otherwise they wouldn't be updated until the first
+        // call to `active_workers`, so all pings would be discarded.
+        registry.update_workers().await?;
+        Ok(registry)
     }
 
     pub async fn ping(&mut self, worker_id: PeerId) {

@@ -1,18 +1,28 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use subsquid_network_transport::PeerId;
 use tokio::time::Instant;
+
+use subsquid_network_transport::PeerId;
 
 const WORKER_INACTIVE_TIMEOUT: Duration = Duration::from_secs(60);
 
-#[derive(Default)]
 pub struct WorkerRegistry {
+    client: Box<dyn contract_client::Client>,
     workers: HashSet<PeerId>,
     pings: HashMap<PeerId, Instant>,
 }
 
 impl WorkerRegistry {
+    pub async fn new(rpc_url: &str) -> anyhow::Result<Self> {
+        let client = contract_client::get_client(rpc_url).await?;
+        Ok(Self {
+            client,
+            workers: Default::default(),
+            pings: Default::default(),
+        })
+    }
+
     pub async fn ping(&mut self, worker_id: PeerId) {
         log::debug!("Got ping from {worker_id}");
         if self.workers.contains(&worker_id) {
@@ -20,13 +30,18 @@ impl WorkerRegistry {
         }
     }
 
-    pub async fn update_workers(&mut self, new_workers: impl IntoIterator<Item = PeerId>) {
-        self.workers = new_workers.into_iter().collect();
+    async fn update_workers(&mut self) -> anyhow::Result<()> {
+        let new_workers = self.client.active_workers().await?;
+        self.workers = new_workers.into_iter().map(|w| w.peer_id).collect();
         log::info!("Registered workers set updated: {:?}", self.workers);
         self.pings.retain(|id, _| self.workers.contains(id));
+        Ok(())
     }
 
-    pub async fn active_workers(&self) -> Vec<PeerId> {
+    pub async fn active_workers(&mut self) -> Vec<PeerId> {
+        if let Err(e) = self.update_workers().await {
+            log::error!("Error updating worker set: {e:?}")
+        }
         self.workers
             .iter()
             .filter_map(|id| match self.pings.get(id) {

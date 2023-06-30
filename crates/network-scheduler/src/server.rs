@@ -7,7 +7,6 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
-use contract_client::Worker;
 use router_controller::messages::envelope::Msg;
 use router_controller::messages::{Envelope, ProstMsg};
 use subsquid_network_transport::{MsgContent, PeerId};
@@ -21,7 +20,6 @@ type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
 pub struct Server {
     incoming_messages: Receiver<Message>,
-    worker_updates: Receiver<Vec<Worker>>,
     incoming_units: Receiver<SchedulingUnit>,
     message_sender: Sender<Message>,
     worker_registry: Arc<RwLock<WorkerRegistry>>,
@@ -31,25 +29,19 @@ pub struct Server {
 }
 
 impl Server {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         incoming_messages: Receiver<Message>,
-        worker_updates: Receiver<Vec<Worker>>,
         incoming_units: Receiver<SchedulingUnit>,
         message_sender: Sender<Message>,
+        worker_registry: WorkerRegistry,
+        scheduler: Scheduler,
         schedule_interval: Duration,
-        replication_factor: usize,
-        worker_storage_bytes: u64,
         metrics_output: Pin<Box<dyn AsyncWrite>>,
     ) -> Self {
-        let worker_registry = Arc::new(Default::default());
-        let scheduler = Arc::new(RwLock::new(Scheduler::new(
-            replication_factor,
-            worker_storage_bytes,
-        )));
+        let worker_registry = Arc::new(RwLock::new(worker_registry));
+        let scheduler = Arc::new(RwLock::new(scheduler));
         Self {
             incoming_messages,
-            worker_updates,
             incoming_units,
             message_sender,
             worker_registry,
@@ -65,7 +57,6 @@ impl Server {
         loop {
             tokio::select! {
                 Some(msg) = self.incoming_messages.recv() => self.handle_message(msg).await,
-                Some(workers) = self.worker_updates.recv() => self.update_workers(workers).await,
                 Some(unit) = self.incoming_units.recv() => self.new_unit(unit).await,
                 else => break
             }
@@ -113,15 +104,6 @@ impl Server {
             .map_err(|e| log::error!("Error saving metrics: {e:?}"));
     }
 
-    async fn update_workers(&self, workers: Vec<Worker>) {
-        let workers = workers.into_iter().map(|w| w.peer_id);
-        self.worker_registry
-            .write()
-            .await
-            .update_workers(workers)
-            .await;
-    }
-
     async fn new_unit(&self, unit: SchedulingUnit) {
         self.scheduler.write().await.new_unit(unit)
     }
@@ -146,7 +128,7 @@ impl Server {
             log::info!("Starting scheduling task");
             loop {
                 tokio::time::sleep(schedule_interval).await;
-                let workers = worker_registry.read().await.active_workers().await;
+                let workers = worker_registry.write().await.active_workers().await;
                 scheduler.write().await.schedule(workers);
             }
         })

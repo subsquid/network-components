@@ -7,7 +7,9 @@ use subsquid_network_transport::transport::P2PTransportBuilder;
 use subsquid_network_transport::util::get_keypair;
 
 use crate::cli::Cli;
+use crate::scheduler::Scheduler;
 use crate::server::Server;
+use crate::worker_registry::WorkerRegistry;
 
 mod cli;
 mod data_chunk;
@@ -42,10 +44,6 @@ async fn main() -> anyhow::Result<()> {
     transport_builder.bootstrap(args.bootstrap);
     let (incoming_messages, message_sender, _) = transport_builder.run().await?;
 
-    // Get worker updates from blockchain
-    let client = contract_client::get_client(&args.rpc_url).await?;
-    let worker_updates = client.active_workers_stream().await?;
-
     // Get scheduling units
     let incoming_units = storage::get_incoming_units(
         config.s3_endpoint,
@@ -54,14 +52,16 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
+    let worker_registry = WorkerRegistry::new(&args.rpc_url).await?;
+    let scheduler = Scheduler::new(config.replication_factor, config.worker_storage_bytes);
+
     Server::new(
         incoming_messages,
-        worker_updates,
         incoming_units,
         message_sender,
+        worker_registry,
+        scheduler,
         schedule_interval,
-        config.replication_factor,
-        config.worker_storage_bytes,
         metrics_output,
     )
     .run()

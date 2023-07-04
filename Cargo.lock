@@ -1607,14 +1607,14 @@ dependencies = [
   "bincode",
   "bs58",
   "coins-core",
- "digest 0.10.6",
- "getrandom 0.2.9",
- "hmac 0.12.1",
- "k256",
- "lazy_static",
- "serde",
- "sha2 0.10.6",
- "thiserror",
+  "digest 0.10.6",
+  "getrandom 0.2.9",
+  "hmac 0.12.1",
+  "k256",
+  "lazy_static",
+  "serde",
+  "sha2 0.10.6",
+  "thiserror",
 ]
 
 [[package]]
@@ -3316,9 +3316,9 @@ dependencies = [
   "android_system_properties",
   "core-foundation-sys",
   "iana-time-zone-haiku",
- "js-sys",
- "wasm-bindgen",
- "windows 0.48.0",
+  "js-sys",
+  "wasm-bindgen",
+  "windows 0.48.0",
 ]
 
 [[package]]
@@ -5294,11 +5294,11 @@ dependencies = [
   "petgraph",
   "prettyplease 0.1.25",
   "prost",
- "prost-types",
- "regex",
- "syn 1.0.109",
- "tempfile",
- "which",
+  "prost-types",
+  "regex",
+  "syn 1.0.109",
+  "tempfile",
+  "which",
 ]
 
 [[package]]
@@ -5993,7 +5993,7 @@ dependencies = [
   "hmac 0.12.1",
   "pbkdf2 0.11.0",
   "salsa20",
- "sha2 0.10.6",
+  "sha2 0.10.6",
 ]
 
 [[package]]
@@ -6752,9 +6752,9 @@ version = "1.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0de47a4eecbe11f498978a9b29d792f0d2692d1dd003650c24c76510e3bc001"
 dependencies = [
- "autocfg",
- "bytes",
- "libc",
+  "autocfg",
+  "bytes",
+  "libc",
   "mio",
   "num_cpus",
   "parking_lot 0.12.1",

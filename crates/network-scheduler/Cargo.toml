@@ -8,7 +8,7 @@ anyhow = "1"
 async-trait = "0.1"
 aws-config = "0.55"
 aws-sdk-s3 = "0.28"
-clap = { version = "4.0.18", features = ["derive"] }
+clap = { version = "4.0.18", features = ["derive", "env"] }
 hex = "0.4"
 itertools = "0.10"
 log = "0.4"

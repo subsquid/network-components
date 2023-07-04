@@ -20,36 +20,47 @@ pub struct Config {
 
 #[derive(Parser)]
 pub struct Cli {
-    #[arg(short, long, help = "Path to libp2p key file")]
+    #[arg(short, long, env = "KEY_PATH", help = "Path to libp2p key file")]
     pub key: Option<PathBuf>,
 
     #[arg(
         short,
         long,
+        env = "LISTEN_ADDR",
         help = "Listen addr",
         default_value = "/ip4/0.0.0.0/tcp/0"
     )]
     pub listen: String,
 
-    #[arg(long, help = "Connect to boot node '<peer_id> <address>'.")]
+    #[arg(long, env, help = "Connect to boot node '<peer_id> <address>'.")]
     pub boot_nodes: Vec<BootNode>,
 
-    #[arg(long, help = "Bootstrap kademlia. Makes node discoverable by others.")]
+    #[arg(
+        long,
+        env,
+        help = "Bootstrap kademlia. Makes node discoverable by others."
+    )]
     pub bootstrap: bool,
 
     #[arg(
         long,
+        env,
         help = "Blockchain RPC URL",
         default_value = "http://127.0.0.1:8545/"
     )]
     pub rpc_url: String,
 
-    #[arg(long, help = "Path to save metrics. If not present, stdout is used.")]
+    #[arg(
+        long,
+        env = "METRICS_PATH",
+        help = "Path to save metrics. If not present, stdout is used."
+    )]
     metrics: Option<PathBuf>,
 
     #[arg(
         short,
         long,
+        env = "CONFIG_PATH",
         help = "Path to config file",
         default_value = "config.yml"
     )]

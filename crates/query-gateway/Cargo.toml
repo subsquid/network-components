@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = "1"
 axum = "0.6"
 chrono = "0.4"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 derivative = "2"
 duration-string = { version = "0.3", features = ["serde"] }
 flate2 = "1"

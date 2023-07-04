@@ -31,15 +31,33 @@ COPY subsquid-network/transport ./subsquid-network/transport
 RUN cargo build --release --workspace
 
 FROM debian:bookworm-slim as network-scheduler
+
 RUN apt-get update && apt-get install ca-certificates -y
+
 WORKDIR /run
+
 COPY --from=network-builder /usr/src/target/release/network-scheduler /usr/local/bin/network-scheduler
 COPY --from=network-builder /usr/src/crates/network-scheduler/config.yml .
+
+ENV LISTEN_ADDR="/ip4/0.0.0.0/tcp/12345"
+ENV BOOTSTRAP="true"
+
 CMD ["network-scheduler"]
 
 FROM debian:bookworm-slim as query-gateway
-RUN apt-get update && apt-get install ca-certificates -y
+
+RUN apt-get update && apt-get install ca-certificates net-tools -y
+
 WORKDIR /run
+
 COPY --from=network-builder /usr/src/target/release/query-gateway /usr/local/bin/query-gateway
 COPY --from=network-builder /usr/src/crates/query-gateway/config.yml .
+
+ENV P2P_LISTEN_ADDR="/ip4/0.0.0.0/tcp/12345"
+ENV HTTP_LISTEN_ADDR="0.0.0.0:8000"
+
 CMD ["query-gateway"]
+
+RUN echo "PORT=\${HTTP_LISTEN_ADDR##*:}; netstat -an | grep \$PORT > /dev/null; if [ 0 != \$? ]; then exit 1; fi;" > ./healthcheck.sh
+RUN chmod +x ./healthcheck.sh
+HEALTHCHECK --interval=5s CMD ./healthcheck.sh

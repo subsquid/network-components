@@ -1,4 +1,4 @@
-FROM rust:1.65.0 AS builder
+FROM rust:1.65.0 AS archive-router-builder
 RUN apt-get update && apt-get install protobuf-compiler -y
 WORKDIR /archive-router
 COPY ./ .
@@ -6,9 +6,40 @@ RUN rm -r crates/network-scheduler
 RUN rm -r crates/query-gateway
 RUN cargo build --release
 
-FROM debian:bullseye-slim
+FROM debian:bullseye-slim AS archive-router
 RUN apt-get update && apt-get install ca-certificates -y
 WORKDIR /archive-router
-COPY --from=builder /archive-router/target/release/router ./router
+COPY --from=archive-router-builder /archive-router/target/release/router ./router
 ENTRYPOINT ["/archive-router/router"]
 EXPOSE 3000
+
+FROM rust:1.70-bookworm AS network-builder
+
+RUN apt update
+RUN apt install -y -V protobuf-compiler
+
+WORKDIR /usr/src
+
+COPY Cargo.toml .
+COPY Cargo.lock .
+COPY crates ./crates
+
+COPY subsquid-network/Cargo.toml ./subsquid-network/
+COPY subsquid-network/Cargo.lock ./subsquid-network/
+COPY subsquid-network/transport ./subsquid-network/transport
+
+RUN cargo build --release --workspace
+
+FROM debian:bookworm-slim as network-scheduler
+RUN apt-get update && apt-get install ca-certificates -y
+WORKDIR /run
+COPY --from=network-builder /usr/src/target/release/network-scheduler /usr/local/bin/network-scheduler
+COPY --from=network-builder /usr/src/crates/network-scheduler/config.yml .
+CMD ["network-scheduler"]
+
+FROM debian:bookworm-slim as query-gateway
+RUN apt-get update && apt-get install ca-certificates -y
+WORKDIR /run
+COPY --from=network-builder /usr/src/target/release/query-gateway /usr/local/bin/query-gateway
+COPY --from=network-builder /usr/src/crates/query-gateway/config.yml .
+CMD ["query-gateway"]

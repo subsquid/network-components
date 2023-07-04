@@ -20,6 +20,6 @@ simple_logger = "4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 uuid = { version = "1", features = ["v4", "fast-rng"] }
 
-subsquid-network-transport = { version = "0.1", path = "../../../subsquid-network/transport"}
+subsquid-network-transport = { version = "0.1", path = "../../subsquid-network/transport" }
 router-controller = { version = "0.1", path = "../router-controller" }
 contract-client = { version = "0.1", path = "../contract-client"}

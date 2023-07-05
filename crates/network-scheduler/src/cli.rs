@@ -1,10 +1,7 @@
 use std::path::PathBuf;
-use std::pin::Pin;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWrite;
 
 use subsquid_network_transport::util::BootNode;
 
@@ -52,10 +49,20 @@ pub struct Cli {
 
     #[arg(
         long,
-        env = "METRICS_PATH",
+        env,
         help = "Path to save metrics. If not present, stdout is used."
     )]
-    metrics: Option<PathBuf>,
+    pub metrics_path: Option<PathBuf>,
+
+    #[arg(
+    long,
+    env,
+    help = "Choose which metrics should be printed.",
+    value_delimiter = ',',
+    num_args = 0..,
+    default_value = "Ping,QuerySubmitted,QueryFinished,QueryExecuted"
+    )]
+    pub metrics: Vec<String>,
 
     #[arg(
         short,
@@ -71,19 +78,5 @@ impl Cli {
     pub async fn config(&self) -> anyhow::Result<Config> {
         let file_contents = tokio::fs::read(&self.config).await?;
         Ok(serde_yaml::from_slice(file_contents.as_slice())?)
-    }
-
-    pub async fn metrics_output(&self) -> anyhow::Result<Pin<Box<dyn AsyncWrite>>> {
-        match &self.metrics {
-            Some(path) => {
-                let metrics_file = OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(path)
-                    .await?;
-                Ok(Box::pin(metrics_file))
-            }
-            None => Ok(Box::pin(tokio::io::stdout())),
-        }
     }
 }

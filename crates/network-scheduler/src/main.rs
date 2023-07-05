@@ -7,6 +7,7 @@ use subsquid_network_transport::transport::P2PTransportBuilder;
 use subsquid_network_transport::util::get_keypair;
 
 use crate::cli::Cli;
+use crate::metrics::MetricsWriter;
 use crate::scheduler::Scheduler;
 use crate::server::Server;
 use crate::worker_registry::WorkerRegistry;
@@ -28,12 +29,12 @@ async fn main() -> anyhow::Result<()> {
         .with_module_level("ethers_providers", log::LevelFilter::Warn)
         .env()
         .init()?;
-    let args = Cli::parse();
+    let args: Cli = Cli::parse();
     let config = args.config().await?;
     let schedule_interval = Duration::from_secs(config.schedule_interval_sec);
 
     // Open file for writing metrics
-    let metrics_output = args.metrics_output().await?;
+    let metrics_writer = MetricsWriter::from_cli(&args).await?;
 
     // Build P2P transport
     let keypair = get_keypair(args.key).await?;
@@ -62,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
         worker_registry,
         scheduler,
         schedule_interval,
-        metrics_output,
+        metrics_writer,
     )
     .run()
     .await;

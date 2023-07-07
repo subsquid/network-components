@@ -6469,6 +6469,7 @@ dependencies = [
   "libp2p-swarm-derive",
   "log",
   "prost",
+  "rand 0.8.5",
   "simple_logger",
   "snow",
   "thiserror",

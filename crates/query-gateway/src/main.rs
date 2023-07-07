@@ -33,8 +33,14 @@ struct Cli {
     )]
     http_listen: String,
 
-    #[arg(short, long, env, help = "Connect to boot node '<peer_id> <address>'.")]
-    boot_nodes: Vec<BootNode>,
+    #[arg(
+    long,
+    env,
+    help = "Connect to boot node '<peer_id> <address>'.",
+    value_delimiter = ',',
+    num_args = 1..,
+    )]
+    pub boot_nodes: Vec<BootNode>,
 
     #[arg(
         short,

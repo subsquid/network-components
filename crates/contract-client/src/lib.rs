@@ -16,12 +16,12 @@ abigen!(WorkerRegistration, "abi/WorkerRegistration.json");
 
 lazy_static! {
     pub static ref TSQD_CONTRACT_ADDR: Address = std::env::var("TSQD_CONTRACT_ADDR")
-        .unwrap_or("0x6a117CBe9Bfab42151396FC54ddb588151a8Aac7".to_string())
+        .unwrap_or("0x5FbDB2315678afecb367f032d93F642f64180aa3".to_string())
         .parse()
         .expect("Invalid tSQD contract address");
     pub static ref WORKER_REGISTRATION_CONTRACT_ADDR: Address =
         std::env::var("WORKER_REGISTRATION_CONTRACT_ADDR")
-            .unwrap_or("0xE49f913608F296584d92c2e176e2e68156A96A12".to_string())
+            .unwrap_or("0xA7E47a7aE0FB29BeF4485f6CAb2ee1b85c1D38aB".to_string())
             .parse()
             .expect("Invalid WorkerRegistration contract address");
 }
@@ -51,28 +51,19 @@ pub struct Worker {
     pub peer_id: PeerId,
     pub address: Address,
     pub bond: U256,
-    pub registered_at: U256,
-    pub deregistered_at: Option<U256>,
+    pub registered_at: u128,
+    pub deregistered_at: Option<u128>,
 }
 
 impl TryFrom<worker_registration::Worker> for Worker {
     type Error = ClientError;
 
     fn try_from(worker: worker_registration::Worker) -> Result<Self, Self::Error> {
-        // Strip the padding – all but last leading zeros
-        let peer_id_bytes: Vec<u8> = worker.peer_id.concat();
-        let last_leading_zero = peer_id_bytes
-            .iter()
-            .position(|x| *x != 0)
-            .ok_or(libp2p::multihash::Error::InvalidSize(0))?
-            .saturating_sub(1);
-        let peer_id = PeerId::from_bytes(&peer_id_bytes[last_leading_zero..])?;
-
-        let deregistered_at = (worker.deregistered_at > 0.into()).then_some(worker.deregistered_at);
-
+        let peer_id = PeerId::from_bytes(&worker.peer_id)?;
+        let deregistered_at = (worker.deregistered_at > 0).then_some(worker.deregistered_at);
         Ok(Self {
             peer_id,
-            address: worker.account,
+            address: worker.creator,
             bond: worker.bond,
             registered_at: worker.registered_at,
             deregistered_at,
@@ -127,13 +118,15 @@ impl<T: RawClient> EthersClient<T> {
 #[async_trait]
 impl<T: RawClient> Client for EthersClient<T> {
     async fn active_workers(&self) -> Result<Vec<Worker>, ClientError> {
-        self.worker_registration
+        let workers = self
+            .worker_registration
             .get_active_workers()
             .call()
             .await?
             .into_iter()
-            .map(|worker| worker.try_into())
-            .collect()
+            .filter_map(|worker| worker.try_into().ok())
+            .collect();
+        Ok(workers)
     }
 
     async fn active_workers_stream(&self) -> Result<Receiver<Vec<Worker>>, ClientError> {

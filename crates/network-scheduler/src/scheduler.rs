@@ -130,13 +130,19 @@ impl Scheduler {
                 }
             }
             if num_assigned_workers < self.replication_factor {
-                log::warn!("Not enough workers for unit {unit}");
                 self.unassigned_units.insert(unit_id);
             }
         }
+
         log::info!("Scheduling complete.");
         for (worker_id, state) in self.worker_states.iter() {
             log::info!("Worker {worker_id}: {state}");
+        }
+        if !self.unassigned_units.is_empty() {
+            log::warn!(
+                "Not enough workers to assign {} units",
+                self.unassigned_units.len()
+            )
         }
     }
 

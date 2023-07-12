@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = "1"
 axum = "0.6"
 chrono = "0.4"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 derivative = "2"
 duration-string = { version = "0.3", features = ["serde"] }
 flate2 = "1"
@@ -20,6 +20,6 @@ simple_logger = "4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 uuid = { version = "1", features = ["v4", "fast-rng"] }
 
-subsquid-network-transport = { version = "0.1", path = "../../../subsquid-network/transport"}
+subsquid-network-transport = { version = "0.1", path = "../../subsquid-network/transport" }
 router-controller = { version = "0.1", path = "../router-controller" }
 contract-client = { version = "0.1", path = "../contract-client"}

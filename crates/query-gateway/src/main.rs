@@ -14,25 +14,38 @@ mod http_server;
 
 #[derive(Parser)]
 struct Cli {
-    #[arg(short, long, help = "Path to libp2p key file")]
+    #[arg(short, long, env = "KEY_PATH", help = "Path to libp2p key file")]
     key: Option<PathBuf>,
 
     #[arg(
         long,
+        env = "P2P_LISTEN_ADDR",
         help = "P2P network listen addr",
         default_value = "/ip4/0.0.0.0/tcp/0"
     )]
     p2p_listen: String,
 
-    #[arg(long, help = "HTTP server listen addr", default_value = "0.0.0.0:8000")]
+    #[arg(
+        long,
+        env = "HTTP_LISTEN_ADDR",
+        help = "HTTP server listen addr",
+        default_value = "0.0.0.0:8000"
+    )]
     http_listen: String,
 
-    #[arg(short, long, help = "Connect to boot node '<peer_id> <address>'.")]
-    boot_nodes: Vec<BootNode>,
+    #[arg(
+    long,
+    env,
+    help = "Connect to boot node '<peer_id> <address>'.",
+    value_delimiter = ',',
+    num_args = 1..,
+    )]
+    pub boot_nodes: Vec<BootNode>,
 
     #[arg(
         short,
         long,
+        env = "CONFIG_PATH",
         help = "Path to config file",
         default_value = "config.yml"
     )]
@@ -41,6 +54,7 @@ struct Cli {
     #[arg(
         short,
         long,
+        env,
         help = "Blockchain RPC URL",
         default_value = "http://127.0.0.1:8545/"
     )]

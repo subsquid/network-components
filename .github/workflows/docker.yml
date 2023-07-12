@@ -23,5 +23,6 @@ jobs:
       - name: Docker build and push
         uses: docker/build-push-action@v3
         with:
+          target: archive-router
           push: true
           tags: eldar/archive-router:${{ inputs.tag }}

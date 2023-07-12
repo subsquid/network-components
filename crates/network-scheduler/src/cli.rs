@@ -1,10 +1,7 @@
 use std::path::PathBuf;
-use std::pin::Pin;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWrite;
 
 use subsquid_network_transport::util::BootNode;
 
@@ -20,36 +17,63 @@ pub struct Config {
 
 #[derive(Parser)]
 pub struct Cli {
-    #[arg(short, long, help = "Path to libp2p key file")]
+    #[arg(short, long, env = "KEY_PATH", help = "Path to libp2p key file")]
     pub key: Option<PathBuf>,
 
     #[arg(
         short,
         long,
+        env = "LISTEN_ADDR",
         help = "Listen addr",
         default_value = "/ip4/0.0.0.0/tcp/0"
     )]
     pub listen: String,
 
-    #[arg(long, help = "Connect to boot node '<peer_id> <address>'.")]
+    #[arg(
+    long,
+    env,
+    help = "Connect to boot node '<peer_id> <address>'.",
+    value_delimiter = ',',
+    num_args = 1..,
+    )]
     pub boot_nodes: Vec<BootNode>,
 
-    #[arg(long, help = "Bootstrap kademlia. Makes node discoverable by others.")]
+    #[arg(
+        long,
+        env,
+        help = "Bootstrap kademlia. Makes node discoverable by others."
+    )]
     pub bootstrap: bool,
 
     #[arg(
         long,
+        env,
         help = "Blockchain RPC URL",
         default_value = "http://127.0.0.1:8545/"
     )]
     pub rpc_url: String,
 
-    #[arg(long, help = "Path to save metrics. If not present, stdout is used.")]
-    metrics: Option<PathBuf>,
+    #[arg(
+        long,
+        env,
+        help = "Path to save metrics. If not present, stdout is used."
+    )]
+    pub metrics_path: Option<PathBuf>,
+
+    #[arg(
+    long,
+    env,
+    help = "Choose which metrics should be printed.",
+    value_delimiter = ',',
+    num_args = 0..,
+    default_value = "Ping,QuerySubmitted,QueryFinished,QueryExecuted"
+    )]
+    pub metrics: Vec<String>,
 
     #[arg(
         short,
         long,
+        env = "CONFIG_PATH",
         help = "Path to config file",
         default_value = "config.yml"
     )]
@@ -60,19 +84,5 @@ impl Cli {
     pub async fn config(&self) -> anyhow::Result<Config> {
         let file_contents = tokio::fs::read(&self.config).await?;
         Ok(serde_yaml::from_slice(file_contents.as_slice())?)
-    }
-
-    pub async fn metrics_output(&self) -> anyhow::Result<Pin<Box<dyn AsyncWrite>>> {
-        match &self.metrics {
-            Some(path) => {
-                let metrics_file = OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(path)
-                    .await?;
-                Ok(Box::pin(metrics_file))
-            }
-            None => Ok(Box::pin(tokio::io::stdout())),
-        }
     }
 }

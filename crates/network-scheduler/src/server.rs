@@ -1,17 +1,15 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 use router_controller::messages::envelope::Msg;
-use router_controller::messages::{Envelope, ProstMsg};
+use router_controller::messages::{Envelope, Ping, ProstMsg};
 use subsquid_network_transport::{MsgContent, PeerId};
 
-use crate::metrics::{Metrics, MetricsEvent};
+use crate::metrics::{MetricsEvent, MetricsWriter};
 use crate::scheduler::Scheduler;
 use crate::scheduling_unit::SchedulingUnit;
 use crate::worker_registry::WorkerRegistry;
@@ -25,7 +23,7 @@ pub struct Server {
     worker_registry: Arc<RwLock<WorkerRegistry>>,
     scheduler: Arc<RwLock<Scheduler>>,
     schedule_interval: Duration,
-    metrics_output: Pin<Box<dyn AsyncWrite>>,
+    metrics_writer: MetricsWriter,
 }
 
 impl Server {
@@ -36,7 +34,7 @@ impl Server {
         worker_registry: WorkerRegistry,
         scheduler: Scheduler,
         schedule_interval: Duration,
-        metrics_output: Pin<Box<dyn AsyncWrite>>,
+        metrics_writer: MetricsWriter,
     ) -> Self {
         let worker_registry = Arc::new(RwLock::new(worker_registry));
         let scheduler = Arc::new(RwLock::new(scheduler));
@@ -47,7 +45,7 @@ impl Server {
             worker_registry,
             scheduler,
             schedule_interval,
-            metrics_output,
+            metrics_writer,
         }
     }
 
@@ -75,15 +73,16 @@ impl Server {
             Err(e) => return log::warn!("Error decoding message: {e:?}"),
         };
         match envelope.msg {
-            Some(Msg::Ping(_)) => self.ping(peer_id).await,
-            Some(Msg::QuerySubmitted(msg)) => self.save_metrics(peer_id, msg).await,
-            Some(Msg::QueryFinished(msg)) => self.save_metrics(peer_id, msg).await,
-            Some(Msg::QueryExecuted(msg)) => self.save_metrics(peer_id, msg).await,
+            Some(Msg::Ping(msg)) => self.ping(peer_id, msg).await,
+            Some(Msg::QuerySubmitted(msg)) => self.write_metrics(peer_id, msg).await,
+            Some(Msg::QueryFinished(msg)) => self.write_metrics(peer_id, msg).await,
+            Some(Msg::QueryExecuted(msg)) => self.write_metrics(peer_id, msg).await,
             _ => log::warn!("Unexpected msg received: {envelope:?}"),
         };
     }
 
-    async fn ping(&mut self, peer_id: PeerId) {
+    async fn ping(&mut self, peer_id: PeerId, msg: Ping) {
+        self.write_metrics(peer_id, msg).await;
         self.worker_registry.write().await.ping(peer_id).await;
         let worker_state = self.scheduler.read().await.get_worker_state(&peer_id);
         if let Some(worker_state) = worker_state {
@@ -91,17 +90,10 @@ impl Server {
         }
     }
 
-    async fn save_metrics(&mut self, peer_id: PeerId, msg: impl Into<MetricsEvent>) {
-        let metrics = Metrics::new(peer_id, msg);
-        let json_line = match metrics.to_json_line() {
-            Err(e) => return log::error!("Invalid metrics: {e:?}"),
-            Ok(line) => line,
-        };
-        let _ = self
-            .metrics_output
-            .write_all(json_line.as_slice())
-            .await
-            .map_err(|e| log::error!("Error saving metrics: {e:?}"));
+    async fn write_metrics(&mut self, peer_id: PeerId, msg: impl Into<MetricsEvent>) {
+        if let Err(e) = self.metrics_writer.write_metrics(peer_id, msg).await {
+            log::error!("Error writing metrics: {e:?}");
+        }
     }
 
     async fn new_unit(&self, unit: SchedulingUnit) {

@@ -38,6 +38,7 @@ message Ping {
   string worker_url = 2;
   WorkerState state = 3;
   bool pause = 4;
+  uint64 stored_bytes = 5;
 }
 
 message Query {

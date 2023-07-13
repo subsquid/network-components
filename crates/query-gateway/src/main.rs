@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use clap::Parser;
 use simple_logger::SimpleLogger;
 
+use subsquid_network_transport::cli::TransportArgs;
 use subsquid_network_transport::transport::P2PTransportBuilder;
-use subsquid_network_transport::util::{get_keypair, BootNode};
 
 use crate::config::Config;
 
@@ -14,16 +14,8 @@ mod http_server;
 
 #[derive(Parser)]
 struct Cli {
-    #[arg(short, long, env = "KEY_PATH", help = "Path to libp2p key file")]
-    key: Option<PathBuf>,
-
-    #[arg(
-        long,
-        env = "P2P_LISTEN_ADDR",
-        help = "P2P network listen addr",
-        default_value = "/ip4/0.0.0.0/tcp/0"
-    )]
-    p2p_listen: String,
+    #[command(flatten)]
+    pub transport: TransportArgs,
 
     #[arg(
         long,
@@ -32,15 +24,6 @@ struct Cli {
         default_value = "0.0.0.0:8000"
     )]
     http_listen: String,
-
-    #[arg(
-    long,
-    env,
-    help = "Connect to boot node '<peer_id> <address>'.",
-    value_delimiter = ',',
-    num_args = 1..,
-    )]
-    pub boot_nodes: Vec<BootNode>,
 
     #[arg(
         short,
@@ -69,16 +52,12 @@ async fn main() -> anyhow::Result<()> {
         .with_module_level("ethers_providers", log::LevelFilter::Warn)
         .env()
         .init()?;
-    let args = Cli::parse();
-    let p2p_listen_addr = args.p2p_listen.parse()?;
+    let args: Cli = Cli::parse();
     let http_listen_addr = args.http_listen.parse()?;
     let config: Config = serde_yaml::from_slice(tokio::fs::read(args.config).await?.as_slice())?;
 
     // Build P2P transport
-    let keypair = get_keypair(args.key).await?;
-    let mut transport_builder = P2PTransportBuilder::from_keypair(keypair);
-    transport_builder.listen_on(std::iter::once(p2p_listen_addr));
-    transport_builder.boot_nodes(args.boot_nodes);
+    let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
     let (msg_receiver, msg_sender, subscription_sender) = transport_builder.run().await?;
 
     // Subscribe to dataset state updates (from p2p pub-sub)

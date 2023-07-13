@@ -2,8 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-
-use subsquid_network_transport::util::BootNode;
+use subsquid_network_transport::cli::TransportArgs;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -17,33 +16,8 @@ pub struct Config {
 
 #[derive(Parser)]
 pub struct Cli {
-    #[arg(short, long, env = "KEY_PATH", help = "Path to libp2p key file")]
-    pub key: Option<PathBuf>,
-
-    #[arg(
-        short,
-        long,
-        env = "LISTEN_ADDR",
-        help = "Listen addr",
-        default_value = "/ip4/0.0.0.0/tcp/0"
-    )]
-    pub listen: String,
-
-    #[arg(
-    long,
-    env,
-    help = "Connect to boot node '<peer_id> <address>'.",
-    value_delimiter = ',',
-    num_args = 1..,
-    )]
-    pub boot_nodes: Vec<BootNode>,
-
-    #[arg(
-        long,
-        env,
-        help = "Bootstrap kademlia. Makes node discoverable by others."
-    )]
-    pub bootstrap: bool,
+    #[command(flatten)]
+    pub transport: TransportArgs,
 
     #[arg(
         long,
@@ -61,12 +35,12 @@ pub struct Cli {
     pub metrics_path: Option<PathBuf>,
 
     #[arg(
-    long,
-    env,
-    help = "Choose which metrics should be printed.",
-    value_delimiter = ',',
-    num_args = 0..,
-    default_value = "Ping,QuerySubmitted,QueryFinished,QueryExecuted"
+        long,
+        env,
+        help = "Choose which metrics should be printed.",
+        value_delimiter = ',',
+        num_args = 0..,
+        default_value = "Ping,QuerySubmitted,QueryFinished,QueryExecuted"
     )]
     pub metrics: Vec<String>,
 

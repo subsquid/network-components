@@ -4,7 +4,6 @@ use clap::Parser;
 use simple_logger::SimpleLogger;
 
 use subsquid_network_transport::transport::P2PTransportBuilder;
-use subsquid_network_transport::util::get_keypair;
 
 use crate::cli::Cli;
 use crate::metrics::MetricsWriter;
@@ -37,12 +36,7 @@ async fn main() -> anyhow::Result<()> {
     let metrics_writer = MetricsWriter::from_cli(&args).await?;
 
     // Build P2P transport
-    let keypair = get_keypair(args.key).await?;
-    let mut transport_builder = P2PTransportBuilder::from_keypair(keypair);
-    let listen_addr = args.listen.parse()?;
-    transport_builder.listen_on(std::iter::once(listen_addr));
-    transport_builder.boot_nodes(args.boot_nodes);
-    transport_builder.bootstrap(args.bootstrap);
+    let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
     let (incoming_messages, message_sender, _) = transport_builder.run().await?;
 
     // Get scheduling units

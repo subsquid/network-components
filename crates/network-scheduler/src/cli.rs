@@ -40,7 +40,7 @@ pub struct Cli {
         help = "Choose which metrics should be printed.",
         value_delimiter = ',',
         num_args = 0..,
-        default_value = "Ping,QuerySubmitted,QueryFinished,QueryExecuted"
+        default_value = "QuerySubmitted,QueryFinished,QueryExecuted,WorkersSnapshot"
     )]
     pub metrics: Vec<String>,
 

@@ -1,7 +1,7 @@
 use std::pin::Pin;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
@@ -9,45 +9,42 @@ use router_controller::messages::{Ping, QueryExecuted, QueryFinished, QuerySubmi
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Cli;
+use crate::worker_registry::ActiveWorker;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Metrics {
-    timestamp: u64,
-    // Milliseconds since UNIX epoch
-    peer_id: String,
+    #[serde(with = "serde_millis")]
+    timestamp: Instant,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    peer_id: Option<String>,
     #[serde(flatten)]
     event: MetricsEvent,
 }
 
 impl Metrics {
-    pub fn new(peer_id: impl ToString, event: impl Into<MetricsEvent>) -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("We're after 1970")
-            .as_millis()
-            .try_into()
-            .expect("But before 2554");
+    pub fn new(peer_id: Option<String>, event: impl Into<MetricsEvent>) -> Self {
         Self {
-            timestamp,
-            peer_id: peer_id.to_string(),
+            timestamp: Instant::now(),
+            peer_id,
             event: event.into(),
         }
     }
 
     pub fn to_json_line(&self) -> anyhow::Result<Vec<u8>> {
-        let json_str = serde_json::to_string(self)?;
-        let vec = format!("metrics: {json_str}\n").into_bytes();
+        let mut vec = serde_json::to_vec(self)?;
+        vec.push(b'\n');
         Ok(vec)
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event")]
 pub enum MetricsEvent {
     Ping(Ping),
     QuerySubmitted(QuerySubmitted),
     QueryFinished(QueryFinished),
     QueryExecuted(QueryExecuted),
+    WorkersSnapshot { active_workers: Vec<ActiveWorker> },
 }
 
 impl MetricsEvent {
@@ -57,6 +54,7 @@ impl MetricsEvent {
             MetricsEvent::QuerySubmitted(_) => "QuerySubmitted",
             MetricsEvent::QueryFinished(_) => "QueryFinished",
             MetricsEvent::QueryExecuted(_) => "QueryExecuted",
+            MetricsEvent::WorkersSnapshot { .. } => "WorkersSnapshot",
         }
     }
 }
@@ -85,14 +83,20 @@ impl From<QueryExecuted> for MetricsEvent {
     }
 }
 
+impl From<Vec<ActiveWorker>> for MetricsEvent {
+    fn from(active_workers: Vec<ActiveWorker>) -> Self {
+        Self::WorkersSnapshot { active_workers }
+    }
+}
+
 pub struct MetricsWriter {
-    output: Pin<Box<dyn AsyncWrite>>,
+    output: Pin<Box<dyn AsyncWrite + Send + Sync>>,
     enabled_metrics: Vec<String>,
 }
 
 impl MetricsWriter {
     pub async fn from_cli(cli: &Cli) -> anyhow::Result<Self> {
-        let output: Pin<Box<dyn AsyncWrite>> = match &cli.metrics_path {
+        let output: Pin<Box<dyn AsyncWrite + Send + Sync>> = match &cli.metrics_path {
             Some(path) => {
                 let metrics_file = OpenOptions::new()
                     .create(true)
@@ -117,9 +121,10 @@ impl MetricsWriter {
 
     pub async fn write_metrics(
         &mut self,
-        peer_id: PeerId,
+        peer_id: Option<PeerId>,
         msg: impl Into<MetricsEvent>,
     ) -> anyhow::Result<()> {
+        let peer_id = peer_id.map(|id| id.to_string());
         let metrics = Metrics::new(peer_id, msg);
         if self.metric_enabled(&metrics.event) {
             let json_line = metrics.to_json_line()?;

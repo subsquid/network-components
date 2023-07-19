@@ -136,7 +136,10 @@ impl Scheduler {
 
         log::info!("Scheduling complete.");
         for (worker_id, state) in self.worker_states.iter() {
-            log::info!("Worker {worker_id}: {state}");
+            log::info!(
+                "Worker {worker_id}: {state} {:?}",
+                self.get_worker_state(worker_id)
+            );
         }
         if !self.unassigned_units.is_empty() {
             log::warn!(

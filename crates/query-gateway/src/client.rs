@@ -204,7 +204,7 @@ struct QueryHandler {
     worker_updates: mpsc::Receiver<Vec<Worker>>,
     tasks: HashMap<String, Task>,
     network_state: Arc<RwLock<NetworkState>>,
-    router_id: PeerId,
+    scheduler_id: PeerId,
     send_metrics: bool,
 }
 
@@ -244,7 +244,7 @@ impl QueryHandler {
 
     async fn send_metrics(&mut self, msg: Msg) {
         let _ = self
-            .send_msg(self.router_id, msg)
+            .send_msg(self.scheduler_id, msg)
             .await
             .map_err(|e| log::error!("Failed to send metrics: {e:?}"));
     }
@@ -467,7 +467,7 @@ pub async fn get_client(
         worker_updates,
         tasks: Default::default(),
         network_state: network_state.clone(),
-        router_id: config.router_id.0,
+        scheduler_id: config.scheduler_id.0,
         send_metrics: config.send_metrics,
     };
     tokio::spawn(handler.run());

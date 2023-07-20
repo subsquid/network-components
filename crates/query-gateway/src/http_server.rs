@@ -20,7 +20,7 @@ async fn get_height(
     Path(dataset): Path<String>,
     Extension(client): Extension<Arc<QueryClient>>,
 ) -> impl IntoResponse {
-    log::info!("Get height dataset={dataset}");
+    log::debug!("Get height dataset={dataset}");
     let dataset_id = match client.get_dataset_id(&dataset).await {
         Some(dataset_id) => dataset_id,
         None => return (StatusCode::NOT_FOUND, format!("Unknown dataset: {dataset}")),
@@ -40,7 +40,7 @@ async fn get_worker(
     Path((dataset, start_block)): Path<(String, u32)>,
     Extension(client): Extension<Arc<QueryClient>>,
 ) -> impl IntoResponse {
-    log::info!("Get worker dataset={dataset} start_block={start_block}");
+    log::debug!("Get worker dataset={dataset} start_block={start_block}");
     let dataset_id = match client.get_dataset_id(&dataset).await {
         Some(dataset_id) => dataset_id,
         None => return (StatusCode::NOT_FOUND, format!("Unknown dataset: {dataset}")),
@@ -76,7 +76,7 @@ async fn execute_query(
     headers: HeaderMap,
     query: String, // request body
 ) -> Response {
-    log::info!("Execute query dataset_id={dataset_id} worker_id={worker_id}");
+    log::debug!("Execute query dataset_id={dataset_id} worker_id={worker_id}");
     match client
         .execute_query(dataset_id, query, worker_id, timeout, profiling)
         .await

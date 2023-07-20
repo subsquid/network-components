@@ -41,11 +41,11 @@ impl CrustClient {
         })
     }
 
-    pub async fn with_random_wallet() -> CrustClient {
+    pub async fn with_random_wallet() -> Result<CrustClient, WalletError> {
         let client = Client::new();
         let wallet = Wallet::new(&mut rand::thread_rng());
         let url = Url::parse("https://crustipfs.xyz").unwrap();
-        CrustClient::new(wallet, client, url).await.unwrap()
+        CrustClient::new(wallet, client, url).await
     }
 
     pub async fn write_to_ipfs(&self, file: &str) -> Result<String, CrustError> {

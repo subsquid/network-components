@@ -37,8 +37,8 @@ impl From<&query_result::Result> for query_finished::Result {
 }
 
 impl SizeAndHash {
-    pub fn compute(data: &[u8]) -> Self {
-        let size = data.len() as u32;
+    pub fn compute(data: impl AsRef<[u8]>) -> Self {
+        let size = data.as_ref().len() as u32;
         let mut hasher = Sha3_256::new();
         hasher.update(data);
         let hash = hasher.finalize();

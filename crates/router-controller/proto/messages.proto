@@ -63,30 +63,42 @@ message OkResult {
 }
 
 message QuerySubmitted {
-  Query query = 1;
+  string client_id = 1;
   string worker_id = 2;
+  string query_id = 3;
+
+  string dataset = 4;
+  string query = 5;
+  bytes query_hash = 6;
 }
 
 message QueryFinished {
-  string query_id = 1;
+  string client_id = 1;
   string worker_id = 2;
-  uint32 exec_time_ms = 3;
+  string query_id = 3;
+
+  uint32 exec_time_ms = 4;
   oneof result {
-    SizeAndHash ok = 4;
-    string bad_request = 5;
-    string server_error = 6;
-    google.protobuf.Empty timeout = 7;
+    SizeAndHash ok = 5;
+    string bad_request = 6;
+    string server_error = 7;
+    google.protobuf.Empty timeout = 8;
   }
 }
 
 message QueryExecuted {
-  Query query = 1;
-  string client_id = 2;
-  uint32 exec_time_ms = 3;
+  string client_id = 1;
+  string worker_id = 2;
+  string query_id = 3;
+
+  string dataset = 4;
+  bytes query_hash = 5;
+
+  uint32 exec_time_ms = 6;
   oneof result {
-    InputAndOutput ok = 4;
-    string bad_request = 5;
-    string server_error = 6;
+    InputAndOutput ok = 7;
+    string bad_request = 8;
+    string server_error = 9;
   }
 }
 

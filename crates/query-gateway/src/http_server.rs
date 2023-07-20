@@ -107,7 +107,9 @@ fn ok_response(result: OkResult, request_headers: HeaderMap) -> Response {
         mut data,
         exec_plan,
     } = result;
-    exec_plan.map(save_exec_plan);
+    if let Some(exec_plan) = exec_plan {
+        save_exec_plan(exec_plan);
+    }
 
     let mut headers = HeaderMap::new();
     headers.insert("content-type", "application/json".parse().unwrap());

@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 use contract_client::Worker;
 use router_controller::messages::{
     envelope::Msg, query_finished, query_result, Envelope, OkResult, Query as QueryMsg,
-    QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, RangeSet,
+    QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, RangeSet, SizeAndHash,
 };
 use subsquid_network_transport::{MsgContent, PeerId};
 
@@ -204,6 +204,7 @@ struct QueryHandler {
     worker_updates: mpsc::Receiver<Vec<Worker>>,
     tasks: HashMap<String, Task>,
     network_state: Arc<RwLock<NetworkState>>,
+    local_peer_id: PeerId,
     scheduler_id: PeerId,
     send_metrics: bool,
 }
@@ -260,24 +261,29 @@ impl QueryHandler {
             profiling,
             result_sender,
         } = query;
+        let dataset = dataset_id.0;
 
         let timeout_handle = self.spawn_timeout_task(&query_id, timeout);
         let task = Task::new(worker_id, result_sender, timeout_handle);
         self.tasks.insert(query_id.clone(), task);
 
-        let query = QueryMsg {
-            query_id,
-            dataset: dataset_id.0,
-            query,
+        let worker_msg = Msg::Query(QueryMsg {
+            query_id: query_id.clone(),
+            dataset: dataset.clone(),
+            query: query.clone(),
             profiling,
-        };
-        let worker_msg = Msg::Query(query.clone());
+        });
         self.send_msg(worker_id, worker_msg).await?;
 
         if self.send_metrics {
+            let query_hash = SizeAndHash::compute(&query).sha3_256;
             let metrics_msg = Msg::QuerySubmitted(QuerySubmitted {
-                query: Some(query),
+                client_id: self.local_peer_id.to_string(),
                 worker_id: worker_id.to_string(),
+                query_id,
+                dataset,
+                query,
+                query_hash,
             });
             self.send_metrics(metrics_msg).await;
         }
@@ -307,8 +313,9 @@ impl QueryHandler {
 
         if self.send_metrics {
             let metrics_msg = Msg::QueryFinished(QueryFinished {
-                query_id,
+                client_id: self.local_peer_id.to_string(),
                 worker_id: task.worker_id.to_string(),
+                query_id,
                 exec_time_ms: task.exec_time_ms(),
                 result: Some(query_finished::Result::Timeout(())),
             });
@@ -370,8 +377,9 @@ impl QueryHandler {
 
         if self.send_metrics {
             let metrics_msg = Msg::QueryFinished(QueryFinished {
-                query_id,
+                client_id: self.local_peer_id.to_string(),
                 worker_id: peer_id.to_string(),
+                query_id,
                 exec_time_ms: task.exec_time_ms(),
                 result: Some((&result).into()),
             });
@@ -450,6 +458,7 @@ impl QueryClient {
 
 pub async fn get_client(
     config: Config,
+    local_peer_id: PeerId,
     msg_receiver: mpsc::Receiver<Message>,
     msg_sender: mpsc::Sender<Message>,
     worker_updates: mpsc::Receiver<Vec<Worker>>,
@@ -467,6 +476,7 @@ pub async fn get_client(
         worker_updates,
         tasks: Default::default(),
         network_state: network_state.clone(),
+        local_peer_id,
         scheduler_id: config.scheduler_id.0,
         send_metrics: config.send_metrics,
     };

@@ -1,3 +1,5 @@
+use crate::core::k256::ecdsa::SigningKey;
+
 use base64::{engine::general_purpose, Engine as _};
 use ethers::prelude::*;
 use ethers_core::k256::ecdsa::{
@@ -22,31 +24,20 @@ pub enum CrustError {
 }
 
 #[derive(Debug)]
-pub struct CrustClient<'a, D: Sync + Send + PrehashSigner<(RecoverableSignature, RecoveryId)>> {
-    http_client: &'a Client,
-    wallet: &'a Wallet<D>,
-    gateway_url: &'a Url,
+pub struct CrustClient<D: Sync + Send + PrehashSigner<(RecoverableSignature, RecoveryId)>> {
+    http_client: Client,
+    wallet: Wallet<D>,
+    gateway_url: Url,
 }
 
-impl<'a, D: Sync + Send + PrehashSigner<(RecoverableSignature, RecoveryId)>> CrustClient<'a, D> {
-    pub fn new(
-        wallet: &'a Wallet<D>,
-        http_client: &'a Client,
-        gateway_url: &'a Url,
-    ) -> CrustClient<'a, D> {
+impl<D: Sync + Send + PrehashSigner<(RecoverableSignature, RecoveryId)>> CrustClient<D> {
+    pub fn new(wallet: Wallet<D>, http_client: Client, gateway_url: Url) -> CrustClient<D> {
         CrustClient {
             http_client,
             wallet,
             gateway_url,
         }
     }
-
-    // pub fn with_random_wallet() -> CrustClient<'a, SigningKey> {
-    //     let client = Client::new();
-    //     let wallet = Wallet::new(&mut rand::thread_rng());
-    //     let url = Url::parse("https://crustipfs.xyz").unwrap();
-    //     CrustClient::new(&wallet, &client, &url)
-    // }
 
     pub async fn write_to_ipfs(&self, file: &str) -> Result<String, CrustError> {
         let auth_key = self.get_auth_key().await?;
@@ -68,5 +59,14 @@ impl<'a, D: Sync + Send + PrehashSigner<(RecoverableSignature, RecoveryId)>> Cru
         let sig = self.wallet.sign_message(&address).await?;
         let plain_auth_key = format!("eth-{address}:{sig}");
         Ok(general_purpose::STANDARD.encode(plain_auth_key.as_bytes()))
+    }
+}
+
+impl CrustClient<SigningKey> {
+    pub fn with_random_wallet() -> CrustClient<SigningKey> {
+        let client = Client::new();
+        let wallet = Wallet::new(&mut rand::thread_rng());
+        let url = Url::parse("https://crustipfs.xyz").unwrap();
+        CrustClient::new(wallet, client, url)
     }
 }

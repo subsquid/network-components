@@ -15,19 +15,29 @@ use crate::worker_registry::ActiveWorker;
 pub struct Metrics {
     #[serde(with = "serde_millis")]
     timestamp: Instant,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    peer_id: Option<String>,
     #[serde(flatten)]
     event: MetricsEvent,
 }
 
 impl Metrics {
-    pub fn new(peer_id: Option<String>, event: impl Into<MetricsEvent>) -> Self {
-        Self {
+    pub fn new(peer_id: Option<String>, event: impl Into<MetricsEvent>) -> anyhow::Result<Self> {
+        let event = event.into();
+        let expected_sender = match &event {
+            MetricsEvent::QuerySubmitted(QuerySubmitted { client_id, .. }) => Some(client_id),
+            MetricsEvent::QueryFinished(QueryFinished { client_id, .. }) => Some(client_id),
+            MetricsEvent::QueryExecuted(QueryExecuted { worker_id, .. }) => Some(worker_id),
+            MetricsEvent::Ping(Ping { worker_id, .. }) => Some(worker_id),
+            _ => None,
+        };
+        anyhow::ensure!(
+            peer_id.as_ref() == expected_sender,
+            "Invalid metrics message sender"
+        );
+
+        Ok(Self {
             timestamp: Instant::now(),
-            peer_id,
-            event: event.into(),
-        }
+            event,
+        })
     }
 
     pub fn to_json_line(&self) -> anyhow::Result<Vec<u8>> {
@@ -125,7 +135,7 @@ impl MetricsWriter {
         msg: impl Into<MetricsEvent>,
     ) -> anyhow::Result<()> {
         let peer_id = peer_id.map(|id| id.to_string());
-        let metrics = Metrics::new(peer_id, msg);
+        let metrics = Metrics::new(peer_id, msg)?;
         if self.metric_enabled(&metrics.event) {
             let json_line = metrics.to_json_line()?;
             self.output.write_all(json_line.as_slice()).await?;

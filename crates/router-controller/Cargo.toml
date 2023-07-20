@@ -3,16 +3,15 @@ name = "router-controller"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 base64 = "0.21"
+hex = { version = "0.4", features = ["serde"] }
+log = "0.4"
 parking_lot = "0.12"
 prost = "0.11"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 sha3 = "0.10"
-log = "0.4"
 
 [build-dependencies]
 prost-build = "0.11"

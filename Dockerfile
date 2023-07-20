@@ -55,6 +55,7 @@ COPY --from=network-builder /usr/src/crates/query-gateway/config.yml .
 
 ENV P2P_LISTEN_ADDR="/ip4/0.0.0.0/tcp/12345"
 ENV HTTP_LISTEN_ADDR="0.0.0.0:8000"
+ENV BOOTSTRAP="true"
 
 CMD ["query-gateway"]
 

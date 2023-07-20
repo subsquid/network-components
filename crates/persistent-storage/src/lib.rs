@@ -13,14 +13,6 @@ struct IpfsCreateResponse {
     hash: String,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum CrustError {
-    #[error("Authentication message signature error: {0:?}")]
-    AuthSigning(#[from] WalletError),
-    #[error("Invalid Peer ID: {0:?}")]
-    Network(#[from] reqwest::Error),
-}
-
 #[derive(Debug)]
 pub struct CrustClient {
     http_client: Client,
@@ -48,7 +40,7 @@ impl CrustClient {
         CrustClient::new(wallet, client, url).await
     }
 
-    pub async fn write_to_ipfs(&self, file: &str) -> Result<String, CrustError> {
+    pub async fn write_to_ipfs(&self, file: &str) -> Result<String, reqwest::Error> {
         let form = multipart::Form::new().text("file", file.to_string());
         Ok(self
             .http_client

@@ -5190,7 +5190,6 @@ dependencies = [
  "ipfs-api",
  "reqwest",
  "serde",
- "thiserror",
  "tokio",
 ]
 

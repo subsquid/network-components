@@ -251,7 +251,7 @@ impl QueryHandler {
     }
 
     async fn handle_query(&mut self, query: Query) -> anyhow::Result<()> {
-        log::info!("Starting query {query:?}");
+        log::debug!("Starting query {query:?}");
         let query_id = Self::generate_query_id();
         let Query {
             dataset_id,
@@ -303,7 +303,7 @@ impl QueryHandler {
     }
 
     async fn handle_timeout(&mut self, query_id: String) -> anyhow::Result<()> {
-        log::info!("Query {query_id} execution timed out");
+        log::debug!("Query {query_id} execution timed out");
         let (query_id, task) = self.get_task(query_id)?.remove_entry();
 
         self.network_state
@@ -366,7 +366,7 @@ impl QueryHandler {
     ) -> anyhow::Result<()> {
         let QueryResultMsg { query_id, result } = result;
         let result = result.ok_or_else(|| anyhow::anyhow!("Result missing"))?;
-        log::info!("Got result for query {query_id}");
+        log::debug!("Got result for query {query_id}");
 
         let task_entry = self.get_task(query_id)?;
         anyhow::ensure!(

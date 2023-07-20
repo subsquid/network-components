@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use simple_logger::SimpleLogger;
+use env_logger::Env;
 
 use subsquid_network_transport::cli::TransportArgs;
 use subsquid_network_transport::transport::P2PTransportBuilder;
@@ -47,11 +47,8 @@ struct Cli {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Init logger and parse arguments and config
-    SimpleLogger::new()
-        .with_level(log::LevelFilter::Info)
-        .with_module_level("ethers_providers", log::LevelFilter::Warn)
-        .env()
-        .init()?;
+    env_logger::Builder::from_env(Env::default().default_filter_or("info, ethers_providers=warn"))
+        .init();
     let args: Cli = Cli::parse();
     let http_listen_addr = args.http_listen.parse()?;
     let config: Config = serde_yaml::from_slice(tokio::fs::read(args.config).await?.as_slice())?;

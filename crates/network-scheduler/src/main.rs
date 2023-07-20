@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use clap::Parser;
-use simple_logger::SimpleLogger;
+use env_logger::Env;
 
 use subsquid_network_transport::transport::P2PTransportBuilder;
 
@@ -23,11 +23,10 @@ mod worker_registry;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Init logger and parse arguments and config
-    SimpleLogger::new()
-        .with_level(log::LevelFilter::Info)
-        .with_module_level("ethers_providers", log::LevelFilter::Warn)
-        .env()
-        .init()?;
+    env_logger::Builder::from_env(
+        Env::default().default_filter_or("info, aws_config=warn, ethers_providers=warn"),
+    )
+    .init();
     let args: Cli = Cli::parse();
     let config = args.config().await?;
     let schedule_interval = Duration::from_secs(config.schedule_interval_sec);

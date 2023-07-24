@@ -1,4 +1,4 @@
-use persistent_storage::CrustClient;
+use persistent_storage::crust_client::CrustClient;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

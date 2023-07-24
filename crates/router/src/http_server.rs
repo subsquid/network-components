@@ -26,7 +26,7 @@ async fn ping(
     let worker_id = msg.worker_id.clone();
     let worker_url = msg.worker_url.clone();
     let current_state = format!("{:?}", msg.state);
-    let desired_state = controller.ping(msg);
+    let desired_state: Arc<WorkerState> = controller.ping(msg).await;
     info!(
         ping_from = worker_id,
         worker_url,

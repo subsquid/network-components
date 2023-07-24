@@ -12,6 +12,9 @@ prost = "0.11"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 sha3 = "0.10"
+tokio = "1.29.1"
+
+persistent-storage = { version = "0.1", path = "../persistent-storage" }
 
 [build-dependencies]
 prost-build = "0.11"

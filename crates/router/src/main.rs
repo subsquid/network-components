@@ -33,7 +33,8 @@ async fn main() -> anyhow::Result<()> {
         .set_data_management_unit(args.scheduling_unit)
         .set_workers(args.worker)
         .set_datasets(args.dataset)
-        .build();
+        .build()
+        .await?;
 
     let controller = Arc::new(controller);
 

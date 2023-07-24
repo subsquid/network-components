@@ -1,5 +1,9 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use persistent_storage::{
+    crust_client::{CrustClient, WalletError},
+    CrustPersistentStorage, PersistentStorage,
+};
 use rand::prelude::SliceRandom;
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
@@ -51,6 +55,7 @@ pub struct Controller {
     managed_workers: parking_lot::RwLock<HashSet<WorkerId>>,
     data_replication: usize,
     data_management_unit: usize,
+    persistent_storage: Box<dyn PersistentStorage + Send + Sync>,
 }
 
 unsafe impl Send for Controller {}
@@ -139,7 +144,7 @@ impl Controller {
         *self.managed_workers.write() = workers.into_iter().collect();
     }
 
-    pub fn ping(&self, msg: Ping) -> Arc<WorkerState> {
+    pub async fn ping(&self, msg: Ping) -> Arc<WorkerState> {
         let info = Arc::new(WorkerInfo {
             id: msg.worker_id.clone(),
             url: msg.worker_url,
@@ -174,6 +179,8 @@ impl Controller {
             }
         });
 
+        // TODO handle errors
+        let _ = self.persistent_storage.store(&format!("{:#?}", info)).await;
         desired_state.unwrap()
     }
 
@@ -263,10 +270,10 @@ impl Controller {
                         };
                         if next_block > c.first_block() {
                             log::error!("Received overlapping chunks: {} and {}", p, c);
-                            return false
+                            return false;
                         } else {
                             log::error!("There is a gap between {} and {}", p, c);
-                            return false
+                            return false;
                         }
                     }
                     next_block = c.last_block() + 1
@@ -476,8 +483,8 @@ impl ControllerBuilder {
         self
     }
 
-    pub fn build(&self) -> Controller {
-        Controller {
+    pub async fn build(&self) -> Result<Controller, WalletError> {
+        Ok(Controller {
             schedule: parking_lot::Mutex::new(Schedule {
                 datasets: self
                     .managed_datasets
@@ -496,7 +503,10 @@ impl ControllerBuilder {
             managed_workers: parking_lot::RwLock::new(self.managed_workers.clone()),
             data_replication: self.replication,
             data_management_unit: self.data_management_unit,
-        }
+            persistent_storage: Box::new(CrustPersistentStorage::new(
+                CrustClient::with_random_wallet().await?,
+            )),
+        })
     }
 }
 
@@ -507,14 +517,16 @@ mod tests {
     use crate::controller::{ControllerBuilder, Ping};
     use crate::data_chunk::DataChunk;
 
-    #[test]
-    fn basic() {
+    #[tokio::test]
+    async fn basic() {
         let controller = ControllerBuilder::new()
             .set_data_management_unit(1)
             .set_data_replication(2)
             .set_workers((0..8).map(|i| i.to_string()))
             .set_datasets((0..2).map(|i| (i.to_string(), i.to_string())))
-            .build();
+            .build()
+            .await
+            .unwrap();
 
         let chunks = vec![
             vec![

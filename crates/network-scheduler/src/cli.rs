@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -18,6 +19,14 @@ pub struct Config {
 pub struct Cli {
     #[command(flatten)]
     pub transport: TransportArgs,
+
+    #[arg(
+        long,
+        env,
+        help = "HTTP metrics server listen addr",
+        default_value = "0.0.0.0:8000"
+    )]
+    pub http_listen_addr: SocketAddr,
 
     #[arg(
         long,

@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,11 +6,13 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
+use crate::cli::Config;
 use router_controller::messages::envelope::Msg;
 use router_controller::messages::{Envelope, Ping, ProstMsg};
 use subsquid_network_transport::{MsgContent, PeerId};
 
 use crate::metrics::{MetricsEvent, MetricsWriter};
+use crate::metrics_server;
 use crate::scheduler::Scheduler;
 use crate::scheduling_unit::SchedulingUnit;
 use crate::worker_registry::{WorkerRegistry, WORKER_INACTIVE_TIMEOUT};
@@ -22,8 +25,8 @@ pub struct Server {
     message_sender: Sender<Message>,
     worker_registry: Arc<RwLock<WorkerRegistry>>,
     scheduler: Arc<RwLock<Scheduler>>,
-    schedule_interval: Duration,
     metrics_writer: Arc<RwLock<MetricsWriter>>,
+    config: Config,
 }
 
 impl Server {
@@ -33,8 +36,8 @@ impl Server {
         message_sender: Sender<Message>,
         worker_registry: WorkerRegistry,
         scheduler: Scheduler,
-        schedule_interval: Duration,
         metrics_writer: MetricsWriter,
+        config: Config,
     ) -> Self {
         let worker_registry = Arc::new(RwLock::new(worker_registry));
         let scheduler = Arc::new(RwLock::new(scheduler));
@@ -45,15 +48,16 @@ impl Server {
             message_sender,
             worker_registry,
             scheduler,
-            schedule_interval,
             metrics_writer,
+            config,
         }
     }
 
-    pub async fn run(mut self) {
+    pub async fn run(mut self, metrics_listen_addr: SocketAddr) {
         log::info!("Starting scheduler server");
         let scheduling_task = self.spawn_scheduling_task();
         let monitoring_task = self.spawn_worker_monitoring_task();
+        let metrics_server_task = self.spawn_metrics_server_task(metrics_listen_addr);
         loop {
             tokio::select! {
                 Some(msg) = self.incoming_messages.recv() => self.handle_message(msg).await,
@@ -64,6 +68,7 @@ impl Server {
         log::info!("Server shutting down");
         scheduling_task.abort();
         monitoring_task.abort();
+        metrics_server_task.abort();
     }
 
     async fn handle_message(&mut self, msg: Message) {
@@ -85,7 +90,11 @@ impl Server {
     }
 
     async fn ping(&mut self, peer_id: PeerId, msg: Ping) {
-        self.worker_registry.write().await.ping(peer_id, &msg).await;
+        self.worker_registry
+            .write()
+            .await
+            .ping(peer_id, msg.clone())
+            .await;
         self.write_metrics(peer_id, msg).await;
         let worker_state = self.scheduler.read().await.get_worker_state(&peer_id);
         if let Some(worker_state) = worker_state {
@@ -124,7 +133,7 @@ impl Server {
     fn spawn_scheduling_task(&self) -> JoinHandle<()> {
         let worker_registry = self.worker_registry.clone();
         let scheduler = self.scheduler.clone();
-        let schedule_interval = self.schedule_interval;
+        let schedule_interval = Duration::from_secs(self.config.schedule_interval_sec);
         tokio::spawn(async move {
             log::info!("Starting scheduling task");
             loop {
@@ -159,6 +168,20 @@ impl Server {
                 {
                     log::error!("Error writing metrics: {e:?}");
                 }
+            }
+        })
+    }
+
+    fn spawn_metrics_server_task(&self, metrics_listen_addr: SocketAddr) -> JoinHandle<()> {
+        let worker_registry = self.worker_registry.clone();
+        let scheduler = self.scheduler.clone();
+        let config = self.config.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                metrics_server::run_server(worker_registry, scheduler, config, metrics_listen_addr)
+                    .await
+            {
+                log::error!("Metrics server crashed: {e:?}");
             }
         })
     }

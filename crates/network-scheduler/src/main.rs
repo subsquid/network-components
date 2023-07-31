@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use clap::Parser;
 use env_logger::Env;
 
@@ -14,6 +12,7 @@ use crate::worker_registry::WorkerRegistry;
 mod cli;
 mod data_chunk;
 mod metrics;
+mod metrics_server;
 mod scheduler;
 mod scheduling_unit;
 mod server;
@@ -29,7 +28,6 @@ async fn main() -> anyhow::Result<()> {
     .init();
     let args: Cli = Cli::parse();
     let config = args.config().await?;
-    let schedule_interval = Duration::from_secs(config.schedule_interval_sec);
 
     // Open file for writing metrics
     let metrics_writer = MetricsWriter::from_cli(&args).await?;
@@ -40,8 +38,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Get scheduling units
     let incoming_units = storage::get_incoming_units(
-        config.s3_endpoint,
-        config.buckets,
+        config.s3_endpoint.clone(),
+        config.buckets.clone(),
         config.scheduling_unit_size,
     )
     .await?;
@@ -55,10 +53,10 @@ async fn main() -> anyhow::Result<()> {
         message_sender,
         worker_registry,
         scheduler,
-        schedule_interval,
         metrics_writer,
+        config,
     )
-    .run()
+    .run(args.http_listen_addr)
     .await;
 
     Ok(())

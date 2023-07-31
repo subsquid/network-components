@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 
 use subsquid_network_transport::PeerId;
 
-use crate::data_chunk::chunks_to_worker_state;
+use crate::data_chunk::{chunks_to_worker_state, DataChunk};
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 
 #[derive(Debug, Clone)]
@@ -62,6 +62,13 @@ impl Scheduler {
             replication_factor,
             worker_storage_bytes,
         }
+    }
+
+    pub fn known_chunks(&self) -> Vec<DataChunk> {
+        self.known_units
+            .iter()
+            .flat_map(|(_, unit)| unit.chunks.iter().cloned())
+            .collect()
     }
 
     pub fn new_unit(&mut self, unit: SchedulingUnit) {

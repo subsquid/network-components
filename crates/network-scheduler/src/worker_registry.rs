@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::{Serialize, Serializer};
 use std::time::Instant;
 
-use router_controller::messages::Ping;
+use router_controller::messages::{Ping, RangeSet};
 use subsquid_network_transport::PeerId;
 
 pub const WORKER_INACTIVE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -31,6 +31,7 @@ pub struct WorkerRegistry {
     registered_workers: HashSet<PeerId>,
     pings: HashMap<PeerId, Instant>,
     stored_bytes: HashMap<PeerId, u64>,
+    stored_ranges: HashMap<PeerId, HashMap<String, RangeSet>>,
 }
 
 impl WorkerRegistry {
@@ -41,6 +42,7 @@ impl WorkerRegistry {
             registered_workers: Default::default(),
             pings: Default::default(),
             stored_bytes: Default::default(),
+            stored_ranges: Default::default(),
         };
         // Need to get new workers immediately, otherwise they wouldn't be updated until the first
         // call to `active_workers`, so all pings would be discarded.
@@ -48,11 +50,13 @@ impl WorkerRegistry {
         Ok(registry)
     }
 
-    pub async fn ping(&mut self, worker_id: PeerId, msg: &Ping) {
+    pub async fn ping(&mut self, worker_id: PeerId, msg: Ping) {
         log::debug!("Got ping from {worker_id}");
         if self.registered_workers.contains(&worker_id) {
             self.pings.insert(worker_id, Instant::now());
             self.stored_bytes.insert(worker_id, msg.stored_bytes);
+            self.stored_ranges
+                .insert(worker_id, msg.state.unwrap_or_default().datasets);
         }
     }
 
@@ -66,6 +70,8 @@ impl WorkerRegistry {
         self.pings
             .retain(|id, _| self.registered_workers.contains(id));
         self.stored_bytes
+            .retain(|id, _| self.registered_workers.contains(id));
+        self.stored_ranges
             .retain(|id, _| self.registered_workers.contains(id));
         Ok(())
     }
@@ -87,5 +93,12 @@ impl WorkerRegistry {
                 _ => None,
             })
             .collect()
+    }
+
+    pub fn stored_ranges(&self, worker_id: &PeerId) -> HashMap<String, RangeSet> {
+        self.stored_ranges
+            .get(worker_id)
+            .cloned()
+            .unwrap_or_default()
     }
 }

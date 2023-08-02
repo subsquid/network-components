@@ -16,7 +16,6 @@ use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize)]
 struct ChunkStatus {
-    dataset: String,
     begin: u32,
     end: u32,
     size_bytes: u64,
@@ -33,7 +32,7 @@ async fn active_workers(
 async fn chunks(
     Extension(worker_registry): Extension<Arc<RwLock<WorkerRegistry>>>,
     Extension(scheduler): Extension<Arc<RwLock<Scheduler>>>,
-) -> Json<Vec<ChunkStatus>> {
+) -> Json<HashMap<String, Vec<ChunkStatus>>> {
     let workers = worker_registry.write().await.active_workers().await;
     let chunks = scheduler.read().await.known_chunks();
     let assigned_ranges = {
@@ -51,16 +50,16 @@ async fn chunks(
         .map(|chunk| {
             let assigned_to = find_workers_with_chunk(&chunk, &assigned_ranges);
             let downloaded_by = find_workers_with_chunk(&chunk, &stored_ranges);
-            ChunkStatus {
-                dataset: chunk.dataset_url,
+            let chunk_status = ChunkStatus {
                 begin: chunk.block_range.begin,
                 end: chunk.block_range.end,
                 size_bytes: chunk.size_bytes,
                 assigned_to,
                 downloaded_by,
-            }
+            };
+            (chunk.dataset_url, chunk_status)
         })
-        .collect();
+        .into_group_map();
     Json(chunk_statuses)
 }
 

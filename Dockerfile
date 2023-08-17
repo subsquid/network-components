@@ -13,7 +13,7 @@ COPY --from=archive-router-builder /archive-router/target/release/router ./route
 ENTRYPOINT ["/archive-router/router"]
 EXPOSE 3000
 
-FROM rust:1.70-bookworm AS network-builder
+FROM rust:1.70-bullseye AS network-builder
 
 RUN apt update
 RUN apt install -y -V protobuf-compiler
@@ -30,7 +30,7 @@ COPY subsquid-network/transport ./subsquid-network/transport
 
 RUN cargo build --release --workspace
 
-FROM debian:bookworm-slim as network-scheduler
+FROM debian:bullseye-slim as network-scheduler
 
 RUN apt-get update && apt-get install ca-certificates -y
 
@@ -39,12 +39,13 @@ WORKDIR /run
 COPY --from=network-builder /usr/src/target/release/network-scheduler /usr/local/bin/network-scheduler
 COPY --from=network-builder /usr/src/crates/network-scheduler/config.yml .
 
-ENV LISTEN_ADDR="/ip4/0.0.0.0/tcp/12345"
+ENV P2P_LISTEN_ADDR="/ip4/0.0.0.0/tcp/12345"
+ENV HTTP_LISTEN_ADDR="0.0.0.0:8000"
 ENV BOOTSTRAP="true"
 
 CMD ["network-scheduler"]
 
-FROM debian:bookworm-slim as query-gateway
+FROM debian:bullseye-slim as query-gateway
 
 RUN apt-get update && apt-get install ca-certificates net-tools -y
 

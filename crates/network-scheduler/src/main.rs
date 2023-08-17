@@ -19,7 +19,7 @@ mod server;
 mod storage;
 mod worker_registry;
 
-#[tokio::main]
+#[tokio::main(worker_threads = 4)]
 async fn main() -> anyhow::Result<()> {
     // Init logger and parse arguments and config
     env_logger::Builder::from_env(

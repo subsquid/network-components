@@ -13,6 +13,7 @@ clap = { version = "4", features = ["derive", "env"] }
 env_logger = "0.10"
 hex = "0.4"
 itertools = "0.11"
+libp2p = "0.50"
 log = "0.4"
 nonempty = "0.8"
 serde = { version = "1", features = ["derive"] }

@@ -1,3 +1,4 @@
+use libp2p::core::PublicKey;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -89,7 +90,25 @@ impl Server {
         };
     }
 
-    async fn ping(&mut self, peer_id: PeerId, msg: Ping) {
+    async fn ping(&mut self, peer_id: PeerId, mut msg: Ping) {
+        if msg.worker_id != peer_id.to_string() {
+            return log::warn!(
+                "Invalid worker ID in string: {} != {peer_id}",
+                msg.worker_id,
+            );
+        }
+        let pubkey = match PublicKey::from_protobuf_encoding(&peer_id.to_bytes()[2..]) {
+            Ok(pubkey) => pubkey,
+            Err(e) => return log::warn!("Cannot retrieve public key from peer ID: {e:?}"),
+        };
+        // Need to remove the signature from the struct before encoding
+        let signature = std::mem::take(&mut msg.signature);
+        let serialized_msg = msg.encode_to_vec();
+        if !pubkey.verify(&serialized_msg, &signature) {
+            return log::warn!("Invalid ping signature");
+        }
+        msg.signature = signature;
+
         self.worker_registry
             .write()
             .await

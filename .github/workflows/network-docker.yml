@@ -16,6 +16,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+        with:
+          submodules: 'true'
+          token: ${{ secrets.NETWORK_REPO_GITHUB_TOKEN }}
 
       - name: Docker login
         uses: docker/login-action@v1
@@ -26,6 +29,7 @@ jobs:
       - name: Build & publish scheduler
         uses: docker/build-push-action@v3
         with:
+          context: .
           target: network-scheduler
           push: true
           tags: subsquid/network-scheduler:${{ inputs.tag }}
@@ -33,6 +37,7 @@ jobs:
       - name: Build & publish query gateway
         uses: docker/build-push-action@v3
         with:
+          context: .
           target: query-gateway
           push: true
           tags: subsquid/query-gateway:${{ inputs.tag }}

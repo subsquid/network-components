@@ -1,0 +1,38 @@
+name: network-docker
+on:
+  workflow_dispatch: # manually run
+    inputs:
+      tag:
+        description: image tag
+        required: true
+
+env:
+  CI: true
+
+jobs:
+  publish:
+    name: Build & publish docker images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Docker login
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_LOGIN }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build & publish scheduler
+        uses: docker/build-push-action@v3
+        with:
+          target: network-scheduler
+          push: true
+          tags: subsquid/network-scheduler:${{ inputs.tag }}
+
+      - name: Build & publish query gateway
+        uses: docker/build-push-action@v3
+        with:
+          target: query-gateway
+          push: true
+          tags: subsquid/query-gateway:${{ inputs.tag }}

@@ -1,17 +1,18 @@
-use libp2p::core::PublicKey;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use libp2p::core::PublicKey;
+use sha3::{Digest, Sha3_256};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
-use crate::cli::Config;
 use router_controller::messages::envelope::Msg;
-use router_controller::messages::{Envelope, Ping, ProstMsg};
+use router_controller::messages::{Envelope, Ping, Pong, ProstMsg};
 use subsquid_network_transport::{MsgContent, PeerId};
 
+use crate::cli::Config;
 use crate::metrics::{MetricsEvent, MetricsWriter};
 use crate::metrics_server;
 use crate::scheduler::Scheduler;
@@ -108,6 +109,7 @@ impl Server {
             return log::warn!("Invalid ping signature");
         }
         msg.signature = signature;
+        let ping_hash = msg_hash(&msg);
 
         self.worker_registry
             .write()
@@ -115,10 +117,13 @@ impl Server {
             .ping(peer_id, msg.clone())
             .await;
         self.write_metrics(peer_id, msg).await;
-        let worker_state = self.scheduler.read().await.get_worker_state(&peer_id);
-        if let Some(worker_state) = worker_state {
-            self.send_msg(peer_id, Msg::StateUpdate(worker_state)).await
-        }
+
+        let assigned_state = self.scheduler.read().await.get_worker_state(&peer_id);
+        let pong = Msg::Pong(Pong {
+            ping_hash,
+            assigned_state,
+        });
+        self.send_msg(peer_id, pong).await;
     }
 
     async fn write_metrics(&mut self, peer_id: PeerId, msg: impl Into<MetricsEvent>) {
@@ -204,4 +209,12 @@ impl Server {
             }
         })
     }
+}
+
+fn msg_hash<M: ProstMsg>(msg: &M) -> Vec<u8> {
+    let mut result = [0u8; 32];
+    let mut hasher = Sha3_256::default();
+    hasher.update(msg.encode_to_vec().as_slice());
+    Digest::finalize_into(hasher, result.as_mut_slice().into());
+    result.to_vec()
 }

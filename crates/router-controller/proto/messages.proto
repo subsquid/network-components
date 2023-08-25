@@ -6,7 +6,7 @@ message Envelope {
   oneof msg {
     // router <-> worker
     Ping ping = 1;
-    WorkerState state_update = 2;
+    Pong pong = 2;
 
     // client <-> worker
     Query query = 5;
@@ -40,6 +40,11 @@ message Ping {
   bool pause = 4;
   uint64 stored_bytes = 5;
   bytes signature = 6;
+}
+
+message Pong {
+  bytes ping_hash = 1;
+  optional WorkerState assigned_state = 2;
 }
 
 message Query {

@@ -63,7 +63,7 @@ impl WorkerRegistry {
     async fn update_workers(&mut self) -> anyhow::Result<()> {
         let new_workers = self.client.active_workers().await?;
         self.registered_workers = new_workers.into_iter().map(|w| w.peer_id).collect();
-        log::info!(
+        log::debug!(
             "Registered workers set updated: {:?}",
             self.registered_workers
         );

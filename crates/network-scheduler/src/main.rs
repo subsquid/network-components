@@ -19,6 +19,8 @@ mod server;
 mod storage;
 mod worker_registry;
 
+const PING_TOPIC: &str = "worker_ping";
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Init logger and parse arguments and config
@@ -34,7 +36,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
-    let (incoming_messages, message_sender, _) = transport_builder.run().await?;
+    let (incoming_messages, message_sender, subscription_sender) = transport_builder.run().await?;
+
+    // Subscribe to receive worker pings
+    subscription_sender
+        .send((PING_TOPIC.to_string(), true))
+        .await?;
 
     // Get scheduling units
     let incoming_units = storage::get_incoming_units(

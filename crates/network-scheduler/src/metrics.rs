@@ -9,7 +9,7 @@ use router_controller::messages::{Ping, QueryExecuted, QueryFinished, QuerySubmi
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Cli;
-use crate::worker_registry::ActiveWorker;
+use crate::worker_registry::Worker;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Metrics {
@@ -54,7 +54,7 @@ pub enum MetricsEvent {
     QuerySubmitted(QuerySubmitted),
     QueryFinished(QueryFinished),
     QueryExecuted(QueryExecuted),
-    WorkersSnapshot { active_workers: Vec<ActiveWorker> },
+    WorkersSnapshot { active_workers: Vec<Worker> },
 }
 
 impl MetricsEvent {
@@ -93,8 +93,8 @@ impl From<QueryExecuted> for MetricsEvent {
     }
 }
 
-impl From<Vec<ActiveWorker>> for MetricsEvent {
-    fn from(active_workers: Vec<ActiveWorker>) -> Self {
+impl From<Vec<Worker>> for MetricsEvent {
+    fn from(active_workers: Vec<Worker>) -> Self {
         Self::WorkersSnapshot { active_workers }
     }
 }

@@ -6,11 +6,11 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
-use crate::cli::Config;
 use router_controller::messages::envelope::Msg;
 use router_controller::messages::{Envelope, Ping, ProstMsg};
 use subsquid_network_transport::{MsgContent, PeerId};
 
+use crate::cli::Config;
 use crate::metrics::{MetricsEvent, MetricsWriter};
 use crate::metrics_server;
 use crate::scheduler::Scheduler;
@@ -89,7 +89,11 @@ impl Server {
         };
     }
 
-    async fn ping(&mut self, peer_id: PeerId, msg: Ping) {
+    async fn ping(&mut self, peer_id: PeerId, mut msg: Ping) {
+        if msg.version.is_empty() {
+            // Sending version was added in v0.1.1
+            msg.version = "0.1.0".to_string();
+        }
         self.worker_registry
             .write()
             .await
@@ -141,7 +145,7 @@ impl Server {
                 let workers = worker_registry
                     .write()
                     .await
-                    .active_workers()
+                    .available_workers()
                     .await
                     .into_iter()
                     .map(|w| w.peer_id)
@@ -159,7 +163,7 @@ impl Server {
             log::info!("Starting monitoring task");
             loop {
                 tokio::time::sleep(monitoring_interval).await;
-                let workers = worker_registry.write().await.active_workers().await;
+                let workers = worker_registry.write().await.available_workers().await;
                 if let Err(e) = metrics_writer
                     .write()
                     .await

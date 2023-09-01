@@ -39,6 +39,7 @@ message Ping {
   WorkerState state = 3;
   bool pause = 4;
   uint64 stored_bytes = 5;
+  string version = 6;
 }
 
 message Query {

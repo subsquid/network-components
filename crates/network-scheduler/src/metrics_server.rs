@@ -1,7 +1,7 @@
 use crate::cli::Config;
 use crate::data_chunk::DataChunk;
 use crate::scheduler::Scheduler;
-use crate::worker_registry::{ActiveWorker, WorkerRegistry};
+use crate::worker_registry::{Worker, WorkerRegistry};
 use axum::routing::get;
 use axum::{Extension, Json, Router, Server};
 use itertools::Itertools;
@@ -25,7 +25,7 @@ struct ChunkStatus {
 
 async fn active_workers(
     Extension(worker_registry): Extension<Arc<RwLock<WorkerRegistry>>>,
-) -> Json<Vec<ActiveWorker>> {
+) -> Json<Vec<Worker>> {
     Json(worker_registry.write().await.active_workers().await)
 }
 
@@ -82,10 +82,7 @@ fn find_workers_with_chunk(
 }
 
 /// Returns a mapping: dataset -> [(worker_id, range_set)]
-fn map_ranges<F>(
-    workers: &[ActiveWorker],
-    state_getter: F,
-) -> HashMap<String, Vec<(PeerId, RangeSet)>>
+fn map_ranges<F>(workers: &[Worker], state_getter: F) -> HashMap<String, Vec<(PeerId, RangeSet)>>
 where
     F: Fn(&PeerId) -> HashMap<String, RangeSet>,
 {

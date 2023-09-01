@@ -44,6 +44,8 @@ struct Cli {
     rpc_url: String,
 }
 
+const PING_TOPIC: &str = "worker_ping";
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Init logger and parse arguments and config
@@ -59,12 +61,9 @@ async fn main() -> anyhow::Result<()> {
     let (msg_receiver, msg_sender, subscription_sender) = transport_builder.run().await?;
 
     // Subscribe to dataset state updates (from p2p pub-sub)
-    for (dataset, dataset_id) in config.available_datasets.iter() {
-        log::info!("Tracking dataset {dataset} ID={dataset_id}");
-        subscription_sender
-            .send((dataset_id.to_string(), true))
-            .await?;
-    }
+    subscription_sender
+        .send((PING_TOPIC.to_string(), true))
+        .await?;
 
     // Subscribe to worker set updates (from blockchain)
     let worker_updates = contract_client::get_client(&args.rpc_url)

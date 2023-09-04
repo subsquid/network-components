@@ -39,7 +39,8 @@ message Ping {
   WorkerState state = 3;
   bool pause = 4;
   uint64 stored_bytes = 5;
-  bytes signature = 6;
+  string version = 6;
+  bytes signature = 7;
 }
 
 message Pong {

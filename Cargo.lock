@@ -5382,6 +5382,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64 0.21.0",
  "chrono",
  "clap 4.2.1",
  "contract-client",

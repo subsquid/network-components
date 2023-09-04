@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 
 use contract_client::Worker;
 use router_controller::messages::{
-    envelope::Msg, query_finished, query_result, Envelope, OkResult, Query as QueryMsg,
+    envelope::Msg, query_finished, query_result, Envelope, OkResult, Ping, Query as QueryMsg,
     QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, RangeSet, SizeAndHash,
 };
 use subsquid_network_transport::{MsgContent, PeerId};
@@ -336,14 +336,28 @@ impl QueryHandler {
         let Envelope { msg } = Envelope::decode(content.as_slice())?;
         match msg {
             Some(Msg::QueryResult(result)) => self.query_result(peer_id, result).await?,
+            Some(Msg::Ping(ping)) => self.ping(peer_id, ping).await,
             Some(Msg::DatasetState(state)) => {
+                // TODO: This is a legacy message. Remove it.
                 let dataset_id = topic.ok_or_else(|| anyhow::anyhow!("Message topic missing"))?;
-                self.update_dataset_state(peer_id, dataset_id.into(), state)
+                self.update_dataset_state(peer_id, DatasetId(dataset_id), state)
                     .await;
             }
             _ => log::warn!("Unexpected message received: {msg:?}"),
         }
         Ok(())
+    }
+
+    async fn ping(&mut self, peer_id: PeerId, ping: Ping) {
+        log::debug!("Got ping from {peer_id}: {ping:?}");
+        let datasets = ping.state.map(|s| s.datasets).unwrap_or_default();
+        for (dataset_url, range_set) in datasets.into_iter() {
+            self.network_state.write().await.update_dataset_state(
+                peer_id,
+                DatasetId::from_url(dataset_url),
+                range_set,
+            )
+        }
     }
 
     async fn update_dataset_state(

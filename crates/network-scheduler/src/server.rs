@@ -165,7 +165,7 @@ impl Server {
                 let workers = worker_registry
                     .write()
                     .await
-                    .active_workers()
+                    .available_workers()
                     .await
                     .into_iter()
                     .map(|w| w.peer_id)
@@ -183,7 +183,7 @@ impl Server {
             log::info!("Starting monitoring task");
             loop {
                 tokio::time::sleep(monitoring_interval).await;
-                let workers = worker_registry.write().await.active_workers().await;
+                let workers = worker_registry.write().await.available_workers().await;
                 if let Err(e) = metrics_writer
                     .write()
                     .await

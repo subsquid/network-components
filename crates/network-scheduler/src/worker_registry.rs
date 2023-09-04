@@ -8,14 +8,32 @@ use router_controller::messages::{Ping, RangeSet};
 use subsquid_network_transport::PeerId;
 
 pub const WORKER_INACTIVE_TIMEOUT: Duration = Duration::from_secs(60);
+pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.1.1"];
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ActiveWorker {
+pub struct Worker {
     #[serde(serialize_with = "serialize_peer_id")]
     pub peer_id: PeerId,
     #[serde(with = "serde_millis")]
     pub last_ping: Instant,
     pub stored_bytes: u64,
+    pub version: String,
+}
+
+impl Worker {
+    pub fn new(peer_id: PeerId, stored_bytes: u64, version: String) -> Self {
+        Self {
+            peer_id,
+            last_ping: Instant::now(),
+            stored_bytes,
+            version,
+        }
+    }
+
+    pub fn is_available(&self) -> bool {
+        self.last_ping.elapsed() < WORKER_INACTIVE_TIMEOUT
+            && SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == self.version)
+    }
 }
 
 fn serialize_peer_id<S: Serializer>(peer_id: &PeerId, serializer: S) -> Result<S::Ok, S::Error> {
@@ -29,8 +47,7 @@ fn serialize_peer_id<S: Serializer>(peer_id: &PeerId, serializer: S) -> Result<S
 pub struct WorkerRegistry {
     client: Box<dyn contract_client::Client>,
     registered_workers: HashSet<PeerId>,
-    pings: HashMap<PeerId, Instant>,
-    stored_bytes: HashMap<PeerId, u64>,
+    active_workers: HashMap<PeerId, Worker>,
     stored_ranges: HashMap<PeerId, HashMap<String, RangeSet>>,
 }
 
@@ -40,8 +57,7 @@ impl WorkerRegistry {
         let mut registry = Self {
             client,
             registered_workers: Default::default(),
-            pings: Default::default(),
-            stored_bytes: Default::default(),
+            active_workers: Default::default(),
             stored_ranges: Default::default(),
         };
         // Need to get new workers immediately, otherwise they wouldn't be updated until the first
@@ -53,8 +69,10 @@ impl WorkerRegistry {
     pub async fn ping(&mut self, worker_id: PeerId, msg: Ping) {
         log::debug!("Got ping from {worker_id}");
         if self.registered_workers.contains(&worker_id) {
-            self.pings.insert(worker_id, Instant::now());
-            self.stored_bytes.insert(worker_id, msg.stored_bytes);
+            self.active_workers.insert(
+                worker_id,
+                Worker::new(worker_id, msg.stored_bytes, msg.version),
+            );
             self.stored_ranges
                 .insert(worker_id, msg.state.unwrap_or_default().datasets);
         }
@@ -67,32 +85,35 @@ impl WorkerRegistry {
             "Registered workers set updated: {:?}",
             self.registered_workers
         );
-        self.pings
-            .retain(|id, _| self.registered_workers.contains(id));
-        self.stored_bytes
+        self.active_workers
             .retain(|id, _| self.registered_workers.contains(id));
         self.stored_ranges
             .retain(|id, _| self.registered_workers.contains(id));
         Ok(())
     }
 
-    pub async fn active_workers(&mut self) -> Vec<ActiveWorker> {
+    /// Get workers which meet all the following conditions:
+    ///   a) registered on-chain,
+    ///   b) running supported version,
+    ///   c) sent ping withing the last `WORKER_INACTIVE_TIMEOUT` period.
+    pub async fn available_workers(&mut self) -> Vec<Worker> {
         if let Err(e) = self.update_workers().await {
             log::error!("Error updating worker set: {e:?}")
         }
-        self.registered_workers
+        self.active_workers
             .iter()
-            .filter_map(|id| match self.pings.get(id) {
-                Some(last_ping) if last_ping.elapsed() < WORKER_INACTIVE_TIMEOUT => {
-                    Some(ActiveWorker {
-                        peer_id: *id,
-                        last_ping: *last_ping,
-                        stored_bytes: self.stored_bytes.get(id).cloned().unwrap_or_default(),
-                    })
-                }
-                _ => None,
-            })
+            .filter_map(|(_, w)| w.is_available().then(|| w.clone()))
             .collect()
+    }
+
+    /// Get workers which meet the following conditions:
+    ///   a) registered on-chain,
+    ///   b) sent at least one ping.
+    pub async fn active_workers(&mut self) -> Vec<Worker> {
+        if let Err(e) = self.update_workers().await {
+            log::error!("Error updating worker set: {e:?}")
+        }
+        self.active_workers.values().cloned().collect()
     }
 
     pub fn stored_ranges(&self, worker_id: &PeerId) -> HashMap<String, RangeSet> {

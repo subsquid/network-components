@@ -1,3 +1,5 @@
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
+use base64::Engine;
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -12,9 +14,9 @@ impl Display for DatasetId {
     }
 }
 
-impl From<String> for DatasetId {
-    fn from(value: String) -> Self {
-        Self(value)
+impl DatasetId {
+    pub fn from_url(url: impl AsRef<[u8]>) -> Self {
+        Self(BASE64_URL_SAFE_NO_PAD.encode(url))
     }
 }
 

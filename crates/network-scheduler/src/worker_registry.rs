@@ -1,9 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::Duration;
-
-use serde::{Serialize, Serializer};
 use std::time::Instant;
 
+use serde::{Serialize, Serializer};
+
+use contract_client::Address;
 use router_controller::messages::{Ping, RangeSet};
 use subsquid_network_transport::PeerId;
 
@@ -14,6 +15,7 @@ pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.1.1"];
 pub struct Worker {
     #[serde(serialize_with = "serialize_peer_id")]
     pub peer_id: PeerId,
+    pub address: Address,
     #[serde(with = "serde_millis")]
     pub last_ping: Instant,
     pub stored_bytes: u64,
@@ -21,9 +23,10 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new(peer_id: PeerId, stored_bytes: u64, version: String) -> Self {
+    pub fn new(peer_id: PeerId, address: Address, stored_bytes: u64, version: String) -> Self {
         Self {
             peer_id,
+            address,
             last_ping: Instant::now(),
             stored_bytes,
             version,
@@ -46,7 +49,7 @@ fn serialize_peer_id<S: Serializer>(peer_id: &PeerId, serializer: S) -> Result<S
 
 pub struct WorkerRegistry {
     client: Box<dyn contract_client::Client>,
-    registered_workers: HashSet<PeerId>,
+    registered_workers: HashMap<PeerId, Address>,
     active_workers: HashMap<PeerId, Worker>,
     stored_ranges: HashMap<PeerId, HashMap<String, RangeSet>>,
 }
@@ -68,10 +71,10 @@ impl WorkerRegistry {
 
     pub async fn ping(&mut self, worker_id: PeerId, msg: Ping) {
         log::debug!("Got ping from {worker_id}");
-        if self.registered_workers.contains(&worker_id) {
+        if let Some(addr) = self.registered_workers.get(&worker_id) {
             self.active_workers.insert(
                 worker_id,
-                Worker::new(worker_id, msg.stored_bytes, msg.version),
+                Worker::new(worker_id, addr.clone(), msg.stored_bytes, msg.version),
             );
             self.stored_ranges
                 .insert(worker_id, msg.state.unwrap_or_default().datasets);
@@ -80,15 +83,18 @@ impl WorkerRegistry {
 
     async fn update_workers(&mut self) -> anyhow::Result<()> {
         let new_workers = self.client.active_workers().await?;
-        self.registered_workers = new_workers.into_iter().map(|w| w.peer_id).collect();
+        self.registered_workers = new_workers
+            .into_iter()
+            .map(|w| (w.peer_id, w.address))
+            .collect();
         log::info!(
             "Registered workers set updated: {:?}",
             self.registered_workers
         );
         self.active_workers
-            .retain(|id, _| self.registered_workers.contains(id));
+            .retain(|id, _| self.registered_workers.contains_key(id));
         self.stored_ranges
-            .retain(|id, _| self.registered_workers.contains(id));
+            .retain(|id, _| self.registered_workers.contains_key(id));
         Ok(())
     }
 

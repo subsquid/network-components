@@ -32,11 +32,15 @@ impl Storage for S3Storage {
         let tops = self.ls(prefix)?;
 
         let mut top: Option<String> = None;
-        for item in tops.iter().rev() {
-            let block_num = item.parse::<u32>().map_err(|err| err.to_string())?;
-            if block_num <= next_block {
-                top = Some(item.clone());
-                break;
+        if tops.len() == 1 {
+            top = Some(tops[0].clone())
+        } else {
+            for item in tops.iter().rev() {
+                let block_num = item.parse::<u32>().map_err(|err| err.to_string())?;
+                if block_num <= next_block {
+                    top = Some(item.clone());
+                    break;
+                }
             }
         }
 
@@ -48,7 +52,7 @@ impl Storage for S3Storage {
             for chunk in top_chunks {
                 let chunk = DataChunk::from_str(&chunk)
                     .map_err(|_| format!("invalid chunk name - {}", &chunk))?;
-                if chunk.first_block() == next_block {
+                if chunk.first_block() == next_block || next_block == 0 {
                     next_chunk = Some(chunk);
                     break;
                 }

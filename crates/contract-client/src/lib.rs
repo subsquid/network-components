@@ -31,7 +31,7 @@ pub enum ClientError {
     #[error("Invalid RPC URL: {0:?}")]
     InvalidRpcUrl(#[from] url::ParseError),
     #[error("Invalid Peer ID: {0:?}")]
-    InvalidPeerId(#[from] libp2p::multihash::Error),
+    InvalidPeerId(#[from] libp2p::identity::ParseError),
     #[error("Contract error: {0}")]
     Contract(String),
     #[error("RPC provider error: {0}")]

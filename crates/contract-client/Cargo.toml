@@ -3,15 +3,13 @@ name = "contract-client"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 
 async-trait = "0.1"
 ethers = {version = "2", features = ["ws"]}
 futures = "0.3"
 lazy_static = "1"
-libp2p = "0.50"
+libp2p = "0.52"
 log = "0.4"
 thiserror = "1"
 tokio = { version = "1", features = ["sync"] }

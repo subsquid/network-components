@@ -1,4 +1,4 @@
-FROM rust:1.65.0 AS archive-router-builder
+FROM --platform=$BUILDPLATFORM rust:1.65.0 AS archive-router-builder
 RUN apt-get update && apt-get install protobuf-compiler -y
 WORKDIR /archive-router
 COPY ./ .
@@ -6,14 +6,14 @@ RUN rm -r crates/network-scheduler
 RUN rm -r crates/query-gateway
 RUN cargo build --release
 
-FROM debian:bullseye-slim AS archive-router
+FROM --platform=$BUILDPLATFORM debian:bullseye-slim AS archive-router
 RUN apt-get update && apt-get install ca-certificates -y
 WORKDIR /archive-router
 COPY --from=archive-router-builder /archive-router/target/release/router ./router
 ENTRYPOINT ["/archive-router/router"]
 EXPOSE 3000
 
-FROM rust:1.70-bookworm AS network-builder
+FROM --platform=$BUILDPLATFORM rust:1.70-bookworm AS network-builder
 
 RUN apt update
 RUN apt install -y -V protobuf-compiler
@@ -30,7 +30,7 @@ COPY subsquid-network/transport ./subsquid-network/transport
 
 RUN cargo build --release --workspace
 
-FROM debian:bookworm-slim as network-scheduler
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim as network-scheduler
 
 RUN apt-get update && apt-get install ca-certificates net-tools -y
 
@@ -49,7 +49,7 @@ RUN echo "PORT=\${HTTP_LISTEN_ADDR##*:}; netstat -an | grep \$PORT > /dev/null; 
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
 
-FROM debian:bookworm-slim as query-gateway
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim as query-gateway
 
 RUN apt-get update && apt-get install ca-certificates net-tools -y
 

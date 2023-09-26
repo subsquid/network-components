@@ -9,7 +9,7 @@ use router_controller::messages::{Ping, RangeSet};
 use subsquid_network_transport::PeerId;
 
 pub const WORKER_INACTIVE_TIMEOUT: Duration = Duration::from_secs(60);
-pub const SUPPORTED_WORKER_VERSIONS: [&str; 2] = ["0.1.1", "0.1.2"];
+pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.1.2"];
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Worker {

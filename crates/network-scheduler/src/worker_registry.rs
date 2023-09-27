@@ -9,7 +9,11 @@ use router_controller::messages::{Ping, RangeSet};
 use subsquid_network_transport::PeerId;
 
 pub const WORKER_INACTIVE_TIMEOUT: Duration = Duration::from_secs(60);
-pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.1.2"];
+pub const SUPPORTED_WORKER_VERSIONS: [&str; 2] = ["0.1.2", "0.1.3"];
+
+fn worker_version_supported(ver: &str) -> bool {
+    SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == ver)
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Worker {
@@ -33,9 +37,8 @@ impl Worker {
         }
     }
 
-    pub fn is_available(&self) -> bool {
+    pub fn is_active(&self) -> bool {
         self.last_ping.elapsed() < WORKER_INACTIVE_TIMEOUT
-            && SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == self.version)
     }
 }
 
@@ -50,7 +53,7 @@ fn serialize_peer_id<S: Serializer>(peer_id: &PeerId, serializer: S) -> Result<S
 pub struct WorkerRegistry {
     client: Box<dyn contract_client::Client>,
     registered_workers: HashMap<PeerId, Address>,
-    active_workers: HashMap<PeerId, Worker>,
+    known_workers: HashMap<PeerId, Worker>,
     stored_ranges: HashMap<PeerId, HashMap<String, RangeSet>>,
 }
 
@@ -60,7 +63,7 @@ impl WorkerRegistry {
         let mut registry = Self {
             client,
             registered_workers: Default::default(),
-            active_workers: Default::default(),
+            known_workers: Default::default(),
             stored_ranges: Default::default(),
         };
         // Need to get new workers immediately, otherwise they wouldn't be updated until the first
@@ -69,16 +72,26 @@ impl WorkerRegistry {
         Ok(registry)
     }
 
-    pub async fn ping(&mut self, worker_id: PeerId, msg: Ping) {
+    /// Register ping msg from a worker. Returns true if ping was accepted.
+    pub async fn ping(&mut self, worker_id: PeerId, msg: Ping) -> bool {
         log::debug!("Got ping from {worker_id}");
-        if let Some(addr) = self.registered_workers.get(&worker_id) {
-            self.active_workers.insert(
-                worker_id,
-                Worker::new(worker_id, addr.clone(), msg.stored_bytes, msg.version),
-            );
-            self.stored_ranges
-                .insert(worker_id, msg.state.unwrap_or_default().datasets);
+        if !worker_version_supported(&msg.version) {
+            log::debug!("Worker {worker_id} version not supported: {}", msg.version);
+            return false;
         }
+
+        let addr = match self.registered_workers.get(&worker_id) {
+            Some(addr) => addr,
+            None => return false,
+        };
+
+        self.known_workers.insert(
+            worker_id,
+            Worker::new(worker_id, addr.clone(), msg.stored_bytes, msg.version),
+        );
+        self.stored_ranges
+            .insert(worker_id, msg.state.unwrap_or_default().datasets);
+        true
     }
 
     pub async fn update_workers(&mut self) {
@@ -94,7 +107,7 @@ impl WorkerRegistry {
             "Registered workers set updated: {:?}",
             self.registered_workers
         );
-        self.active_workers
+        self.known_workers
             .retain(|id, _| self.registered_workers.contains_key(id));
         self.stored_ranges
             .retain(|id, _| self.registered_workers.contains_key(id));
@@ -104,18 +117,19 @@ impl WorkerRegistry {
     ///   a) registered on-chain,
     ///   b) running supported version,
     ///   c) sent ping withing the last `WORKER_INACTIVE_TIMEOUT` period.
-    pub async fn available_workers(&self) -> Vec<Worker> {
-        self.active_workers
+    pub async fn active_workers(&self) -> Vec<Worker> {
+        self.known_workers
             .iter()
-            .filter_map(|(_, w)| w.is_available().then(|| w.clone()))
+            .filter_map(|(_, w)| w.is_active().then(|| w.clone()))
             .collect()
     }
 
     /// Get workers which meet the following conditions:
     ///   a) registered on-chain,
-    ///   b) sent at least one ping.
-    pub async fn active_workers(&self) -> Vec<Worker> {
-        self.active_workers.values().cloned().collect()
+    ///   b) running supported version,
+    ///   c) sent at least one ping.
+    pub async fn known_workers(&self) -> Vec<Worker> {
+        self.known_workers.values().cloned().collect()
     }
 
     pub fn stored_ranges(&self, worker_id: &PeerId) -> HashMap<String, RangeSet> {

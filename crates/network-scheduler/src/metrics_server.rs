@@ -23,17 +23,17 @@ struct ChunkStatus {
     downloaded_by: Vec<String>,
 }
 
-async fn available_workers(
+async fn active_workers(
     Extension(worker_registry): Extension<Arc<RwLock<WorkerRegistry>>>,
 ) -> Json<Vec<Worker>> {
-    Json(worker_registry.read().await.available_workers().await)
+    Json(worker_registry.read().await.active_workers().await)
 }
 
 async fn chunks(
     Extension(worker_registry): Extension<Arc<RwLock<WorkerRegistry>>>,
     Extension(scheduler): Extension<Arc<RwLock<Scheduler>>>,
 ) -> Json<HashMap<String, Vec<ChunkStatus>>> {
-    let workers = worker_registry.read().await.active_workers().await;
+    let workers = worker_registry.read().await.known_workers().await;
     let chunks = scheduler.read().await.known_chunks();
     let assigned_ranges = {
         let scheduler = scheduler.read().await;
@@ -108,7 +108,7 @@ pub async fn run_server(
 ) -> anyhow::Result<()> {
     log::info!("Starting HTTP server listening on {addr}");
     let app = Router::new()
-        .route("/workers/pings", get(available_workers))
+        .route("/workers/pings", get(active_workers))
         .route("/chunks", get(chunks))
         .route("/config", get(get_config))
         .layer(Extension(worker_registry))

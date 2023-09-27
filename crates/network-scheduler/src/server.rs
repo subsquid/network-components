@@ -94,11 +94,16 @@ impl Server {
             // Sending version was added in v0.1.1
             msg.version = "0.1.0".to_string();
         }
-        self.worker_registry
+        let ping_accepted = self
+            .worker_registry
             .write()
             .await
             .ping(peer_id, msg.clone())
             .await;
+        if !ping_accepted {
+            return;
+        }
+
         self.write_metrics(peer_id, msg).await;
         let worker_state = self.scheduler.read().await.get_worker_state(&peer_id);
         if let Some(worker_state) = worker_state {
@@ -146,7 +151,7 @@ impl Server {
                 let workers = worker_registry
                     .read()
                     .await
-                    .available_workers()
+                    .active_workers()
                     .await
                     .into_iter()
                     .map(|w| w.peer_id)
@@ -164,7 +169,7 @@ impl Server {
             log::info!("Starting monitoring task");
             loop {
                 tokio::time::sleep(monitoring_interval).await;
-                let workers = worker_registry.read().await.available_workers().await;
+                let workers = worker_registry.read().await.active_workers().await;
                 if let Err(e) = metrics_writer
                     .write()
                     .await

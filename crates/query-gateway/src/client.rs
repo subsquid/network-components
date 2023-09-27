@@ -185,6 +185,7 @@ impl NetworkState {
     }
 
     pub fn greylist_worker(&mut self, worker_id: PeerId) {
+        log::info!("Grey-listing worker {worker_id}");
         self.worker_greylist.insert(worker_id, Instant::now());
     }
 
@@ -388,6 +389,18 @@ impl QueryHandler {
             "Invalid message sender"
         );
         let (query_id, task) = task_entry.remove_entry();
+
+        // Greylist worker if server error occurred during query execution
+        match &result {
+            query_result::Result::ServerError(e) => {
+                log::warn!("Server error returned for query {query_id}: {e}");
+                self.network_state
+                    .write()
+                    .await
+                    .greylist_worker(task.worker_id);
+            }
+            _ => {}
+        }
 
         if self.send_metrics {
             let metrics_msg = Msg::QueryFinished(QueryFinished {

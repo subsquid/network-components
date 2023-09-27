@@ -142,8 +142,9 @@ impl Server {
             log::info!("Starting scheduling task");
             loop {
                 tokio::time::sleep(schedule_interval).await;
+                worker_registry.write().await.update_workers().await;
                 let workers = worker_registry
-                    .write()
+                    .read()
                     .await
                     .available_workers()
                     .await
@@ -163,7 +164,7 @@ impl Server {
             log::info!("Starting monitoring task");
             loop {
                 tokio::time::sleep(monitoring_interval).await;
-                let workers = worker_registry.write().await.available_workers().await;
+                let workers = worker_registry.read().await.available_workers().await;
                 if let Err(e) = metrics_writer
                     .write()
                     .await

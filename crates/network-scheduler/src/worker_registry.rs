@@ -64,8 +64,8 @@ impl WorkerRegistry {
             stored_ranges: Default::default(),
         };
         // Need to get new workers immediately, otherwise they wouldn't be updated until the first
-        // call to `active_workers`, so all pings would be discarded.
-        registry.update_workers().await?;
+        // run of the scheduling, so all pings would be discarded.
+        registry.update_workers().await;
         Ok(registry)
     }
 
@@ -81,8 +81,11 @@ impl WorkerRegistry {
         }
     }
 
-    async fn update_workers(&mut self) -> anyhow::Result<()> {
-        let new_workers = self.client.active_workers().await?;
+    pub async fn update_workers(&mut self) {
+        let new_workers = match self.client.active_workers().await {
+            Ok(new_workers) => new_workers,
+            Err(e) => return log::error!("Error updating worker set: {e:?}"),
+        };
         self.registered_workers = new_workers
             .into_iter()
             .map(|w| (w.peer_id, w.address))
@@ -95,17 +98,13 @@ impl WorkerRegistry {
             .retain(|id, _| self.registered_workers.contains_key(id));
         self.stored_ranges
             .retain(|id, _| self.registered_workers.contains_key(id));
-        Ok(())
     }
 
     /// Get workers which meet all the following conditions:
     ///   a) registered on-chain,
     ///   b) running supported version,
     ///   c) sent ping withing the last `WORKER_INACTIVE_TIMEOUT` period.
-    pub async fn available_workers(&mut self) -> Vec<Worker> {
-        if let Err(e) = self.update_workers().await {
-            log::error!("Error updating worker set: {e:?}")
-        }
+    pub async fn available_workers(&self) -> Vec<Worker> {
         self.active_workers
             .iter()
             .filter_map(|(_, w)| w.is_available().then(|| w.clone()))
@@ -115,10 +114,7 @@ impl WorkerRegistry {
     /// Get workers which meet the following conditions:
     ///   a) registered on-chain,
     ///   b) sent at least one ping.
-    pub async fn active_workers(&mut self) -> Vec<Worker> {
-        if let Err(e) = self.update_workers().await {
-            log::error!("Error updating worker set: {e:?}")
-        }
+    pub async fn active_workers(&self) -> Vec<Worker> {
         self.active_workers.values().cloned().collect()
     }
 

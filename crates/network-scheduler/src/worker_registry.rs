@@ -85,6 +85,13 @@ impl WorkerRegistry {
             None => return false,
         };
 
+        if let Some(prev_state) = self.known_workers.get(&worker_id) {
+            if Instant::now().duration_since(prev_state.last_ping) < Duration::from_secs(10) {
+                log::warn!("Worker {worker_id} sending pings too often");
+                return false;
+            }
+        }
+
         self.known_workers.insert(
             worker_id,
             Worker::new(worker_id, addr.clone(), msg.stored_bytes, msg.version),

@@ -5,6 +5,7 @@ use env_logger::Env;
 
 use subsquid_network_transport::cli::TransportArgs;
 use subsquid_network_transport::transport::P2PTransportBuilder;
+use subsquid_network_transport::Subscription;
 
 use crate::config::Config;
 
@@ -62,7 +63,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Subscribe to dataset state updates (from p2p pub-sub)
     subscription_sender
-        .send((PING_TOPIC.to_string(), true))
+        .send(Subscription {
+            topic: PING_TOPIC.to_string(),
+            subscribed: true,
+            allow_unordered: false,
+        })
         .await?;
 
     // Subscribe to worker set updates (from blockchain)

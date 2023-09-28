@@ -2,6 +2,7 @@ use clap::Parser;
 use env_logger::Env;
 
 use subsquid_network_transport::transport::P2PTransportBuilder;
+use subsquid_network_transport::Subscription;
 
 use crate::cli::Cli;
 use crate::metrics::MetricsWriter;
@@ -40,7 +41,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Subscribe to receive worker pings
     subscription_sender
-        .send((PING_TOPIC.to_string(), true))
+        .send(Subscription {
+            topic: PING_TOPIC.to_string(),
+            subscribed: true,
+            allow_unordered: false,
+        })
         .await?;
 
     // Get scheduling units

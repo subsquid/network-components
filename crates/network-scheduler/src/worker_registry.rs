@@ -9,6 +9,7 @@ use router_controller::messages::{Ping, RangeSet};
 use subsquid_network_transport::PeerId;
 
 pub const WORKER_INACTIVE_TIMEOUT: Duration = Duration::from_secs(60);
+pub const MIN_PING_INTERVAL: Duration = Duration::from_secs(8);
 pub const SUPPORTED_WORKER_VERSIONS: [&str; 2] = ["0.1.2", "0.1.3"];
 
 fn worker_version_supported(ver: &str) -> bool {
@@ -86,7 +87,7 @@ impl WorkerRegistry {
         };
 
         if let Some(prev_state) = self.known_workers.get(&worker_id) {
-            if Instant::now().duration_since(prev_state.last_ping) < Duration::from_secs(10) {
+            if Instant::now().duration_since(prev_state.last_ping) < MIN_PING_INTERVAL {
                 log::warn!("Worker {worker_id} sending pings too often");
                 return false;
             }

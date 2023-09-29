@@ -8,6 +8,8 @@ use subsquid_network_transport::cli::TransportArgs;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub schedule_interval_sec: u64,
+    pub min_ping_interval_sec: u64,
+    pub worker_inactive_timeout_sec: u64,
     pub replication_factor: usize,
     pub scheduling_unit_size: usize,
     pub worker_storage_bytes: u64,

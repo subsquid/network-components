@@ -1,4 +1,6 @@
 schedule_interval_sec: 300
+min_ping_interval_sec: 10
+worker_inactive_timeout_sec: 120
 replication_factor: 2
 scheduling_unit_size: 10
 worker_storage_bytes: 549755813888  # 512 GiB

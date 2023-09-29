@@ -15,7 +15,7 @@ use crate::metrics::{MetricsEvent, MetricsWriter};
 use crate::metrics_server;
 use crate::scheduler::Scheduler;
 use crate::scheduling_unit::SchedulingUnit;
-use crate::worker_registry::{WorkerRegistry, WORKER_INACTIVE_TIMEOUT};
+use crate::worker_registry::WorkerRegistry;
 
 type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
@@ -164,7 +164,7 @@ impl Server {
     fn spawn_worker_monitoring_task(&self) -> JoinHandle<()> {
         let worker_registry = self.worker_registry.clone();
         let metrics_writer = self.metrics_writer.clone();
-        let monitoring_interval = WORKER_INACTIVE_TIMEOUT / 2;
+        let monitoring_interval = Duration::from_secs(self.config.worker_inactive_timeout_sec) / 2;
         tokio::spawn(async move {
             log::info!("Starting monitoring task");
             loop {

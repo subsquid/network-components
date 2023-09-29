@@ -56,7 +56,12 @@ async fn main() -> anyhow::Result<()> {
     )
     .await?;
 
-    let worker_registry = WorkerRegistry::init(&args.rpc_url).await?;
+    let worker_registry = WorkerRegistry::init(
+        &args.rpc_url,
+        config.min_ping_interval_sec,
+        config.worker_inactive_timeout_sec,
+    )
+    .await?;
     let scheduler = Scheduler::new(config.replication_factor, config.worker_storage_bytes);
 
     Server::new(

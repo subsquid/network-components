@@ -8,9 +8,7 @@ use contract_client::Address;
 use router_controller::messages::{Ping, RangeSet};
 use subsquid_network_transport::PeerId;
 
-pub const WORKER_INACTIVE_TIMEOUT: Duration = Duration::from_secs(60);
-pub const MIN_PING_INTERVAL: Duration = Duration::from_secs(8);
-pub const SUPPORTED_WORKER_VERSIONS: [&str; 2] = ["0.1.2", "0.1.3"];
+pub const SUPPORTED_WORKER_VERSIONS: [&str; 2] = ["0.1.3", "0.1.4"];
 
 fn worker_version_supported(ver: &str) -> bool {
     SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == ver)
@@ -38,8 +36,8 @@ impl Worker {
         }
     }
 
-    pub fn is_active(&self) -> bool {
-        self.last_ping.elapsed() < WORKER_INACTIVE_TIMEOUT
+    pub fn time_since_last_ping(&self) -> Duration {
+        self.last_ping.elapsed()
     }
 }
 
@@ -56,16 +54,24 @@ pub struct WorkerRegistry {
     registered_workers: HashMap<PeerId, Address>,
     known_workers: HashMap<PeerId, Worker>,
     stored_ranges: HashMap<PeerId, HashMap<String, RangeSet>>,
+    min_ping_interval: Duration,
+    worker_inactive_timeout: Duration,
 }
 
 impl WorkerRegistry {
-    pub async fn init(rpc_url: &str) -> anyhow::Result<Self> {
+    pub async fn init(
+        rpc_url: &str,
+        min_ping_interval_sec: u64,
+        worker_inactive_timeout_sec: u64,
+    ) -> anyhow::Result<Self> {
         let client = contract_client::get_client(rpc_url).await?;
         let mut registry = Self {
             client,
             registered_workers: Default::default(),
             known_workers: Default::default(),
             stored_ranges: Default::default(),
+            min_ping_interval: Duration::from_secs(min_ping_interval_sec),
+            worker_inactive_timeout: Duration::from_secs(worker_inactive_timeout_sec),
         };
         // Need to get new workers immediately, otherwise they wouldn't be updated until the first
         // run of the scheduling, so all pings would be discarded.
@@ -87,7 +93,7 @@ impl WorkerRegistry {
         };
 
         if let Some(prev_state) = self.known_workers.get(&worker_id) {
-            if Instant::now().duration_since(prev_state.last_ping) < MIN_PING_INTERVAL {
+            if Instant::now().duration_since(prev_state.last_ping) < self.min_ping_interval {
                 log::warn!("Worker {worker_id} sending pings too often");
                 return false;
             }
@@ -124,11 +130,13 @@ impl WorkerRegistry {
     /// Get workers which meet all the following conditions:
     ///   a) registered on-chain,
     ///   b) running supported version,
-    ///   c) sent ping withing the last `WORKER_INACTIVE_TIMEOUT` period.
+    ///   c) sent ping withing the last `worker_inactive_timeout` period.
     pub async fn active_workers(&self) -> Vec<Worker> {
         self.known_workers
             .iter()
-            .filter_map(|(_, w)| w.is_active().then(|| w.clone()))
+            .filter_map(|(_, w)| {
+                (w.time_since_last_ping() < self.worker_inactive_timeout).then(|| w.clone())
+            })
             .collect()
     }
 

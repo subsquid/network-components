@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::Parser;
 use env_logger::Env;
@@ -85,6 +86,9 @@ async fn main() -> anyhow::Result<()> {
         worker_updates,
     )
     .await?;
+
+    // Wait one worker ping cycle before starting to serve
+    tokio::time::sleep(Duration::from_secs(20)).await;
 
     // Start HTTP server
     http_server::run_server(query_client, &http_listen_addr).await

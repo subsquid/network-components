@@ -15,6 +15,7 @@ mod config;
 mod http_server;
 
 #[derive(Parser)]
+#[command(version)]
 struct Cli {
     #[command(flatten)]
     pub transport: TransportArgs,

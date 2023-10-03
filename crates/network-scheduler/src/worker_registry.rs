@@ -8,7 +8,7 @@ use contract_client::Address;
 use router_controller::messages::{Ping, RangeSet};
 use subsquid_network_transport::PeerId;
 
-pub const SUPPORTED_WORKER_VERSIONS: [&str; 2] = ["0.1.3", "0.1.4"];
+pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.1.4"];
 
 fn worker_version_supported(ver: &str) -> bool {
     SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == ver)

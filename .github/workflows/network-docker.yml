@@ -29,6 +29,17 @@ jobs:
           username: ${{ secrets.DOCKER_LOGIN }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
+      - name: Build scheduler
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: network-scheduler
+          load: true
+          tags: subsquid/network-scheduler:test
+
+      - name: Get scheduler version
+        run: echo "SCHEDULER_VERSION=$(docker run --rm subsquid/network-scheduler:test network-scheduler --version | cut -d ' ' -f2)" >> $GITHUB_ENV
+
       - name: Build & publish scheduler
         uses: docker/build-push-action@v5
         with:
@@ -36,7 +47,20 @@ jobs:
           platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
           target: network-scheduler
           push: true
-          tags: subsquid/network-scheduler:${{ inputs.tag }}
+          tags: |
+            subsquid/network-scheduler:${{ env.SCHEDULER_VERSION }}
+            subsquid/network-scheduler:${{ inputs.tag }}
+
+      - name: Build query gateway
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: query-gateway
+          load: true
+          tags: subsquid/query-gateway:test
+
+      - name: Get query gateway version
+        run: echo "GATEWAY_VERSION=$(docker run --rm subsquid/query-gateway:test query-gateway --version | cut -d ' ' -f2)" >> $GITHUB_ENV
 
       - name: Build & publish query gateway
         uses: docker/build-push-action@v5
@@ -45,4 +69,6 @@ jobs:
           platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
           target: query-gateway
           push: true
-          tags: subsquid/query-gateway:${{ inputs.tag }}
+          tags: |
+            subsquid/query-gateway:${{ env.GATEWAY_VERSION }}
+            subsquid/query-gateway:${{ inputs.tag }}

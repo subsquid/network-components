@@ -1,7 +1,10 @@
+import functools
+import heapq
 import matplotlib.pyplot as plt
 import os
 import random
 import seaborn
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -17,8 +20,11 @@ WORKER_STORAGE_MB = int(os.environ.get('WORKER_STORAGE_MB', '500000'))
 REPLICATION_FACTOR = int(os.environ.get('REPLICATION_FACTOR', '3'))
 MAX_EPOCHS = int(os.environ.get('MAX_EPOCHS', '0'))
 NUM_REPS = int(os.environ.get('NUM_REPS', '1'))
+SCHEDULER_TYPE = os.environ.get('SCHEDULER_TYPE', 'xor')
+MIXED_UNITS_RATIO = float(os.environ.get('MIXED_UNITS_RATIO', '0.05'))
 OUTPUT_DIR = Path(os.environ.get('OUTPUT_DIR', './out'))
 
+assert 0 <= MIXED_UNITS_RATIO <= 1, 'MIXED_UNITS_RATIO should be in range [0,1]'
 
 Id = int
 
@@ -31,6 +37,7 @@ def distance(unit: 'Unit', worker: 'Worker') -> int:
     return unit.id ^ worker.id
 
 
+@functools.total_ordering
 class Worker:
     def __init__(self, epoch_joined=0):
         self.id = random_id()
@@ -41,6 +48,16 @@ class Worker:
         self.total_downloaded_data = 0
         self.initial_sync_data = 0
         self.jailed = False
+
+    def __eq__(self, other):
+        if not isinstance(other, Worker):
+            return NotImplemented
+        return self.assigned_data == other.assigned_data
+
+    def __lt__(self, other):
+        if not isinstance(other, Worker):
+            return NotImplemented
+        return self.assigned_data < other.assigned_data
 
     @property
     def stored_data(self) -> int:
@@ -55,16 +72,15 @@ class Worker:
         return WORKER_STORAGE_MB - self.assigned_data
 
     def try_assign_unit(self, unit: 'Unit') -> bool:
-        assert self.epoch_retired is None
         if self.remaining_capacity > UNIT_SIZE_MB and not self.jailed and unit not in self.assigned_units:
             self.assigned_units.add(unit)
-            unit.assigned_to.add(self.id)
+            unit.assigned_to[self.id] = self
             return True
         return False
 
     def purge_assignment(self):
         while len(self.assigned_units) > 0:
-            self.assigned_units.pop().assigned_to.remove(self.id)
+            self.assigned_units.pop().assigned_to.pop(self.id)
 
     def download_assigned(self) -> int:
         if self.jailed:
@@ -96,12 +112,13 @@ class Worker:
     def retire(self, epoch):
         assert self.epoch_retired is None
         self.epoch_retired = epoch
+        self.purge_assignment()
 
 
 class Unit:
     def __init__(self):
         self.id = random_id()
-        self.assigned_to: 'Set[Id]' = set()
+        self.assigned_to: 'dict[Id, Worker]' = {}
 
     def __eq__(self, other):
         if not isinstance(other, Unit):
@@ -115,13 +132,18 @@ class Unit:
     def missing_replicas(self) -> int:
         return REPLICATION_FACTOR - len(self.assigned_to)
 
+    def remove_random_replica(self):
+        assert len(self.assigned_to) > 0
+        _, worker = self.assigned_to.popitem()
+        worker.assigned_units.remove(self)
+
 
 class AssignmentError(ValueError):
     def __init__(self):
         super().__init__("Not enough workers to assign unit")
 
 
-class Scheduler:
+class Scheduler(ABC):
     def __init__(self):
         self.workers: '[Worker]' = [Worker() for _ in range(NUM_WORKERS)]
         self.retired_workers: '[Worker]' = []
@@ -131,7 +153,8 @@ class Scheduler:
         self.retired_workers_data = 0
 
         # Perform initial assignment
-        self.assign_units()
+        self.assign_units(initial=True)
+        self.download()
 
     @property
     def total_downloaded_data(self) -> int:
@@ -141,16 +164,11 @@ class Scheduler:
     def initial_sync_data(self) -> int:
         return sum(w.initial_sync_data for w in (self.workers + self.retired_workers))
 
-    def assign_units(self):
-        for unit in self.units:
-            if unit.missing_replicas > 0:
-                for worker in sorted(self.workers, key=lambda w: distance(unit, w)):
-                    worker.try_assign_unit(unit)
-                    if unit.missing_replicas == 0:
-                        break
-                else:
-                    raise AssignmentError()
+    @abstractmethod
+    def assign_units(self, initial=False, mid_epoch=False):
+        raise NotImplementedError
 
+    def download(self):
         for worker in self.workers:
             worker.download_assigned()
 
@@ -158,7 +176,8 @@ class Scheduler:
         worker: 'Worker' = random.choice([w for w in self.workers if not w.jailed])
         self.jailed_workers_data += worker.stored_data
         worker.jail()
-        self.assign_units()
+        self.assign_units(mid_epoch=True)
+        self.download()
 
     def retire_random_worker(self):
         worker = self.workers.pop(random.randint(0, len(self.workers)-1))
@@ -167,9 +186,8 @@ class Scheduler:
         self.retired_workers.append(worker)
 
     def run_epoch(self):
-        # clean up existing assignments, release jailed workers
+        # release jailed workers
         for worker in self.workers:
-            worker.purge_assignment()
             worker.release()
 
         # some workers leave, some workers join
@@ -178,8 +196,9 @@ class Scheduler:
         for _ in range(WORKER_CHURN_PER_EPOCH):
             self.workers.append(Worker(epoch_joined=self.epoch))
 
-        # assign units
+        # assign units & download data
         self.assign_units()
+        self.download()
 
         # some workers get jailed during epoch
         for _ in range(WORKERS_JAILED_PER_EPOCH):
@@ -221,6 +240,56 @@ class Scheduler:
         return summary
 
 
+class XorDistanceScheduler(Scheduler):
+    def assign_units(self, initial=False, mid_epoch=False):
+        if not initial and not mid_epoch:
+            for worker in self.workers:
+                worker.purge_assignment()
+
+        for unit in self.units:
+            if unit.missing_replicas > 0:
+                for worker in sorted(self.workers, key=lambda w: distance(unit, w)):
+                    worker.try_assign_unit(unit)
+                    if unit.missing_replicas == 0:
+                        break
+                else:
+                    raise AssignmentError()
+
+
+class RandomScheduler(Scheduler):
+
+    def assign_units(self, initial=False, mid_epoch=False):
+        # Random mixing at the beginning of each epoch
+        if not initial and not mid_epoch:
+            num_mixed_units = int(len(self.units) * MIXED_UNITS_RATIO)
+            assigned_units = [u for u in self.units if u.missing_replicas < REPLICATION_FACTOR]
+            for unit in random.sample(assigned_units, k=num_mixed_units):
+                unit.remove_random_replica()
+
+        # Workers shuffled and ordered by number of assigned units
+        random.shuffle(self.workers)
+        heapq.heapify(self.workers)
+
+        for unit in self.units:
+            tried_workers = []
+            while len(self.workers) > 0 and unit.missing_replicas > 0:
+                worker: 'Worker' = heapq.heappop(self.workers)
+                worker.try_assign_unit(unit)
+                tried_workers.append(worker)
+            for worker in tried_workers:
+                heapq.heappush(self.workers, worker)
+            if unit.missing_replicas > 0:
+                raise AssignmentError()
+
+
+def get_scheduler(scheduler_type: str) -> 'Scheduler':
+    if scheduler_type.lower() == 'xor':
+        return XorDistanceScheduler()
+    if scheduler_type.lower() == 'random':
+        return RandomScheduler()
+    raise ValueError(f"Unknown scheduler: {scheduler_type}")
+
+
 @dataclass
 class Summary:
     last_epoch: int
@@ -239,19 +308,21 @@ class Summary:
         return (self.downloaded_data_gb - self.jailed_workers_data_gb - self.retired_workers_data_gb - self.new_chunks_data_gb) // self.last_epoch
 
     def to_string(self) -> str:
-        return f"""Run for {self.last_epoch} epochs.
-        Downloaded a total of {self.downloaded_data_gb} GB (excluding initial sync).
-        That amounts to {self.downloaded_per_epoch} GB/epoch.
-        Jailed workers data: {self.jailed_workers_data_gb} GB.
-        Retired workers data: {self.retired_workers_data_gb} GB.
-        New chunks data: {self.new_chunks_data_gb} GB.
-        Unnecessary reshuffled {self.reshuffled_per_epoch} GB/epoch."""
+        return f"""
+    Run for {self.last_epoch} epochs.
+    Downloaded a total of {self.downloaded_data_gb} GB (excluding initial sync).
+    That amounts to {self.downloaded_per_epoch} GB/epoch.
+    Jailed workers data: {self.jailed_workers_data_gb} GB.
+    Retired workers data: {self.retired_workers_data_gb} GB.
+    New chunks data: {self.new_chunks_data_gb} GB.
+    Unnecessary reshuffled {self.reshuffled_per_epoch} GB/epoch.
+    """
 
 
 def run_simulation() -> 'Iterator[Summary]':
     for i in range(NUM_REPS):
         print(f"Running round {i+1} / {NUM_REPS}")
-        scheduler = Scheduler()
+        scheduler = get_scheduler(SCHEDULER_TYPE)
         yield scheduler.run_simulation()
 
 
@@ -278,6 +349,7 @@ def main():
         WORKER_STORAGE_MB = {WORKER_STORAGE_MB}
         REPLICATION_FACTOR = {REPLICATION_FACTOR}
         MAX_EPOCHS = {MAX_EPOCHS}
+        SCHEDULER_TYPE = {SCHEDULER_TYPE}
     """)
     OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
 

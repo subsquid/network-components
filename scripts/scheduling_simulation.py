@@ -1,5 +1,6 @@
 import functools
 import heapq
+import itertools
 import matplotlib.pyplot as plt
 import os
 import random
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Set, Optional, Iterator
+import numpy
 
 NUM_WORKERS = int(os.environ.get('NUM_WORKERS', '100'))
 WORKERS_JAILED_PER_EPOCH = int(os.environ.get('WORKERS_JAILED_PER_EPOCH', '5'))
@@ -22,9 +24,31 @@ MAX_EPOCHS = int(os.environ.get('MAX_EPOCHS', '0'))
 NUM_REPS = int(os.environ.get('NUM_REPS', '1'))
 SCHEDULER_TYPE = os.environ.get('SCHEDULER_TYPE', 'xor')
 MIXED_UNITS_RATIO = float(os.environ.get('MIXED_UNITS_RATIO', '0.05'))
+MIXING_RECENT_UNIT_WEIGHT = float(os.environ.get('MIXING_RECENT_UNIT_WEIGHT', '1'))
+NUM_SQUIDS_PER_EPOCH = int(os.environ.get('NUM_SQUIDS_PER_EPOCH', '10000'))
 OUTPUT_DIR = Path(os.environ.get('OUTPUT_DIR', './out'))
 
 assert 0 <= MIXED_UNITS_RATIO <= 1, 'MIXED_UNITS_RATIO should be in range [0,1]'
+assert MIXING_RECENT_UNIT_WEIGHT >= 1, 'MIXING_RECENT_UNIT_WEIGHT should be >= 1'
+
+
+def params_summary() -> str:
+    return (
+        f"NUM_WORKERS = {NUM_WORKERS}\n"
+        f"WORKERS_JAILED_PER_EPOCH = {WORKERS_JAILED_PER_EPOCH}\n"
+        f"WORKER_CHURN_PER_EPOCH = {WORKER_CHURN_PER_EPOCH}\n"
+        f"NUM_UNITS = {NUM_UNITS}\n"
+        f"NEW_UNITS_PER_EPOCH = {NEW_UNITS_PER_EPOCH}\n"
+        f"UNIT_SIZE_MB = {UNIT_SIZE_MB}\n"
+        f"WORKER_STORAGE_MB = {WORKER_STORAGE_MB}\n"
+        f"REPLICATION_FACTOR = {REPLICATION_FACTOR}\n"
+        f"MAX_EPOCHS = {MAX_EPOCHS}\n"
+        f"SCHEDULER_TYPE = {SCHEDULER_TYPE}\n"
+        f"MIXED_UNITS_RATIO = {MIXED_UNITS_RATIO}\n"
+        f"MIXING_RECENT_UNIT_WEIGHT = {MIXING_RECENT_UNIT_WEIGHT}\n"
+        f"NUM_SQUIDS_PER_EPOCH = {NUM_SQUIDS_PER_EPOCH}\n"
+    )
+
 
 Id = int
 
@@ -47,6 +71,7 @@ class Worker:
         self.downloaded_units: 'Set[Unit]' = set()
         self.total_downloaded_data = 0
         self.initial_sync_data = 0
+        self.num_requests = 0
         self.jailed = False
 
     def __eq__(self, other):
@@ -102,6 +127,9 @@ class Worker:
 
         return download_size
 
+    def make_request(self):
+        self.num_requests += 1
+
     def jail(self):
         self.jailed = True
         self.purge_assignment()
@@ -136,6 +164,10 @@ class Unit:
         assert len(self.assigned_to) > 0
         _, worker = self.assigned_to.popitem()
         worker.assigned_units.remove(self)
+
+    def query(self):
+        assert len(self.assigned_to) > 0
+        random.choice(list(self.assigned_to.values())).make_request()
 
 
 class AssignmentError(ValueError):
@@ -185,6 +217,13 @@ class Scheduler(ABC):
         self.retired_workers_data += worker.stored_data
         self.retired_workers.append(worker)
 
+    def run_squids(self):
+        for _ in range(NUM_SQUIDS_PER_EPOCH):
+            # Each squid starts with a random unit and queries all subsequent ones
+            start_unit = random.randint(0, len(self.units) - 1)
+            for unit in itertools.islice(self.units, start_unit, None):
+                unit.query()
+
     def run_epoch(self):
         # release jailed workers
         for worker in self.workers:
@@ -196,9 +235,10 @@ class Scheduler(ABC):
         for _ in range(WORKER_CHURN_PER_EPOCH):
             self.workers.append(Worker(epoch_joined=self.epoch))
 
-        # assign units & download data
+        # assign units, download data, run squids
         self.assign_units()
         self.download()
+        self.run_squids()
 
         # some workers get jailed during epoch
         for _ in range(WORKERS_JAILED_PER_EPOCH):
@@ -218,13 +258,18 @@ class Scheduler(ABC):
             worker.id: (worker.total_downloaded_data - worker.initial_sync_data) // epochs_active(worker) // 1024
             for worker in self.workers + self.retired_workers
         }
+        avg_worker_requests = {
+            worker.id: worker.num_requests // epochs_active(worker) // 1000
+            for worker in self.workers + self.retired_workers
+        }
         return Summary(
             last_epoch=self.epoch,
             downloaded_data_gb=(self.total_downloaded_data - self.initial_sync_data) // 1024,
             jailed_workers_data_gb=self.jailed_workers_data // 1024,
             retired_workers_data_gb=self.retired_workers_data // 1024,
             new_chunks_data_gb=self.epoch * NEW_UNITS_PER_EPOCH * UNIT_SIZE_MB * REPLICATION_FACTOR // 1024,
-            avg_worker_download=avg_worker_download
+            avg_worker_download=avg_worker_download,
+            avg_worker_requests=avg_worker_requests,
         )
 
     def run_simulation(self):
@@ -263,7 +308,10 @@ class RandomScheduler(Scheduler):
         if not initial and not mid_epoch:
             num_mixed_units = int(len(self.units) * MIXED_UNITS_RATIO)
             assigned_units = [u for u in self.units if u.missing_replicas < REPLICATION_FACTOR]
-            for unit in random.sample(assigned_units, k=num_mixed_units):
+            # earliest units have weight 1, most recent have `MIXING_RECENT_UNIT_WEIGHT`
+            unit_weights = numpy.linspace(1.0, MIXING_RECENT_UNIT_WEIGHT, num=len(assigned_units))
+            probabilities = unit_weights / sum(unit_weights)
+            for unit in numpy.random.choice(assigned_units, size=num_mixed_units, replace=False, p=probabilities):
                 unit.remove_random_replica()
 
         # Workers shuffled and ordered by number of assigned units
@@ -298,6 +346,7 @@ class Summary:
     retired_workers_data_gb: int  # Total data that was held by all retired workers at the time they were retired
     new_chunks_data_gb: int  # Total size of new chunks which appeared throughout the simulation
     avg_worker_download: dict['Id', int]  # Average size of data downloaded per epoch for each worker
+    avg_worker_requests: dict['Id', int]  # Average number of received requests per epoch for each worker
 
     @property
     def downloaded_per_epoch(self) -> int:
@@ -308,15 +357,32 @@ class Summary:
         return (self.downloaded_data_gb - self.jailed_workers_data_gb - self.retired_workers_data_gb - self.new_chunks_data_gb) // self.last_epoch
 
     def to_string(self) -> str:
-        return f"""
-    Run for {self.last_epoch} epochs.
-    Downloaded a total of {self.downloaded_data_gb} GB (excluding initial sync).
-    That amounts to {self.downloaded_per_epoch} GB/epoch.
-    Jailed workers data: {self.jailed_workers_data_gb} GB.
-    Retired workers data: {self.retired_workers_data_gb} GB.
-    New chunks data: {self.new_chunks_data_gb} GB.
-    Unnecessary reshuffled {self.reshuffled_per_epoch} GB/epoch.
-    """
+        return (
+            f"Run for {self.last_epoch} epochs.\n"
+            f"Downloaded a total of {self.downloaded_data_gb} GB (excluding initial sync).\n"
+            f"That amounts to {self.downloaded_per_epoch} GB/epoch.\n"
+            f"Jailed workers data: {self.jailed_workers_data_gb} GB.\n"
+            f"Retired workers data: {self.retired_workers_data_gb} GB.\n"
+            f"New chunks data: {self.new_chunks_data_gb} GB.\n"
+            f"Unnecessary reshuffled {self.reshuffled_per_epoch} GB/epoch.\n"
+        )
+
+    def save_plot(self, plot_path: Path):
+        print(f"Saving plot to {plot_path}")
+
+        fig, ax = plt.subplots(1, 2, figsize=(8, 4))
+
+        seaborn.histplot(data=self.avg_worker_download, kde=True, ax=ax[0])
+        ax[0].set_xlabel("average data downloaded per epoch [GB]")
+        ax[0].set_ylabel("# workers")
+
+        seaborn.histplot(data=self.avg_worker_requests, kde=True, ax=ax[1])
+        ax[1].set_xlabel("average requests served per epoch [thousands]")
+        ax[1].set_ylabel("# workers")
+
+        plt.tight_layout()
+        plt.savefig(plot_path, format="png")
+        plt.close()
 
 
 def run_simulation() -> 'Iterator[Summary]':
@@ -334,37 +400,25 @@ def aggregate_summaries(summaries: ['Summary']) -> 'Summary':
         jailed_workers_data_gb=sum(s.jailed_workers_data_gb * s.last_epoch for s in summaries) // total_epochs,
         retired_workers_data_gb=sum(s.retired_workers_data_gb * s.last_epoch for s in summaries) // total_epochs,
         new_chunks_data_gb=sum(s.new_chunks_data_gb * s.last_epoch for s in summaries) // total_epochs,
-        avg_worker_download={w: d for s in summaries for w, d in s.avg_worker_download.items()}
+        avg_worker_download={w: d for s in summaries for w, d in s.avg_worker_download.items()},
+        avg_worker_requests={w: d for s in summaries for w, d in s.avg_worker_requests.items()},
     )
 
 
 def main():
-    print(f"""Starting simulation. 
-        NUM_WORKERS = {NUM_WORKERS}
-        WORKERS_JAILED_PER_EPOCH = {WORKERS_JAILED_PER_EPOCH}
-        WORKER_CHURN_PER_EPOCH = {WORKER_CHURN_PER_EPOCH}
-        NUM_UNITS = {NUM_UNITS}
-        NEW_UNITS_PER_EPOCH = {NEW_UNITS_PER_EPOCH}
-        UNIT_SIZE_MB = {UNIT_SIZE_MB}
-        WORKER_STORAGE_MB = {WORKER_STORAGE_MB}
-        REPLICATION_FACTOR = {REPLICATION_FACTOR}
-        MAX_EPOCHS = {MAX_EPOCHS}
-        SCHEDULER_TYPE = {SCHEDULER_TYPE}
-    """)
+    print("Starting simulation.\n")
     OUTPUT_DIR.mkdir(exist_ok=True, parents=True)
+    print(params_summary())
 
     summary = aggregate_summaries(list(run_simulation()))
 
-    print(f"Simulation ended. Average results from {NUM_REPS} rounds:\n{summary.to_string()}")
+    print(f"\nSimulation ended. Average results from {NUM_REPS} rounds:\n{summary.to_string()}")
 
-    plot_path = OUTPUT_DIR / f"worker_download_distribution_{datetime.utcnow().isoformat(timespec='seconds')}.png"
-    print(f"Saving plot to {plot_path}")
-    seaborn.displot(data=summary.avg_worker_download, kde=True)
-    plt.xlabel("average data downloaded per epoch [GB]")
-    plt.ylabel("# workers")
-    plt.tight_layout()
-    plt.savefig(plot_path, format="png")
-    plt.close()
+    timestamp = datetime.utcnow().isoformat(timespec='seconds')
+    with open(OUTPUT_DIR / f"{timestamp}_results.txt", "w") as results_file:
+        results_file.write(params_summary())
+        results_file.write(summary.to_string())
+    summary.save_plot(OUTPUT_DIR / f"{timestamp}_worker_distribution.png")
 
 
 if __name__ == '__main__':

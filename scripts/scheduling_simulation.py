@@ -26,6 +26,7 @@ SCHEDULER_TYPE = os.environ.get('SCHEDULER_TYPE', 'xor')
 MIXED_UNITS_RATIO = float(os.environ.get('MIXED_UNITS_RATIO', '0.05'))
 MIXING_RECENT_UNIT_WEIGHT = float(os.environ.get('MIXING_RECENT_UNIT_WEIGHT', '1'))
 NUM_SQUIDS_PER_EPOCH = int(os.environ.get('NUM_SQUIDS_PER_EPOCH', '10000'))
+QUALIFIED_WORKER_THRESHOLD = float(os.environ.get('QUALIFIED_WORKER_THRESHOLD', '0.25'))
 OUTPUT_DIR = Path(os.environ.get('OUTPUT_DIR', './out'))
 
 assert 0 <= MIXED_UNITS_RATIO <= 1, 'MIXED_UNITS_RATIO should be in range [0,1]'
@@ -47,6 +48,7 @@ def params_summary() -> str:
         f"MIXED_UNITS_RATIO = {MIXED_UNITS_RATIO}\n"
         f"MIXING_RECENT_UNIT_WEIGHT = {MIXING_RECENT_UNIT_WEIGHT}\n"
         f"NUM_SQUIDS_PER_EPOCH = {NUM_SQUIDS_PER_EPOCH}\n"
+        f"QUALIFIED_WORKER_THRESHOLD = {QUALIFIED_WORKER_THRESHOLD}\n"
     )
 
 
@@ -254,13 +256,20 @@ class Scheduler(ABC):
         def epochs_active(worker: 'Worker') -> int:
             last_epoch = worker.epoch_retired if worker.epoch_retired is not None else self.epoch
             return last_epoch - worker.epoch_joined + 1
+        min_epochs = int(self.epoch * QUALIFIED_WORKER_THRESHOLD)
+        qualified_workers = [
+            (worker, num_epochs)
+            for worker in (self.workers + self.retired_workers)
+            if (num_epochs := epochs_active(worker)) > min_epochs
+        ]
+
         avg_worker_download = {
-            worker.id: (worker.total_downloaded_data - worker.initial_sync_data) // epochs_active(worker) // 1024
-            for worker in self.workers + self.retired_workers
+            worker.id: (worker.total_downloaded_data - worker.initial_sync_data) // num_epochs // 1024
+            for worker, num_epochs in qualified_workers
         }
         avg_worker_requests = {
-            worker.id: worker.num_requests // epochs_active(worker) // 1000
-            for worker in self.workers + self.retired_workers
+            worker.id: worker.num_requests // num_epochs // 1000
+            for worker, num_epochs in qualified_workers
         }
         return Summary(
             last_epoch=self.epoch,

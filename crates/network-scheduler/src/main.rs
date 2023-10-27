@@ -8,7 +8,6 @@ use crate::cli::Cli;
 use crate::metrics::MetricsWriter;
 use crate::scheduler::Scheduler;
 use crate::server::Server;
-use crate::worker_registry::WorkerRegistry;
 
 mod cli;
 mod data_chunk;
@@ -18,7 +17,6 @@ mod scheduler;
 mod scheduling_unit;
 mod server;
 mod storage;
-mod worker_registry;
 
 const PING_TOPIC: &str = "worker_ping";
 
@@ -30,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
     )
     .init();
     let args: Cli = Cli::parse();
-    let config = args.config().await?;
+    args.read_config().await?;
 
     // Open file for writing metrics
     let metrics_writer = MetricsWriter::from_cli(&args).await?;
@@ -49,31 +47,18 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     // Get scheduling units
-    let incoming_units = storage::get_incoming_units(
-        config.s3_endpoint.clone(),
-        config.buckets.clone(),
-        config.scheduling_unit_size,
-    )
-    .await?;
-
-    let worker_registry = WorkerRegistry::init(
-        &args.rpc_url,
-        config.min_ping_interval_sec,
-        config.worker_inactive_timeout_sec,
-    )
-    .await?;
-    let scheduler = Scheduler::new(config.replication_factor, config.worker_storage_bytes);
+    let incoming_units = storage::get_incoming_units().await?;
+    let scheduler = Scheduler::new();
+    let contract_client = contract_client::get_client(&args.rpc_url).await?;
 
     Server::new(
         incoming_messages,
         incoming_units,
         message_sender,
-        worker_registry,
         scheduler,
         metrics_writer,
-        config,
     )
-    .run(args.http_listen_addr)
+    .run(contract_client, args.http_listen_addr)
     .await;
 
     Ok(())

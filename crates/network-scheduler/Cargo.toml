@@ -13,13 +13,17 @@ clap = { version = "4", features = ["derive", "env"] }
 env_logger = "0.10"
 hex = "0.4"
 itertools = "0.11"
+iter_num_tools = "0.7"
 log = "0.4"
 nonempty = "0.8"
+rand = "0.8"
+random_choice = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_millis = "0.1"
+serde_with = "3"
 serde_yaml = "0.9"
 sha3 = "0.10"
+smallvec = "1"
 tokio = { version = "1", features = ["full"] }
 
 contract-client = { version = "0.1", path = "../contract-client" }

@@ -31,6 +31,14 @@ impl SchedulingUnit {
         // later, it will still have the same ID.
         self.chunks.first().id()
     }
+
+    pub fn dataset_url(&self) -> &str {
+        self.chunks.first().dataset_url.as_str()
+    }
+
+    pub fn begin(&self) -> u32 {
+        self.chunks.first().block_range.begin
+    }
 }
 
 impl IntoIterator for SchedulingUnit {

@@ -1,7 +1,8 @@
 use std::pin::Pin;
-use std::time::Instant;
+use std::time::SystemTime;
 
 use serde::Serialize;
+use serde_with::{serde_as, TimestampMilliSeconds};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
@@ -9,12 +10,13 @@ use router_controller::messages::{Ping, QueryExecuted, QueryFinished, QuerySubmi
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Cli;
-use crate::worker_registry::Worker;
+use crate::scheduler::WorkerState;
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize)]
 pub struct Metrics {
-    #[serde(with = "serde_millis")]
-    timestamp: Instant,
+    #[serde_as(as = "TimestampMilliSeconds")]
+    timestamp: SystemTime,
     #[serde(flatten)]
     event: MetricsEvent,
 }
@@ -35,7 +37,7 @@ impl Metrics {
         );
 
         Ok(Self {
-            timestamp: Instant::now(),
+            timestamp: SystemTime::now(),
             event,
         })
     }
@@ -54,7 +56,7 @@ pub enum MetricsEvent {
     QuerySubmitted(QuerySubmitted),
     QueryFinished(QueryFinished),
     QueryExecuted(QueryExecuted),
-    WorkersSnapshot { active_workers: Vec<Worker> },
+    WorkersSnapshot { active_workers: Vec<WorkerState> },
 }
 
 impl MetricsEvent {
@@ -93,8 +95,8 @@ impl From<QueryExecuted> for MetricsEvent {
     }
 }
 
-impl From<Vec<Worker>> for MetricsEvent {
-    fn from(active_workers: Vec<Worker>) -> Self {
+impl From<Vec<WorkerState>> for MetricsEvent {
+    fn from(active_workers: Vec<WorkerState>) -> Self {
         Self::WorkersSnapshot { active_workers }
     }
 }

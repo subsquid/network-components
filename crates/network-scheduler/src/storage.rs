@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use crate::cli::Config;
 use aws_sdk_s3 as s3;
 use aws_sdk_s3::types::Object;
 use itertools::Itertools;
@@ -178,23 +179,24 @@ impl S3Storage {
     }
 }
 
-pub async fn get_incoming_units(
-    s3_endpoint: String,
-    buckets: Vec<String>,
-    unit_size: usize,
-) -> anyhow::Result<Receiver<SchedulingUnit>> {
-    let config = aws_config::from_env()
-        .endpoint_url(s3_endpoint)
+pub async fn get_incoming_units() -> anyhow::Result<Receiver<SchedulingUnit>> {
+    let config = Config::get();
+    let s3_config = aws_config::from_env()
+        .endpoint_url(config.s3_endpoint.clone())
         .load()
         .await;
-    let client = s3::Client::new(&config);
+    let client = s3::Client::new(&s3_config);
 
     let (unit_sender, unit_receiver) = mpsc::channel(100);
 
-    for bucket in buckets {
+    for bucket in config.buckets.clone() {
         let storage = S3Storage::new(bucket, client.clone());
         let incoming_chunks = storage.get_incoming_chunks();
-        bundle_chunks(incoming_chunks, unit_sender.clone(), unit_size);
+        bundle_chunks(
+            incoming_chunks,
+            unit_sender.clone(),
+            config.scheduling_unit_size,
+        );
     }
     Ok(unit_receiver)
 }

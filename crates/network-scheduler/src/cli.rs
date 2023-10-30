@@ -29,7 +29,8 @@ pub struct Config {
     pub mixed_units_ratio: f64,
     pub mixing_recent_unit_weight: f64,
     pub s3_endpoint: String,
-    pub buckets: Vec<String>,
+    pub dataset_buckets: Vec<String>,
+    pub scheduler_state_bucket: String,
 }
 
 impl Config {

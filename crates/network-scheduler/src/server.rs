@@ -14,6 +14,7 @@ use crate::metrics::{MetricsEvent, MetricsWriter};
 use crate::metrics_server;
 use crate::scheduler::Scheduler;
 use crate::scheduling_unit::SchedulingUnit;
+use crate::storage::S3Storage;
 
 type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
@@ -47,10 +48,11 @@ impl Server {
     pub async fn run(
         mut self,
         contract_client: Box<dyn contract_client::Client>,
+        storage_client: S3Storage,
         metrics_listen_addr: SocketAddr,
     ) {
         log::info!("Starting scheduler server");
-        let scheduling_task = self.spawn_scheduling_task(contract_client);
+        let scheduling_task = self.spawn_scheduling_task(contract_client, storage_client);
         let monitoring_task = self.spawn_worker_monitoring_task();
         let metrics_server_task = self.spawn_metrics_server_task(metrics_listen_addr);
         loop {
@@ -85,14 +87,12 @@ impl Server {
     }
 
     async fn ping(&mut self, peer_id: PeerId, msg: Ping) {
-        let ping_accepted = self.scheduler.write().await.ping(peer_id, msg.clone());
-        if !ping_accepted {
-            return;
-        }
-
+        let worker_state = match self.scheduler.write().await.ping(peer_id, msg.clone()) {
+            Some(state) => state,
+            None => return,
+        };
         self.write_metrics(peer_id, msg).await;
-        let worker_state = self.scheduler.read().await.get_worker_state(&peer_id);
-        if let Some(worker_state) = worker_state {
+        if !worker_state.datasets.is_empty() {
             self.send_msg(peer_id, Msg::StateUpdate(worker_state)).await
         }
     }
@@ -128,16 +128,30 @@ impl Server {
     fn spawn_scheduling_task(
         &self,
         contract_client: Box<dyn contract_client::Client>,
+        storage_client: S3Storage,
     ) -> JoinHandle<()> {
         let scheduler = self.scheduler.clone();
         tokio::spawn(async move {
             log::info!("Starting scheduling task");
+            // Get worker set immediately to accept pings
+            match contract_client.active_workers().await {
+                Ok(workers) => scheduler.write().await.update_workers(workers),
+                Err(e) => log::error!("Error getting workers: {e:?}"),
+            }
+            // Wait some time to get pings and download chunks
+            tokio::time::sleep(Config::get().worker_inactive_timeout).await;
+
             loop {
-                tokio::time::sleep(Config::get().schedule_interval).await;
                 match contract_client.active_workers().await {
-                    Ok(workers) => scheduler.write().await.schedule(workers),
+                    Ok(workers) => scheduler.write().await.update_workers(workers),
                     Err(e) => log::error!("Error getting workers: {e:?}"),
                 }
+                scheduler.write().await.schedule();
+                let _ = storage_client
+                    .save_scheduler(scheduler.read().await)
+                    .await
+                    .map_err(|e| log::error!("Error saving scheduler state: {e:?}"));
+                tokio::time::sleep(Config::get().schedule_interval).await;
             }
         })
     }

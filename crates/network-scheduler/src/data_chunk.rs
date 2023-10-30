@@ -2,13 +2,16 @@ use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
+use serde_with::{hex::Hex, serde_as};
 use sha3::{Digest, Sha3_256};
 
 use router_controller::messages::WorkerState;
 use router_controller::range::Range;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub struct ChunkId([u8; 32]);
+#[serde_as]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
+pub struct ChunkId(#[serde_as(as = "Hex")] [u8; 32]);
 
 impl Display for ChunkId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -16,7 +19,7 @@ impl Display for ChunkId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataChunk {
     pub dataset_url: String,
     pub block_range: Range,

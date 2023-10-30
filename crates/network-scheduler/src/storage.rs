@@ -1,17 +1,22 @@
+use std::ops::Deref;
 use std::time::Duration;
 
-use crate::cli::Config;
 use aws_sdk_s3 as s3;
+use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::types::Object;
 use itertools::Itertools;
 use nonempty::NonEmpty;
 use tokio::sync::mpsc::{self, Receiver};
 
+use crate::cli::Config;
 use crate::data_chunk::DataChunk;
+use crate::scheduler::Scheduler;
 use crate::scheduling_unit::{bundle_chunks, SchedulingUnit};
 
+const SCHEDULER_STATE_KEY: &str = "scheduler_state.json";
+
 #[derive(Clone)]
-struct S3Storage {
+struct DatasetStorage {
     bucket: String,
     client: s3::Client,
     last_key: Option<String>,
@@ -50,7 +55,7 @@ impl TryFrom<Object> for S3Object {
     }
 }
 
-impl S3Storage {
+impl DatasetStorage {
     pub fn new(bucket: String, client: s3::Client) -> Self {
         Self {
             bucket,
@@ -93,17 +98,39 @@ impl S3Storage {
     }
 
     async fn list_all_new_chunks(&mut self) -> anyhow::Result<Vec<DataChunk>> {
-        let objects = self.list_all_new_objects().await?;
-        objects
+        let objects = match NonEmpty::from_vec(self.list_all_new_objects().await?) {
+            None => return Ok(Vec::new()),
+            Some(objects) => objects,
+        };
+        let last_key = objects.last().key();
+        let chunks = objects
             .into_iter()
             .group_by(|obj| obj.prefix.clone())
             .into_iter()
             .map(|(_, objects)| self.objects_to_chunk(objects))
-            .collect()
+            .collect::<anyhow::Result<Vec<DataChunk>>>()?;
+
+        // Verify if chunks are continuous
+        let mut next_block = self.last_block.map(|x| x + 1).unwrap_or_default();
+        for chunk in chunks.iter() {
+            if chunk.block_range.begin != next_block {
+                anyhow::bail!(
+                    "Blocks {} to {} missing from {}",
+                    next_block,
+                    chunk.block_range.begin - 1,
+                    self.bucket
+                );
+            }
+            next_block = chunk.block_range.end + 1;
+        }
+
+        self.last_key = Some(last_key);
+        self.last_block = chunks.last().map(|c| c.block_range.end);
+        Ok(chunks)
     }
 
     fn objects_to_chunk(
-        &mut self,
+        &self,
         objs: impl IntoIterator<Item = S3Object>,
     ) -> anyhow::Result<DataChunk> {
         let mut last_key = None;
@@ -127,18 +154,6 @@ impl S3Storage {
         };
         log::debug!("Downloaded chunk {chunk:?}");
 
-        let next_block = self.last_block.map(|x| x + 1).unwrap_or_default();
-        if chunk.block_range.begin != next_block {
-            anyhow::bail!(
-                "Blocks {} to {} missing from {}",
-                next_block,
-                chunk.block_range.begin,
-                self.bucket
-            );
-        }
-
-        self.last_key = Some(last_key);
-        self.last_block = Some(chunk.block_range.end);
         Ok(chunk)
     }
 
@@ -179,24 +194,68 @@ impl S3Storage {
     }
 }
 
-pub async fn get_incoming_units() -> anyhow::Result<Receiver<SchedulingUnit>> {
-    let config = Config::get();
-    let s3_config = aws_config::from_env()
-        .endpoint_url(config.s3_endpoint.clone())
-        .load()
-        .await;
-    let client = s3::Client::new(&s3_config);
+pub struct S3Storage {
+    client: s3::Client,
+    config: &'static Config,
+}
 
-    let (unit_sender, unit_receiver) = mpsc::channel(100);
-
-    for bucket in config.buckets.clone() {
-        let storage = S3Storage::new(bucket, client.clone());
-        let incoming_chunks = storage.get_incoming_chunks();
-        bundle_chunks(
-            incoming_chunks,
-            unit_sender.clone(),
-            config.scheduling_unit_size,
-        );
+impl S3Storage {
+    pub async fn new() -> Self {
+        let config = Config::get();
+        let s3_config = aws_config::from_env()
+            .endpoint_url(config.s3_endpoint.clone())
+            .load()
+            .await;
+        let client = s3::Client::new(&s3_config);
+        Self { client, config }
     }
-    Ok(unit_receiver)
+
+    pub async fn get_incoming_units(&self) -> Receiver<SchedulingUnit> {
+        let (unit_sender, unit_receiver) = mpsc::channel(100);
+
+        for bucket in self.config.dataset_buckets.clone() {
+            let storage = DatasetStorage::new(bucket, self.client.clone());
+            let incoming_chunks = storage.get_incoming_chunks();
+            bundle_chunks(
+                incoming_chunks,
+                unit_sender.clone(),
+                self.config.scheduling_unit_size,
+            );
+        }
+        unit_receiver
+    }
+
+    pub async fn load_scheduler(&self) -> anyhow::Result<Scheduler> {
+        let api_result = self
+            .client
+            .get_object()
+            .bucket(&self.config.scheduler_state_bucket)
+            .key(SCHEDULER_STATE_KEY)
+            .send()
+            .await;
+        let bytes = match api_result {
+            Ok(res) => res.body.collect().await?.to_vec(),
+            Err(SdkError::ServiceError(e)) if e.err().is_no_such_key() => {
+                log::warn!("Scheduler state not found. Initializing with blank state.");
+                return Ok(Scheduler::default());
+            }
+            Err(e) => return Err(anyhow::anyhow!(e)),
+        };
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+
+    pub async fn save_scheduler<T: Deref<Target = Scheduler>>(
+        &self,
+        scheduler: T,
+    ) -> anyhow::Result<()> {
+        let state = serde_json::to_vec(scheduler.deref())?;
+        self.client
+            .put_object()
+            .bucket(&self.config.scheduler_state_bucket)
+            .key(SCHEDULER_STATE_KEY)
+            .body(state.into())
+            .send()
+            .await?;
+        Ok(())
+    }
 }

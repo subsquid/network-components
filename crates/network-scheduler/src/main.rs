@@ -6,8 +6,8 @@ use subsquid_network_transport::Subscription;
 
 use crate::cli::Cli;
 use crate::metrics::MetricsWriter;
-use crate::scheduler::Scheduler;
 use crate::server::Server;
+use crate::storage::S3Storage;
 
 mod cli;
 mod data_chunk;
@@ -47,8 +47,9 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     // Get scheduling units
-    let incoming_units = storage::get_incoming_units().await?;
-    let scheduler = Scheduler::new();
+    let storage = S3Storage::new().await;
+    let incoming_units = storage.get_incoming_units().await;
+    let scheduler = storage.load_scheduler().await?;
     let contract_client = contract_client::get_client(&args.rpc_url).await?;
 
     Server::new(
@@ -58,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
         scheduler,
         metrics_writer,
     )
-    .run(contract_client, args.http_listen_addr)
+    .run(contract_client, storage, args.http_listen_addr)
     .await;
 
     Ok(())

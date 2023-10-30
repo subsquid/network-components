@@ -1,11 +1,12 @@
 use std::fmt::{Display, Formatter};
 
 use nonempty::NonEmpty;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::data_chunk::{ChunkId, DataChunk};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SchedulingUnit {
     pub chunks: NonEmpty<DataChunk>,
 }

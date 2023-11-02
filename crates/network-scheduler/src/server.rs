@@ -55,6 +55,8 @@ impl Server {
         let scheduling_task = self.spawn_scheduling_task(contract_client, storage_client);
         let monitoring_task = self.spawn_worker_monitoring_task();
         let metrics_server_task = self.spawn_metrics_server_task(metrics_listen_addr);
+        let jail_inactive_task = self.spawn_jail_inactive_workers_task();
+        let jail_stale_task = self.spawn_jail_stale_workers_task();
         loop {
             tokio::select! {
                 Some(msg) = self.incoming_messages.recv() => self.handle_message(msg).await,
@@ -66,6 +68,8 @@ impl Server {
         scheduling_task.abort();
         monitoring_task.abort();
         metrics_server_task.abort();
+        jail_inactive_task.abort();
+        jail_stale_task.abort();
     }
 
     async fn handle_message(&mut self, msg: Message) {
@@ -182,6 +186,26 @@ impl Server {
         tokio::spawn(async move {
             if let Err(e) = metrics_server::run_server(scheduler, metrics_listen_addr).await {
                 log::error!("Metrics server crashed: {e:?}");
+            }
+        })
+    }
+
+    fn spawn_jail_inactive_workers_task(&self) -> JoinHandle<()> {
+        let scheduler = self.scheduler.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Config::get().worker_inactive_timeout).await;
+                scheduler.write().await.jail_inactive_workers();
+            }
+        })
+    }
+
+    fn spawn_jail_stale_workers_task(&self) -> JoinHandle<()> {
+        let scheduler = self.scheduler.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Config::get().worker_stale_timeout).await;
+                scheduler.write().await.jail_stale_workers();
             }
         })
     }

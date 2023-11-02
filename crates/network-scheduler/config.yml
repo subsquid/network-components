@@ -1,6 +1,7 @@
 schedule_interval_sec: 10800  # 3 hours
 min_ping_interval_sec: 10
 worker_inactive_timeout_sec: 120
+worker_stale_timeout_sec: 900  # 15 min
 replication_factor: 2
 scheduling_unit_size: 10
 mixed_units_ratio: 0.1

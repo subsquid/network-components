@@ -16,7 +16,7 @@ use router_controller::range::RangeSet;
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;
-use crate::data_chunk::chunks_to_worker_state;
+use crate::data_chunk::{chunks_to_worker_state, DataChunk};
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 
 pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.1.4"];
@@ -34,6 +34,8 @@ pub struct WorkerState {
     pub assigned_bytes: u64, // Can be outdated, source of truth is assigned_units
     pub stored_ranges: HashMap<String, RangeSet>, // dataset -> ranges
     pub stored_bytes: u64,
+    #[serde(default)]
+    pub num_missing_chunks: u32,
 }
 
 impl WorkerState {
@@ -48,6 +50,7 @@ impl WorkerState {
             stored_ranges: HashMap::new(),
             stored_bytes: 0,
             assigned_bytes: 0,
+            num_missing_chunks: 0,
         }
     }
 
@@ -112,6 +115,76 @@ impl WorkerState {
             false
         }
     }
+
+    pub fn assigned_chunks<'a>(
+        &'a self,
+        units_map: &'a HashMap<UnitId, SchedulingUnit>,
+    ) -> impl Iterator<Item = DataChunk> + 'a {
+        self.assigned_units.iter().flat_map(|unit_id| {
+            units_map
+                .get(unit_id)
+                .expect("Unknown scheduling unit")
+                .clone()
+        })
+    }
+
+    fn count_missing_chunks<'a>(&'a self, units: &'a HashMap<UnitId, SchedulingUnit>) -> u32 {
+        self.assigned_chunks(units)
+            .map(|chunk| match self.stored_ranges.get(&chunk.dataset_url) {
+                Some(range_set) if range_set.includes(chunk.block_range) => 0,
+                _ => 1,
+            })
+            .sum()
+    }
+
+    /// Check if the worker is making progress with downloading missing chunks.
+    /// If it's not, jail the worker and return Err with unassigned units' IDs.
+    /// Assumes the worker is not jailed.
+    pub fn check_download_progress<'a>(
+        &'a mut self,
+        units: &'a HashMap<UnitId, SchedulingUnit>,
+    ) -> Result<(), Vec<UnitId>> {
+        assert!(!self.jailed);
+        let num_missing_chunks = self.count_missing_chunks(units);
+        if num_missing_chunks == 0 {
+            log::debug!("Worker {} is fully synced", self.peer_id);
+            self.num_missing_chunks = num_missing_chunks;
+            Ok(())
+        } else if num_missing_chunks < self.num_missing_chunks {
+            log::debug!(
+                "Worker {} is making progress {} -> {} chunks missing",
+                self.peer_id,
+                self.num_missing_chunks,
+                num_missing_chunks
+            );
+            self.num_missing_chunks = num_missing_chunks;
+            Ok(())
+        } else {
+            log::debug!(
+                "Worker {} has not downloaded any chunks since last check",
+                self.peer_id
+            );
+            Err(self.jail())
+        }
+    }
+
+    pub fn reset_download_progress<'a>(&'a mut self, units: &'a HashMap<UnitId, SchedulingUnit>) {
+        self.num_missing_chunks = self.count_missing_chunks(units);
+    }
+
+    /// Jail the worker, unassign all units and return their IDs.
+    pub fn jail(&mut self) -> Vec<UnitId> {
+        log::info!("Jailing worker {}", self.peer_id);
+        self.jailed = true;
+        self.assigned_bytes = 0;
+        self.num_missing_chunks = 0;
+        self.assigned_units.drain().collect()
+    }
+
+    pub fn release(&mut self) {
+        log::info!("Releasing worker {}", self.peer_id);
+        self.jailed = false;
+    }
 }
 
 impl Display for WorkerState {
@@ -140,7 +213,6 @@ impl Scheduler {
         worker_id: PeerId,
         msg: Ping,
     ) -> Option<router_controller::messages::WorkerState> {
-        log::debug!("Got ping from {worker_id}");
         if !SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == msg.version) {
             log::debug!("Worker {worker_id} version not supported: {}", msg.version);
             return None;
@@ -156,12 +228,7 @@ impl Scheduler {
             return None;
         }
         Some(chunks_to_worker_state(
-            worker_state.assigned_units.iter().flat_map(|unit_id| {
-                self.known_units
-                    .get(unit_id)
-                    .expect("Unknown scheduling unit")
-                    .clone()
-            }),
+            worker_state.assigned_chunks(&self.known_units),
         ))
     }
 
@@ -235,6 +302,7 @@ impl Scheduler {
             self.worker_states.len(),
             self.known_units.len()
         );
+        self.release_jailed_workers();
         self.mix_random_units();
         self.assign_units();
     }
@@ -263,6 +331,71 @@ impl Scheduler {
                     .expect("unknown unit")
                     .retain(|id| *id != worker.peer_id);
             }
+        }
+    }
+
+    fn release_jailed_workers(&mut self) {
+        log::info!("Releasing jailed workers");
+        self.worker_states
+            .values_mut()
+            .filter(|w| w.jailed)
+            .for_each(|w| w.release());
+    }
+
+    /// Jail workers which don't send pings.
+    pub fn jail_inactive_workers(&mut self) {
+        log::info!("Jailing inactive workers");
+        let mut num_jailed_workers = 0;
+        let mut num_unassigned_units = 0;
+
+        self.worker_states
+            .values_mut()
+            .filter(|w| !w.jailed && !w.is_active())
+            .for_each(|w| {
+                let units = w.jail();
+                num_jailed_workers += 1;
+                num_unassigned_units += units.len();
+                for unit_id in units {
+                    self.units_assignments
+                        .get_mut(&unit_id)
+                        .expect("Unit assignment missing")
+                        .retain(|id| *id != w.peer_id)
+                }
+            });
+
+        log::info!("Jailed {num_jailed_workers} workers. Unassigned {num_unassigned_units} units");
+        if num_unassigned_units > 0 {
+            self.assign_units();
+        }
+    }
+
+    /// Jail workers which don't make download progress.
+    pub fn jail_stale_workers(&mut self) {
+        log::info!("Jailing stale workers");
+        let mut num_jailed_workers = 0;
+        let mut num_unassigned_units = 0;
+
+        self.worker_states
+            .values_mut()
+            .filter(|w| !w.jailed)
+            .for_each(|w| {
+                let units = match w.check_download_progress(&self.known_units) {
+                    Ok(_) => return,
+                    Err(units) => units,
+                };
+                num_jailed_workers += 1;
+                num_unassigned_units += units.len();
+                for unit_id in units {
+                    self.units_assignments
+                        .get_mut(&unit_id)
+                        .expect("Unit assignment missing")
+                        .retain(|id| *id != w.peer_id)
+                }
+            });
+
+        log::info!("Jailed {num_jailed_workers} workers. Unassigned {num_unassigned_units} units");
+        if num_unassigned_units > 0 {
+            self.assign_units();
         }
     }
 
@@ -375,8 +508,11 @@ impl Scheduler {
                 .count()
         );
         self.worker_states
-            .values()
+            .values_mut()
             .filter(|w| w.is_active() && !w.jailed)
-            .for_each(|w| log::info!("{w}"));
+            .for_each(|w| {
+                w.reset_download_progress(&self.known_units);
+                log::info!("{w}")
+            });
     }
 }

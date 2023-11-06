@@ -1,32 +1,17 @@
-use std::cmp::min;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
+use serde_with::{hex::Hex, serde_as};
 use sha3::{Digest, Sha3_256};
 
 use router_controller::messages::WorkerState;
 use router_controller::range::Range;
-use subsquid_network_transport::PeerId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ChunkId([u8; 32]);
-
-impl ChunkId {
-    pub fn distance(&self, peer_id: &PeerId) -> [u8; 32] {
-        // Take 32 *last* bytes of the peer ID, because initial bytes of a multihash are metadata
-        let peer_id = peer_id.to_bytes();
-        let num_bytes = min(32, peer_id.len());
-        let mut result = [0u8; 32];
-        result[..num_bytes].copy_from_slice(&peer_id[(peer_id.len() - num_bytes)..]);
-
-        // Compute XOR with chunk ID bytes
-        for (i, result_byte) in result.iter_mut().enumerate() {
-            *result_byte ^= self.0[i];
-        }
-        result
-    }
-}
+#[serde_as]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
+pub struct ChunkId(#[serde_as(as = "Hex")] [u8; 32]);
 
 impl Display for ChunkId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -34,7 +19,7 @@ impl Display for ChunkId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataChunk {
     pub dataset_url: String,
     pub block_range: Range,

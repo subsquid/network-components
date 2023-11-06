@@ -1,21 +1,50 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DurationSeconds};
+use tokio::sync::OnceCell;
+
 use subsquid_network_transport::cli::TransportArgs;
 
+static CONFIG: OnceCell<Config> = OnceCell::const_new();
+
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub schedule_interval_sec: u64,
+    #[serde_as(as = "DurationSeconds")]
+    #[serde(rename = "schedule_interval_sec")]
+    pub schedule_interval: Duration,
+    #[serde_as(as = "DurationSeconds")]
+    #[serde(rename = "min_ping_interval_sec")]
+    pub min_ping_interval: Duration,
+    #[serde_as(as = "DurationSeconds")]
+    #[serde(rename = "worker_inactive_timeout_sec")]
+    pub worker_inactive_timeout: Duration,
+    #[serde_as(as = "DurationSeconds")]
+    #[serde(rename = "worker_stale_timeout_sec")]
+    pub worker_stale_timeout: Duration,
     pub replication_factor: usize,
     pub scheduling_unit_size: usize,
     pub worker_storage_bytes: u64,
+    pub mixed_units_ratio: f64,
+    pub mixing_recent_unit_weight: f64,
     pub s3_endpoint: String,
-    pub buckets: Vec<String>,
+    pub dataset_buckets: Vec<String>,
+    pub scheduler_state_bucket: String,
+}
+
+impl Config {
+    #[inline(always)]
+    pub fn get() -> &'static Self {
+        CONFIG.get().expect("Config not initialized")
+    }
 }
 
 #[derive(Parser)]
+#[command(version)]
 pub struct Cli {
     #[command(flatten)]
     pub transport: TransportArgs,
@@ -64,8 +93,10 @@ pub struct Cli {
 }
 
 impl Cli {
-    pub async fn config(&self) -> anyhow::Result<Config> {
+    pub async fn read_config(&self) -> anyhow::Result<()> {
         let file_contents = tokio::fs::read(&self.config).await?;
-        Ok(serde_yaml::from_slice(file_contents.as_slice())?)
+        let config = serde_yaml::from_slice(file_contents.as_slice())?;
+        CONFIG.set(config)?;
+        Ok(())
     }
 }

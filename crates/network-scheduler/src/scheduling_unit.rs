@@ -1,11 +1,12 @@
 use std::fmt::{Display, Formatter};
 
 use nonempty::NonEmpty;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::data_chunk::{ChunkId, DataChunk};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SchedulingUnit {
     pub chunks: NonEmpty<DataChunk>,
 }
@@ -30,6 +31,14 @@ impl SchedulingUnit {
         // ID of the unit is just ID of the first chunk. This way, when an incomplete unit is filled
         // later, it will still have the same ID.
         self.chunks.first().id()
+    }
+
+    pub fn dataset_url(&self) -> &str {
+        self.chunks.first().dataset_url.as_str()
+    }
+
+    pub fn begin(&self) -> u32 {
+        self.chunks.first().block_range.begin
     }
 }
 

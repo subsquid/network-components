@@ -1,7 +1,6 @@
 use async_trait::async_trait;
 use ethers::prelude::{abigen, ContractError, Http, JsonRpcClient, Middleware};
 use ethers::providers::{Provider, Ws};
-use ethers::types::{Address, U256};
 use futures::{Stream, StreamExt};
 use lazy_static::lazy_static;
 use libp2p::PeerId;
@@ -9,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+pub use ethers::types::{Address, U256};
 pub use tokio::sync::mpsc::Receiver;
 
 abigen!(TSQD, "abi/tSQD.json");
@@ -31,7 +31,7 @@ pub enum ClientError {
     #[error("Invalid RPC URL: {0:?}")]
     InvalidRpcUrl(#[from] url::ParseError),
     #[error("Invalid Peer ID: {0:?}")]
-    InvalidPeerId(#[from] libp2p::multihash::Error),
+    InvalidPeerId(#[from] libp2p::identity::ParseError),
     #[error("Contract error: {0}")]
     Contract(String),
     #[error("RPC provider error: {0}")]

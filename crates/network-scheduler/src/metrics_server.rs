@@ -1,18 +1,19 @@
-use crate::cli::Config;
-use crate::data_chunk::DataChunk;
-use crate::scheduler::Scheduler;
-use crate::worker_registry::{Worker, WorkerRegistry};
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+
 use axum::routing::get;
 use axum::{Extension, Json, Router, Server};
 use itertools::Itertools;
-use router_controller::messages::RangeSet;
 use serde::Serialize;
-use std::collections::HashMap;
-use std::net::SocketAddr;
-use std::ops::Deref;
-use std::sync::Arc;
-use subsquid_network_transport::PeerId;
 use tokio::sync::RwLock;
+
+use router_controller::messages::RangeSet;
+use subsquid_network_transport::PeerId;
+
+use crate::cli::Config;
+use crate::data_chunk::{chunks_to_worker_state, DataChunk};
+use crate::scheduler::{Scheduler, WorkerState};
 
 #[derive(Debug, Clone, Serialize)]
 struct ChunkStatus {
@@ -24,29 +25,40 @@ struct ChunkStatus {
 }
 
 async fn active_workers(
-    Extension(worker_registry): Extension<Arc<RwLock<WorkerRegistry>>>,
-) -> Json<Vec<Worker>> {
-    Json(worker_registry.write().await.active_workers().await)
+    Extension(scheduler): Extension<Arc<RwLock<Scheduler>>>,
+) -> Json<Vec<WorkerState>> {
+    Json(scheduler.read().await.active_workers())
 }
 
 async fn chunks(
-    Extension(worker_registry): Extension<Arc<RwLock<WorkerRegistry>>>,
     Extension(scheduler): Extension<Arc<RwLock<Scheduler>>>,
 ) -> Json<HashMap<String, Vec<ChunkStatus>>> {
-    let workers = worker_registry.write().await.active_workers().await;
-    let chunks = scheduler.read().await.known_chunks();
-    let assigned_ranges = {
-        let scheduler = scheduler.read().await;
-        map_ranges(&workers, |id| {
-            scheduler.get_worker_state(id).unwrap_or_default().datasets
+    let workers = scheduler.read().await.all_workers();
+    let units = scheduler.read().await.known_units();
+    let assigned_ranges = workers
+        .iter()
+        .flat_map(|w| {
+            let chunks = w
+                .assigned_units
+                .iter()
+                .flat_map(|unit_id| units.get(unit_id).unwrap().clone());
+            chunks_to_worker_state(chunks)
+                .datasets
+                .into_iter()
+                .map(|(dataset, ranges)| (dataset, (w.peer_id, ranges)))
         })
-    };
-    let stored_ranges = {
-        let registry = worker_registry.read().await;
-        map_ranges(&workers, |id| registry.stored_ranges(id))
-    };
-    let chunk_statuses = chunks
-        .into_iter()
+        .into_group_map();
+    let stored_ranges = workers
+        .iter()
+        .flat_map(|w| {
+            w.stored_ranges
+                .iter()
+                .map(|(dataset, ranges)| (dataset.clone(), (w.peer_id, ranges.clone())))
+        })
+        .into_group_map();
+    let chunk_statuses = units
+        .into_values()
+        .flatten()
         .map(|chunk| {
             let assigned_to = find_workers_with_chunk(&chunk, &assigned_ranges);
             let downloaded_by = find_workers_with_chunk(&chunk, &stored_ranges);
@@ -81,39 +93,17 @@ fn find_workers_with_chunk(
         .collect()
 }
 
-/// Returns a mapping: dataset -> [(worker_id, range_set)]
-fn map_ranges<F>(workers: &[Worker], state_getter: F) -> HashMap<String, Vec<(PeerId, RangeSet)>>
-where
-    F: Fn(&PeerId) -> HashMap<String, RangeSet>,
-{
-    workers
-        .iter()
-        .flat_map(|w| {
-            state_getter(&w.peer_id)
-                .into_iter()
-                .map(|(dataset, range_set)| (dataset, (w.peer_id, range_set)))
-        })
-        .into_group_map()
+async fn get_config() -> Json<Config> {
+    Json(Config::get().clone())
 }
 
-async fn get_config(Extension(config): Extension<Arc<Config>>) -> Json<Config> {
-    Json(config.deref().clone())
-}
-
-pub async fn run_server(
-    worker_registry: Arc<RwLock<WorkerRegistry>>,
-    scheduler: Arc<RwLock<Scheduler>>,
-    config: Config,
-    addr: SocketAddr,
-) -> anyhow::Result<()> {
+pub async fn run_server(scheduler: Arc<RwLock<Scheduler>>, addr: SocketAddr) -> anyhow::Result<()> {
     log::info!("Starting HTTP server listening on {addr}");
     let app = Router::new()
         .route("/workers/pings", get(active_workers))
         .route("/chunks", get(chunks))
         .route("/config", get(get_config))
-        .layer(Extension(worker_registry))
-        .layer(Extension(scheduler))
-        .layer(Extension(Arc::new(config)));
+        .layer(Extension(scheduler));
     Server::bind(&addr).serve(app.into_make_service()).await?;
     Ok(())
 }

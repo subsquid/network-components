@@ -1,10 +1,12 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
 use clap::Parser;
 use env_logger::Env;
 
 use subsquid_network_transport::cli::TransportArgs;
 use subsquid_network_transport::transport::P2PTransportBuilder;
+use subsquid_network_transport::Subscription;
 
 use crate::config::Config;
 
@@ -13,6 +15,7 @@ mod config;
 mod http_server;
 
 #[derive(Parser)]
+#[command(version)]
 struct Cli {
     #[command(flatten)]
     pub transport: TransportArgs,
@@ -62,7 +65,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Subscribe to dataset state updates (from p2p pub-sub)
     subscription_sender
-        .send((PING_TOPIC.to_string(), true))
+        .send(Subscription {
+            topic: PING_TOPIC.to_string(),
+            subscribed: true,
+            allow_unordered: false,
+        })
         .await?;
 
     // Subscribe to worker set updates (from blockchain)
@@ -80,6 +87,9 @@ async fn main() -> anyhow::Result<()> {
         worker_updates,
     )
     .await?;
+
+    // Wait one worker ping cycle before starting to serve
+    tokio::time::sleep(Duration::from_secs(20)).await;
 
     // Start HTTP server
     http_server::run_server(query_client, &http_listen_addr).await

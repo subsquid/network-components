@@ -5,10 +5,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use derivative::Derivative;
+use futures::stream::StreamExt;
 use prost::Message as ProstMsg;
 use rand::prelude::IteratorRandom;
+use tabled::settings::Style;
+use tabled::{Table, Tabled};
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
+use tokio::time::interval;
+use tokio_stream::wrappers::IntervalStream;
 
 use contract_client::Worker;
 use router_controller::messages::{
@@ -18,10 +23,11 @@ use router_controller::messages::{
 use subsquid_network_transport::{MsgContent, PeerId};
 
 use crate::config::{Config, DatasetId};
+use crate::PING_TOPIC;
 
 type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
-const WORKER_INACTIVE_THRESHOLD: Duration = Duration::from_secs(30);
+const WORKER_INACTIVE_THRESHOLD: Duration = Duration::from_secs(120);
 const WORKER_GREYLIST_TIME: Duration = Duration::from_secs(600);
 const DEFAULT_QUERY_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -113,6 +119,46 @@ impl DatasetState {
         }
         self.worker_ranges.insert(peer_id, state);
     }
+
+    pub fn highest_indexable_block(&self) -> u32 {
+        let range_set: RangeSet = self
+            .worker_ranges
+            .values()
+            .cloned()
+            .flat_map(|r| r.ranges)
+            .into();
+        match range_set.ranges.get(0) {
+            Some(range) if range.begin == 0 => range.end,
+            _ => 0,
+        }
+    }
+}
+
+#[derive(Tabled)]
+struct DatasetSummary<'a> {
+    #[tabled(rename = "dataset")]
+    name: &'a String,
+    #[tabled(rename = "highest indexable block")]
+    highest_indexable_block: u32,
+    #[tabled(rename = "highest seen block")]
+    highest_seen_block: u32,
+}
+
+impl<'a> DatasetSummary<'a> {
+    pub fn new(name: &'a String, state: Option<&DatasetState>) -> Self {
+        match state {
+            None => Self {
+                name,
+                highest_indexable_block: 0,
+                highest_seen_block: 0,
+            },
+            Some(state) => Self {
+                name,
+                highest_indexable_block: state.highest_indexable_block(),
+                highest_seen_block: state.height,
+            },
+        }
+    }
 }
 
 #[derive(Default)]
@@ -185,6 +231,7 @@ impl NetworkState {
     }
 
     pub fn greylist_worker(&mut self, worker_id: PeerId) {
+        log::info!("Grey-listing worker {worker_id}");
         self.worker_greylist.insert(worker_id, Instant::now());
     }
 
@@ -192,6 +239,12 @@ impl NetworkState {
         self.dataset_states
             .get(dataset_id)
             .map(|state| state.height)
+    }
+
+    pub fn summary(&self) -> impl Iterator<Item = DatasetSummary> {
+        self.available_datasets
+            .iter()
+            .map(|(name, id)| DatasetSummary::new(name, self.dataset_states.get(id)))
     }
 }
 
@@ -211,8 +264,10 @@ struct QueryHandler {
 
 impl QueryHandler {
     async fn run(mut self) {
+        let mut summary_timer = IntervalStream::new(interval(Duration::from_secs(30))).fuse();
         loop {
             let _ = tokio::select! {
+                _ = summary_timer.select_next_some() => self.print_summary().await,
                 Some(query) = self.query_receiver.recv() => self.handle_query(query)
                     .await
                     .map_err(|e| log::error!("Error handling query: {e:?}")),
@@ -226,6 +281,13 @@ impl QueryHandler {
                 else => break
             };
         }
+    }
+
+    async fn print_summary(&self) -> Result<(), ()> {
+        let mut summary = Table::new(self.network_state.read().await.summary());
+        summary.with(Style::sharp());
+        log::info!("Datasets summary:\n{summary}");
+        Ok(())
     }
 
     fn generate_query_id() -> String {
@@ -336,12 +398,8 @@ impl QueryHandler {
         let Envelope { msg } = Envelope::decode(content.as_slice())?;
         match msg {
             Some(Msg::QueryResult(result)) => self.query_result(peer_id, result).await?,
-            Some(Msg::Ping(ping)) => self.ping(peer_id, ping).await,
-            Some(Msg::DatasetState(state)) => {
-                // TODO: This is a legacy message. Remove it.
-                let dataset_id = topic.ok_or_else(|| anyhow::anyhow!("Message topic missing"))?;
-                self.update_dataset_state(peer_id, DatasetId(dataset_id), state)
-                    .await;
+            Some(Msg::Ping(ping)) if topic.is_some_and(|t| t == PING_TOPIC) => {
+                self.ping(peer_id, ping).await
             }
             _ => log::warn!("Unexpected message received: {msg:?}"),
         }
@@ -349,7 +407,8 @@ impl QueryHandler {
     }
 
     async fn ping(&mut self, peer_id: PeerId, ping: Ping) {
-        log::debug!("Got ping from {peer_id}: {ping:?}");
+        log::debug!("Got ping from {peer_id}");
+        log::trace!("Ping from {peer_id}: {ping:?}");
         let datasets = ping.state.map(|s| s.datasets).unwrap_or_default();
         for (dataset_url, range_set) in datasets.into_iter() {
             self.network_state.write().await.update_dataset_state(
@@ -358,19 +417,6 @@ impl QueryHandler {
                 range_set,
             )
         }
-    }
-
-    async fn update_dataset_state(
-        &mut self,
-        peer_id: PeerId,
-        dataset_id: DatasetId,
-        state: RangeSet,
-    ) {
-        log::debug!("Updating dataset state. worker_id={peer_id} dataset_id={dataset_id}");
-        self.network_state
-            .write()
-            .await
-            .update_dataset_state(peer_id, dataset_id, state)
     }
 
     async fn query_result(
@@ -388,6 +434,18 @@ impl QueryHandler {
             "Invalid message sender"
         );
         let (query_id, task) = task_entry.remove_entry();
+
+        // Greylist worker if server error occurred during query execution
+        match &result {
+            query_result::Result::ServerError(e) => {
+                log::warn!("Server error returned for query {query_id}: {e}");
+                self.network_state
+                    .write()
+                    .await
+                    .greylist_worker(task.worker_id);
+            }
+            _ => {}
+        }
 
         if self.send_metrics {
             let metrics_msg = Msg::QueryFinished(QueryFinished {

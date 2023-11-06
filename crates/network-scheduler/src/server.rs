@@ -1,8 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 
-use libp2p::core::PublicKey;
 use sha3::{Digest, Sha3_256};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
@@ -10,14 +8,14 @@ use tokio::task::JoinHandle;
 
 use router_controller::messages::envelope::Msg;
 use router_controller::messages::{Envelope, Ping, Pong, ProstMsg};
-use subsquid_network_transport::{MsgContent, PeerId};
+use subsquid_network_transport::{MsgContent, PeerId, PublicKey};
 
 use crate::cli::Config;
 use crate::metrics::{MetricsEvent, MetricsWriter};
 use crate::metrics_server;
 use crate::scheduler::Scheduler;
 use crate::scheduling_unit::SchedulingUnit;
-use crate::worker_registry::{WorkerRegistry, WORKER_INACTIVE_TIMEOUT};
+use crate::storage::S3Storage;
 
 type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
@@ -25,10 +23,8 @@ pub struct Server {
     incoming_messages: Receiver<Message>,
     incoming_units: Receiver<SchedulingUnit>,
     message_sender: Sender<Message>,
-    worker_registry: Arc<RwLock<WorkerRegistry>>,
     scheduler: Arc<RwLock<Scheduler>>,
     metrics_writer: Arc<RwLock<MetricsWriter>>,
-    config: Config,
 }
 
 impl Server {
@@ -36,30 +32,32 @@ impl Server {
         incoming_messages: Receiver<Message>,
         incoming_units: Receiver<SchedulingUnit>,
         message_sender: Sender<Message>,
-        worker_registry: WorkerRegistry,
         scheduler: Scheduler,
         metrics_writer: MetricsWriter,
-        config: Config,
     ) -> Self {
-        let worker_registry = Arc::new(RwLock::new(worker_registry));
         let scheduler = Arc::new(RwLock::new(scheduler));
         let metrics_writer = Arc::new(RwLock::new(metrics_writer));
         Self {
             incoming_messages,
             incoming_units,
             message_sender,
-            worker_registry,
             scheduler,
             metrics_writer,
-            config,
         }
     }
 
-    pub async fn run(mut self, metrics_listen_addr: SocketAddr) {
+    pub async fn run(
+        mut self,
+        contract_client: Box<dyn contract_client::Client>,
+        storage_client: S3Storage,
+        metrics_listen_addr: SocketAddr,
+    ) {
         log::info!("Starting scheduler server");
-        let scheduling_task = self.spawn_scheduling_task();
+        let scheduling_task = self.spawn_scheduling_task(contract_client, storage_client);
         let monitoring_task = self.spawn_worker_monitoring_task();
         let metrics_server_task = self.spawn_metrics_server_task(metrics_listen_addr);
+        let jail_inactive_task = self.spawn_jail_inactive_workers_task();
+        let jail_stale_task = self.spawn_jail_stale_workers_task();
         loop {
             tokio::select! {
                 Some(msg) = self.incoming_messages.recv() => self.handle_message(msg).await,
@@ -71,6 +69,8 @@ impl Server {
         scheduling_task.abort();
         monitoring_task.abort();
         metrics_server_task.abort();
+        jail_inactive_task.abort();
+        jail_stale_task.abort();
     }
 
     async fn handle_message(&mut self, msg: Message) {
@@ -92,13 +92,7 @@ impl Server {
     }
 
     async fn ping(&mut self, peer_id: PeerId, mut msg: Ping) {
-        if msg.worker_id != peer_id.to_string() {
-            return log::warn!(
-                "Invalid worker ID in string: {} != {peer_id}",
-                msg.worker_id,
-            );
-        }
-        let pubkey = match PublicKey::from_protobuf_encoding(&peer_id.to_bytes()[2..]) {
+        let pubkey = match PublicKey::try_decode_protobuf(&peer_id.to_bytes()[2..]) {
             Ok(pubkey) => pubkey,
             Err(e) => return log::warn!("Cannot retrieve public key from peer ID: {e:?}"),
         };
@@ -110,20 +104,18 @@ impl Server {
         }
         msg.signature = signature;
         let ping_hash = msg_hash(&msg);
-
-        self.worker_registry
-            .write()
-            .await
-            .ping(peer_id, msg.clone())
-            .await;
+        let assigned_state = match self.scheduler.write().await.ping(peer_id, msg.clone()) {
+            Some(state) => state,
+            None => return,
+        };
         self.write_metrics(peer_id, msg).await;
-
-        let assigned_state = self.scheduler.read().await.get_worker_state(&peer_id);
-        let pong = Msg::Pong(Pong {
-            ping_hash,
-            assigned_state,
-        });
-        self.send_msg(peer_id, pong).await;
+        if !assigned_state.datasets.is_empty() {
+            let pong = Msg::Pong(Pong {
+                ping_hash,
+                assigned_state: Some(assigned_state),
+            });
+            self.send_msg(peer_id, pong).await;
+        }
     }
 
     async fn write_metrics(&mut self, peer_id: PeerId, msg: impl Into<MetricsEvent>) {
@@ -154,36 +146,46 @@ impl Server {
         }
     }
 
-    fn spawn_scheduling_task(&self) -> JoinHandle<()> {
-        let worker_registry = self.worker_registry.clone();
+    fn spawn_scheduling_task(
+        &self,
+        contract_client: Box<dyn contract_client::Client>,
+        storage_client: S3Storage,
+    ) -> JoinHandle<()> {
         let scheduler = self.scheduler.clone();
-        let schedule_interval = Duration::from_secs(self.config.schedule_interval_sec);
         tokio::spawn(async move {
             log::info!("Starting scheduling task");
+            // Get worker set immediately to accept pings
+            match contract_client.active_workers().await {
+                Ok(workers) => scheduler.write().await.update_workers(workers),
+                Err(e) => log::error!("Error getting workers: {e:?}"),
+            }
+            // Wait some time to get pings and download chunks
+            tokio::time::sleep(Config::get().worker_inactive_timeout).await;
+
             loop {
-                tokio::time::sleep(schedule_interval).await;
-                let workers = worker_registry
-                    .write()
+                match contract_client.active_workers().await {
+                    Ok(workers) => scheduler.write().await.update_workers(workers),
+                    Err(e) => log::error!("Error getting workers: {e:?}"),
+                }
+                scheduler.write().await.schedule();
+                let _ = storage_client
+                    .save_scheduler(scheduler.read().await)
                     .await
-                    .available_workers()
-                    .await
-                    .into_iter()
-                    .map(|w| w.peer_id)
-                    .collect();
-                scheduler.write().await.schedule(workers);
+                    .map_err(|e| log::error!("Error saving scheduler state: {e:?}"));
+                tokio::time::sleep(Config::get().schedule_interval).await;
             }
         })
     }
 
     fn spawn_worker_monitoring_task(&self) -> JoinHandle<()> {
-        let worker_registry = self.worker_registry.clone();
+        let scheduler = self.scheduler.clone();
         let metrics_writer = self.metrics_writer.clone();
-        let monitoring_interval = WORKER_INACTIVE_TIMEOUT / 2;
+        let monitoring_interval = Config::get().worker_inactive_timeout / 2;
         tokio::spawn(async move {
             log::info!("Starting monitoring task");
             loop {
                 tokio::time::sleep(monitoring_interval).await;
-                let workers = worker_registry.write().await.available_workers().await;
+                let workers = scheduler.read().await.active_workers();
                 if let Err(e) = metrics_writer
                     .write()
                     .await
@@ -197,15 +199,30 @@ impl Server {
     }
 
     fn spawn_metrics_server_task(&self, metrics_listen_addr: SocketAddr) -> JoinHandle<()> {
-        let worker_registry = self.worker_registry.clone();
         let scheduler = self.scheduler.clone();
-        let config = self.config.clone();
         tokio::spawn(async move {
-            if let Err(e) =
-                metrics_server::run_server(worker_registry, scheduler, config, metrics_listen_addr)
-                    .await
-            {
+            if let Err(e) = metrics_server::run_server(scheduler, metrics_listen_addr).await {
                 log::error!("Metrics server crashed: {e:?}");
+            }
+        })
+    }
+
+    fn spawn_jail_inactive_workers_task(&self) -> JoinHandle<()> {
+        let scheduler = self.scheduler.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Config::get().worker_inactive_timeout).await;
+                scheduler.write().await.jail_inactive_workers();
+            }
+        })
+    }
+
+    fn spawn_jail_stale_workers_task(&self) -> JoinHandle<()> {
+        let scheduler = self.scheduler.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Config::get().worker_stale_timeout).await;
+                scheduler.write().await.jail_stale_workers();
             }
         })
     }

@@ -263,10 +263,10 @@ impl Controller {
                         };
                         if next_block > c.first_block() {
                             log::error!("Received overlapping chunks: {} and {}", p, c);
-                            return false
+                            return false;
                         } else {
                             log::error!("There is a gap between {} and {}", p, c);
-                            return false
+                            return false;
                         }
                     }
                     next_block = c.last_block() + 1
@@ -533,6 +533,8 @@ mod tests {
                 worker_url: w.to_string(),
                 state: Some(Default::default()),
                 pause: false,
+                stored_bytes: 0,
+                version: "".to_string(),
             });
         }
 
@@ -545,6 +547,8 @@ mod tests {
                     worker_url: w.to_string(),
                     state: Some(Default::default()),
                     pause: false,
+                    stored_bytes: 0,
+                    version: "".to_string(),
                 })
             })
             .collect();
@@ -557,6 +561,8 @@ mod tests {
                 worker_url: w.to_string(),
                 state: Some(state.deref().clone()),
                 pause: false,
+                stored_bytes: 0,
+                version: "".to_string(),
             });
         }
 

@@ -1,7 +1,13 @@
-schedule_interval_sec: 300
+schedule_interval_sec: 10800  # 3 hours
+min_ping_interval_sec: 10
+worker_inactive_timeout_sec: 120
+worker_stale_timeout_sec: 900  # 15 min
 replication_factor: 2
 scheduling_unit_size: 10
+mixed_units_ratio: 0.1
+mixing_recent_unit_weight: 10.0
 worker_storage_bytes: 549755813888  # 512 GiB
 s3_endpoint: 'https://7a28e49ec5f4a60c66f216392792ac38.r2.cloudflarestorage.com/'
-buckets:
+dataset_buckets:
   - 'ethereum-mainnet'
+scheduler_state_bucket: 'network-scheduler-state'

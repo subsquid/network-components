@@ -8,7 +8,7 @@ use tracing::{error, info};
 use router_controller::controller::Controller;
 
 use crate::dataset::Storage;
-use crate::metrics::DATASET_SYNC_ERRORS;
+use crate::metrics::{DATASET_HEIGHT, DATASET_SYNC_ERRORS};
 
 pub fn start(
     controller: Arc<Controller>,
@@ -26,6 +26,13 @@ pub fn start(
                 match storage.get_chunks(next_block) {
                     Ok(chunks) => {
                         info!("found new chunks in {}: {:?}", dataset, chunks);
+
+                        if let Some(chunk) = chunks.last() {
+                            DATASET_HEIGHT
+                                .with_label_values(&[dataset])
+                                .set(chunk.last_block().into())
+                        }
+
                         Ok(chunks)
                     }
                     Err(err) => {

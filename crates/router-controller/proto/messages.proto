@@ -45,7 +45,12 @@ message Ping {
 
 message Pong {
   bytes ping_hash = 1;
-  optional WorkerState assigned_state = 2;
+  oneof status {
+    google.protobuf.Empty not_registered = 2;
+    google.protobuf.Empty unsupported_version = 3;
+    google.protobuf.Empty jailed = 4;
+    WorkerState active = 5;
+  }
 }
 
 message Query {

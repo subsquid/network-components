@@ -11,6 +11,7 @@ use crate::storage::S3Storage;
 
 mod cli;
 mod data_chunk;
+mod messages;
 mod metrics;
 mod metrics_server;
 mod scheduler;

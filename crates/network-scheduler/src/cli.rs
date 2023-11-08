@@ -18,9 +18,6 @@ pub struct Config {
     #[serde(rename = "schedule_interval_sec")]
     pub schedule_interval: Duration,
     #[serde_as(as = "DurationSeconds")]
-    #[serde(rename = "min_ping_interval_sec")]
-    pub min_ping_interval: Duration,
-    #[serde_as(as = "DurationSeconds")]
     #[serde(rename = "worker_inactive_timeout_sec")]
     pub worker_inactive_timeout: Duration,
     #[serde_as(as = "DurationSeconds")]

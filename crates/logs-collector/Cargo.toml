@@ -1,0 +1,20 @@
+[package]
+name = "logs-collector"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive", "env"] }
+clickhouse = "0.11"
+env_logger = "0.10"
+log = "0.4"
+serde = { version = "1.0.188", features = ["derive"] }
+serde_bytes = "0.11"
+serde_repr = "0.1"
+tokio = { version = "1", features = ["full"] }
+
+contract-client = { version = "0.1", path = "../contract-client" }
+router-controller = { version = "0.1", path = "../router-controller" }
+subsquid-network-transport = { version = "0.1", path = "../../subsquid-network/transport" }

@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use clap::Args;
 use ethers::prelude::{abigen, ContractError, Http, JsonRpcClient, Middleware};
 use ethers::providers::{Provider, Ws};
 use futures::{Stream, StreamExt};
@@ -80,7 +81,18 @@ pub trait Client: Send + Sync {
     async fn active_workers_stream(&self) -> Result<Receiver<Vec<Worker>>, ClientError>;
 }
 
-pub async fn get_client(rpc_url: &str) -> Result<Box<dyn Client>, ClientError> {
+#[derive(Args)]
+pub struct RpcArgs {
+    #[arg(
+        long,
+        env,
+        help = "Blockchain RPC URL",
+        default_value = "http://127.0.0.1:8545/"
+    )]
+    pub rpc_url: String,
+}
+
+pub async fn get_client(RpcArgs { rpc_url }: &RpcArgs) -> Result<Box<dyn Client>, ClientError> {
     if rpc_url.starts_with("http") {
         let provider = Provider::<Http>::try_from(rpc_url)?;
         Ok(Box::new(EthersClient::new(provider)))

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
+use contract_client::RpcArgs;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
 use tokio::sync::OnceCell;
@@ -46,6 +47,9 @@ pub struct Cli {
     #[command(flatten)]
     pub transport: TransportArgs,
 
+    #[command(flatten)]
+    pub rpc: RpcArgs,
+
     #[arg(
         long,
         env,
@@ -53,14 +57,6 @@ pub struct Cli {
         default_value = "0.0.0.0:8000"
     )]
     pub http_listen_addr: SocketAddr,
-
-    #[arg(
-        long,
-        env,
-        help = "Blockchain RPC URL",
-        default_value = "http://127.0.0.1:8545/"
-    )]
-    pub rpc_url: String,
 
     #[arg(
         long,

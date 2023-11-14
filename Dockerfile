@@ -84,3 +84,15 @@ CMD ["query-gateway"]
 RUN echo "PORT=\${HTTP_LISTEN_ADDR##*:}; netstat -an | grep \$PORT > /dev/null; if [ 0 != \$? ]; then exit 1; fi;" > ./healthcheck.sh
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
+
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim as logs-collector
+
+RUN apt-get update && apt-get install ca-certificates -y
+
+COPY --from=network-builder /app/target/release/logs-collector /usr/local/bin/logs-collector
+
+ENV P2P_LISTEN_ADDR="/ip4/0.0.0.0/tcp/12345"
+ENV BOOTSTRAP="true"
+ENV PRIVATE_NODE="true"
+
+CMD ["logs-collector"]

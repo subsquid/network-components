@@ -16,7 +16,11 @@ message Envelope {
     // metrics
     QuerySubmitted query_submitted = 8;
     QueryFinished query_finished = 9;
-    QueryExecuted query_executed = 10;
+
+    // collector <-> worker
+    QueryLogs query_logs = 10;
+    google.protobuf.Empty get_next_seq_no = 11;
+    uint32 next_seq_no = 12;
   }
 }
 
@@ -101,9 +105,8 @@ message QueryFinished {
 message QueryExecuted {
   string client_id = 1;
   string worker_id = 2;
-  string query_id = 3;
 
-  string dataset = 4;
+  Query query = 3;
   bytes query_hash = 5;
 
   uint32 exec_time_ms = 6;
@@ -112,6 +115,11 @@ message QueryExecuted {
     string bad_request = 8;
     string server_error = 9;
   }
+  uint32 seq_no = 10;
+}
+
+message QueryLogs {
+  repeated QueryExecuted queries_executed = 1;
 }
 
 message InputAndOutput {

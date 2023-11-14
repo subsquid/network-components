@@ -86,7 +86,6 @@ impl Server {
             Some(Msg::Ping(msg)) => self.ping(peer_id, msg).await,
             Some(Msg::QuerySubmitted(msg)) => self.write_metrics(peer_id, msg).await,
             Some(Msg::QueryFinished(msg)) => self.write_metrics(peer_id, msg).await,
-            Some(Msg::QueryExecuted(msg)) => self.write_metrics(peer_id, msg).await,
             _ => log::warn!("Unexpected msg received: {envelope:?}"),
         };
     }

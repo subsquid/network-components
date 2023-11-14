@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
+use contract_client::RpcArgs;
 use env_logger::Env;
 
 use subsquid_network_transport::cli::TransportArgs;
@@ -20,6 +21,9 @@ struct Cli {
     #[command(flatten)]
     pub transport: TransportArgs,
 
+    #[command(flatten)]
+    pub rpc: RpcArgs,
+
     #[arg(
         long,
         env = "HTTP_LISTEN_ADDR",
@@ -36,15 +40,6 @@ struct Cli {
         default_value = "config.yml"
     )]
     config: PathBuf,
-
-    #[arg(
-        short,
-        long,
-        env,
-        help = "Blockchain RPC URL",
-        default_value = "http://127.0.0.1:8545/"
-    )]
-    rpc_url: String,
 }
 
 const PING_TOPIC: &str = "worker_ping";
@@ -73,7 +68,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     // Subscribe to worker set updates (from blockchain)
-    let worker_updates = contract_client::get_client(&args.rpc_url)
+    let worker_updates = contract_client::get_client(&args.rpc)
         .await?
         .active_workers_stream()
         .await?;

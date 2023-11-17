@@ -13,14 +13,13 @@ message Envelope {
     QueryResult query_result = 6;
     RangeSet dataset_state = 7;
 
-    // metrics
+    // client metrics
     QuerySubmitted query_submitted = 8;
     QueryFinished query_finished = 9;
 
     // collector <-> worker
     QueryLogs query_logs = 10;
-    google.protobuf.Empty get_next_seq_no = 11;
-    uint32 next_seq_no = 12;
+    LogsCollected logs_collected = 11;
   }
 }
 
@@ -130,4 +129,8 @@ message InputAndOutput {
 message SizeAndHash {
   uint32 size = 1;
   bytes sha3_256 = 2;
+}
+
+message LogsCollected {
+  map<string, uint32> sequence_numbers = 1; // peer ID -> last saved seq no
 }

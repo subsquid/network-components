@@ -119,7 +119,7 @@ impl<'a> From<&'a QueryExecuted> for QueryExecutedRow<'a> {
 
 #[derive(Row, Debug, Deserialize)]
 struct SeqNoRow {
-    client_id: String,
+    worker_id: String,
     seq_no: u32,
 }
 
@@ -141,9 +141,11 @@ impl LogsStorage for ClickhouseStorage {
         &self,
         query_logs: T,
     ) -> anyhow::Result<()> {
+        log::debug!("Storing logs in clickhouse");
         let mut insert = self.0.insert(LOGS_TABLE)?;
         let rows: Vec<QueryExecutedRow> = query_logs.map(Into::into).collect();
         for row in rows {
+            log::debug!("Storing query log {:?}", row);
             insert.write(&row).await?;
         }
         insert.end().await?;
@@ -151,6 +153,7 @@ impl LogsStorage for ClickhouseStorage {
     }
 
     async fn get_last_seq_numbers(&self) -> anyhow::Result<HashMap<String, u32>> {
+        log::debug!("Retrieving latest sequence from clickhouse");
         let mut cursor = self
             .0
             .query(&format!(
@@ -159,8 +162,9 @@ impl LogsStorage for ClickhouseStorage {
             .fetch::<SeqNoRow>()?;
         let mut result = HashMap::new();
         while let Some(row) = cursor.next().await? {
-            result.insert(row.client_id, row.seq_no);
+            result.insert(row.worker_id, row.seq_no);
         }
+        log::debug!("Retrieved sequence numbers: {:?}", result);
         Ok(result)
     }
 }
@@ -182,7 +186,7 @@ mod tests {
     //
     #[tokio::test]
     async fn test_storage() {
-        let mut storage = ClickhouseStorage::new(ClickhouseArgs {
+        let storage = ClickhouseStorage::new(ClickhouseArgs {
             clickhouse_url: "http://localhost:8123/".to_string(),
             clickhouse_database: "logs_db".to_string(),
             clickhouse_user: "user".to_string(),
@@ -192,26 +196,29 @@ mod tests {
         .unwrap();
 
         storage
-            .store_logs(vec![QueryExecuted {
-                client_id: "client".to_string(),
-                worker_id: "worker".to_string(),
-                query: Some(Query {
-                    query_id: "query_id".to_string(),
-                    dataset: "dataset".to_string(),
-                    query: "{\"from\": \"0xdeadbeef\"}".to_string(),
-                    profiling: false,
-                }),
-                query_hash: vec![0xde, 0xad, 0xbe, 0xef],
-                exec_time_ms: 2137,
-                seq_no: 69,
-                result: Some(query_executed::Result::Ok(InputAndOutput {
-                    num_read_chunks: 10,
-                    output: Some(SizeAndHash {
-                        size: 666,
-                        sha3_256: vec![0xbe, 0xbe, 0xf0, 0x00],
+            .store_logs(
+                vec![QueryExecuted {
+                    client_id: "client".to_string(),
+                    worker_id: "worker".to_string(),
+                    query: Some(Query {
+                        query_id: "query_id".to_string(),
+                        dataset: "dataset".to_string(),
+                        query: "{\"from\": \"0xdeadbeef\"}".to_string(),
+                        profiling: false,
                     }),
-                })),
-            }])
+                    query_hash: vec![0xde, 0xad, 0xbe, 0xef],
+                    exec_time_ms: 2137,
+                    seq_no: 69,
+                    result: Some(query_executed::Result::Ok(InputAndOutput {
+                        num_read_chunks: 10,
+                        output: Some(SizeAndHash {
+                            size: 666,
+                            sha3_256: vec![0xbe, 0xbe, 0xf0, 0x00],
+                        }),
+                    })),
+                }]
+                .iter(),
+            )
             .await
             .unwrap();
 

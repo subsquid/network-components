@@ -6,11 +6,12 @@ use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 use router_controller::messages::envelope::Msg;
-use router_controller::messages::{Envelope, ProstMsg, QueryLogs};
+use router_controller::messages::{Envelope, LogsCollected, ProstMsg, QueryLogs};
 use subsquid_network_transport::{MsgContent, PeerId};
 
 use crate::collector::LogsCollector;
 use crate::storage::LogsStorage;
+use crate::LOGS_TOPIC;
 
 type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
@@ -60,7 +61,6 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
         };
         match envelope.msg {
             Some(Msg::QueryLogs(query_logs)) => self.collect_logs(peer_id, query_logs).await,
-            Some(Msg::GetNextSeqNo(_)) => self.get_next_seq_no(peer_id).await,
             _ => log::warn!("Unexpected msg received: {envelope:?}"),
         }
     }
@@ -72,32 +72,31 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
             .collect_logs(worker_id, query_logs);
     }
 
-    async fn get_next_seq_no(&self, worker_id: PeerId) {
-        let seq_no = self.logs_collector.read().await.next_seq_no(&worker_id);
-        let msg = Msg::NextSeqNo(seq_no);
-        self.send_msg(worker_id, msg).await
-    }
-
-    async fn send_msg(&self, peer_id: PeerId, msg: Msg) {
-        let envelope = Envelope { msg: Some(msg) };
-        let msg = Message {
-            peer_id: Some(peer_id),
-            topic: None,
-            content: envelope.encode_to_vec().into(),
-        };
-        if let Err(e) = self.message_sender.send(msg).await {
-            log::error!("Error sending message: {e:?}");
-        }
-    }
-
     fn spawn_saving_task(&self, store_logs_interval: Duration) -> JoinHandle<()> {
         let collector = self.logs_collector.clone();
+        let msg_sender = self.message_sender.clone();
+
         tokio::spawn(async move {
             log::info!("Starting logs saving task");
             loop {
                 tokio::time::sleep(store_logs_interval).await;
-                if let Err(e) = collector.write().await.storage_sync().await {
-                    log::error!("Error saving logs to storage: {e:?}");
+                let sequence_numbers = match collector.write().await.storage_sync().await {
+                    Err(e) => {
+                        log::error!("Error saving logs to storage: {e:?}");
+                        continue;
+                    }
+                    Ok(seq_nums) => seq_nums,
+                };
+
+                let msg = Msg::LogsCollected(LogsCollected { sequence_numbers });
+                let envelope = Envelope { msg: Some(msg) };
+                let msg = Message {
+                    peer_id: None,
+                    topic: Some(LOGS_TOPIC.to_string()),
+                    content: envelope.encode_to_vec().into(),
+                };
+                if let Err(e) = msg_sender.send(msg).await {
+                    log::error!("Error sending message: {e:?}");
                 }
             }
         })

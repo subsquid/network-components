@@ -18,14 +18,6 @@ impl<T: LogsStorage> LogsCollector<T> {
         }
     }
 
-    pub fn next_seq_no(&self, worker_id: &PeerId) -> u32 {
-        self.sequence_numbers
-            .get(&worker_id.to_string())
-            .cloned()
-            .unwrap_or_default()
-            + 1
-    }
-
     pub fn collect_logs(
         &mut self,
         worker_id: PeerId,
@@ -36,15 +28,17 @@ impl<T: LogsStorage> LogsCollector<T> {
         log::debug!("Collecting logs from {worker_id}: {queries_executed:?}");
         let buffered = self.queries_executed.entry(worker_id).or_default();
 
-        // Sequence number of the last buffered log, or last stored log if there is none buffered + 1
-        let mut next_seq_no = buffered.last().map(|q| q.seq_no).unwrap_or_else(|| {
-            self.sequence_numbers
-                .get(&worker_id.to_string())
-                .cloned()
-                .unwrap_or_default()
-        }) + 1;
+        // Sequence number of the last buffered log, or last stored log if there is none buffered,
+        // increased by one (because that's the expected sequence number of the **next** log),
+        // defaults to 0 if there are no logs buffered or stored.
+        let mut next_seq_no = buffered
+            .last()
+            .map(|q| q.seq_no)
+            .or_else(|| self.sequence_numbers.get(&worker_id.to_string()).cloned())
+            .map(|seq_no| seq_no + 1)
+            .unwrap_or_default();
 
-        // Remove already buffered/stored logs, sort for checking continuity
+        // Remove already buffered/stored logs, sort to determine if there are gaps in the sequence
         queries_executed.retain(|q| q.seq_no >= next_seq_no);
         queries_executed.sort_by_cached_key(|q| q.seq_no);
 
@@ -58,13 +52,13 @@ impl<T: LogsStorage> LogsCollector<T> {
         }
     }
 
-    pub async fn storage_sync(&mut self) -> anyhow::Result<()> {
+    pub async fn storage_sync(&mut self) -> anyhow::Result<HashMap<String, u32>> {
         log::info!("Syncing state with storage");
         self.storage
             .store_logs(self.queries_executed.iter().flat_map(|(_, logs)| logs))
             .await?;
         self.sequence_numbers = self.storage.get_last_seq_numbers().await?;
         self.queries_executed.clear();
-        Ok(())
+        Ok(self.sequence_numbers.clone())
     }
 }

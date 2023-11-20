@@ -1,4 +1,4 @@
-use crate::range::Range;
+use crate::Range;
 
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct DataChunk {
@@ -7,7 +7,6 @@ pub struct DataChunk {
     last_block: u32,
     last_hash: String,
 }
-
 
 impl DataChunk {
     pub fn new(top: u32, first_block: u32, last_block: u32, last_hash: String) -> Self {
@@ -37,20 +36,21 @@ impl DataChunk {
     }
 }
 
-
 impl std::fmt::Display for DataChunk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:010}/{:010}-{:010}-{}", self.top, self.first_block, self.last_block, self.last_hash)
+        write!(
+            f,
+            "{:010}/{:010}-{:010}-{}",
+            self.top, self.first_block, self.last_block, self.last_hash
+        )
     }
 }
-
 
 impl std::fmt::Debug for DataChunk {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self)
     }
 }
-
 
 impl std::str::FromStr for DataChunk {
     type Err = ();
@@ -71,7 +71,6 @@ impl std::str::FromStr for DataChunk {
         }
     }
 }
-
 
 impl From<DataChunk> for Range {
     fn from(chunk: DataChunk) -> Self {

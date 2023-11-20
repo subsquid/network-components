@@ -1,6 +1,6 @@
 use std::cmp::{max, Ordering};
 
-pub use crate::messages::{Range, RangeSet};
+pub use crate::{Range, RangeSet};
 
 impl Range {
     pub fn new(begin: u32, end: u32) -> Self {

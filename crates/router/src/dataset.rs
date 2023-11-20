@@ -1,8 +1,9 @@
 use std::str::FromStr;
 
 use aws_sdk_s3::Client;
-use router_controller::data_chunk::DataChunk;
 use tokio::runtime::Handle;
+
+use subsquid_messages::data_chunk::DataChunk;
 
 pub trait Storage {
     /// Get data chunks in the dataset.

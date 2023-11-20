@@ -1,0 +1,19 @@
+[package]
+name = "subsquid-messages"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+signatures = ["subsquid-network-transport"]
+
+[dependencies]
+anyhow = "1"
+hex = { version = "0.4", features = ["serde"] }
+prost = "0.12"
+serde = { version = "1", features = ["derive"] }
+sha3 = "0.10"
+
+subsquid-network-transport = { version = "0.1", path = "../../subsquid-network/transport", optional = true }
+
+[build-dependencies]
+prost-build = "0.12"

@@ -27,5 +27,5 @@ smallvec = "1"
 tokio = { version = "1", features = ["full"] }
 
 contract-client = { version = "0.1", path = "../contract-client" }
-router-controller = { version = "0.1", path = "../router-controller" }
+subsquid-messages = { version = "0.1", path = "../messages", features = ["signatures"]}
 subsquid-network-transport = { version = "0.1", path = "../../subsquid-network/transport" }

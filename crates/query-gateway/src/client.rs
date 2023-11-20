@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 
 use derivative::Derivative;
 use futures::stream::StreamExt;
-use prost::Message as ProstMsg;
 use rand::prelude::IteratorRandom;
 use tabled::settings::Style;
 use tabled::{Table, Tabled};
@@ -16,11 +15,13 @@ use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
 
 use contract_client::Worker;
-use router_controller::messages::{
-    envelope::Msg, query_finished, query_result, Envelope, OkResult, Ping, Query as QueryMsg,
-    QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, RangeSet, SizeAndHash,
+use subsquid_messages::signatures::SignedMessage;
+use subsquid_messages::{
+    envelope::Msg, query_finished, query_result, Envelope, OkResult, Ping, ProstMsg,
+    Query as QueryMsg, QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, RangeSet,
+    SizeAndHash,
 };
-use subsquid_network_transport::{MsgContent, PeerId};
+use subsquid_network_transport::{Keypair, MsgContent, PeerId};
 
 use crate::config::{Config, DatasetId};
 use crate::PING_TOPIC;
@@ -257,7 +258,7 @@ struct QueryHandler {
     worker_updates: mpsc::Receiver<Vec<Worker>>,
     tasks: HashMap<String, Task>,
     network_state: Arc<RwLock<NetworkState>>,
-    local_peer_id: PeerId,
+    keypair: Keypair,
     scheduler_id: PeerId,
     send_metrics: bool,
 }
@@ -292,6 +293,10 @@ impl QueryHandler {
 
     fn generate_query_id() -> String {
         uuid::Uuid::new_v4().to_string()
+    }
+
+    fn client_id(&self) -> String {
+        PeerId::from(self.keypair.public()).to_string()
     }
 
     async fn send_msg(&mut self, peer_id: PeerId, msg: Msg) -> anyhow::Result<()> {
@@ -329,18 +334,20 @@ impl QueryHandler {
         let task = Task::new(worker_id, result_sender, timeout_handle);
         self.tasks.insert(query_id.clone(), task);
 
-        let worker_msg = Msg::Query(QueryMsg {
+        let mut worker_msg = QueryMsg {
             query_id: query_id.clone(),
             dataset: dataset.clone(),
             query: query.clone(),
             profiling,
-        });
-        self.send_msg(worker_id, worker_msg).await?;
+            signature: vec![],
+        };
+        worker_msg.sing(&self.keypair)?;
+        self.send_msg(worker_id, Msg::Query(worker_msg)).await?;
 
         if self.send_metrics {
             let query_hash = SizeAndHash::compute(&query).sha3_256;
             let metrics_msg = Msg::QuerySubmitted(QuerySubmitted {
-                client_id: self.local_peer_id.to_string(),
+                client_id: self.client_id(),
                 worker_id: worker_id.to_string(),
                 query_id,
                 dataset,
@@ -375,7 +382,7 @@ impl QueryHandler {
 
         if self.send_metrics {
             let metrics_msg = Msg::QueryFinished(QueryFinished {
-                client_id: self.local_peer_id.to_string(),
+                client_id: self.client_id(),
                 worker_id: task.worker_id.to_string(),
                 query_id,
                 exec_time_ms: task.exec_time_ms(),
@@ -449,7 +456,7 @@ impl QueryHandler {
 
         if self.send_metrics {
             let metrics_msg = Msg::QueryFinished(QueryFinished {
-                client_id: self.local_peer_id.to_string(),
+                client_id: self.client_id(),
                 worker_id: peer_id.to_string(),
                 query_id,
                 exec_time_ms: task.exec_time_ms(),
@@ -530,7 +537,7 @@ impl QueryClient {
 
 pub async fn get_client(
     config: Config,
-    local_peer_id: PeerId,
+    keypair: Keypair,
     msg_receiver: mpsc::Receiver<Message>,
     msg_sender: mpsc::Sender<Message>,
     worker_updates: mpsc::Receiver<Vec<Worker>>,
@@ -548,7 +555,7 @@ pub async fn get_client(
         worker_updates,
         tasks: Default::default(),
         network_state: network_state.clone(),
-        local_peer_id,
+        keypair,
         scheduler_id: config.scheduler_id.0,
         send_metrics: config.send_metrics,
     };

@@ -6,8 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use sha3::{Digest, Sha3_256};
 
-use router_controller::messages::WorkerState;
-use router_controller::range::Range;
+use subsquid_messages::{Range, WorkerState};
 
 #[serde_as]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
@@ -38,7 +37,7 @@ impl Display for DataChunk {
 
 impl DataChunk {
     pub fn new(bucket: &str, chunk_str: &str, size_bytes: u64) -> anyhow::Result<Self> {
-        let chunk = router_controller::data_chunk::DataChunk::from_str(chunk_str)
+        let chunk = subsquid_messages::data_chunk::DataChunk::from_str(chunk_str)
             .map_err(|_| anyhow::anyhow!("Invalid chunk: {chunk_str}"))?;
         Ok(Self {
             dataset_url: format!("s3://{bucket}"),
@@ -67,7 +66,7 @@ pub fn chunks_to_worker_state(chunks: impl IntoIterator<Item = DataChunk>) -> Wo
 
 #[cfg(test)]
 mod tests {
-    use router_controller::range::RangeSet;
+    use subsquid_messages::range::RangeSet;
     use subsquid_network_transport::PeerId;
 
     use super::*;

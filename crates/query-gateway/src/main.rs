@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
-    let local_peer_id = transport_builder.local_peer_id();
+    let keypair = transport_builder.keypair();
     let (msg_receiver, msg_sender, subscription_sender) = transport_builder.run().await?;
 
     // Subscribe to dataset state updates (from p2p pub-sub)
@@ -74,14 +74,8 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     // Start query client
-    let query_client = client::get_client(
-        config,
-        local_peer_id,
-        msg_receiver,
-        msg_sender,
-        worker_updates,
-    )
-    .await?;
+    let query_client =
+        client::get_client(config, keypair, msg_receiver, msg_sender, worker_updates).await?;
 
     // Wait one worker ping cycle before starting to serve
     tokio::time::sleep(Duration::from_secs(20)).await;

@@ -5,12 +5,12 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
-use router_controller::messages::envelope::Msg;
-use router_controller::messages::{Envelope, Ping, Pong, ProstMsg};
+use subsquid_messages::envelope::Msg;
+use subsquid_messages::signatures::{msg_hash, SignedMessage};
+use subsquid_messages::{Envelope, Ping, Pong, ProstMsg};
 use subsquid_network_transport::{MsgContent, PeerId};
 
 use crate::cli::Config;
-use crate::messages::{msg_hash, SignedMessage};
 use crate::metrics::{MetricsEvent, MetricsWriter};
 use crate::metrics_server;
 use crate::scheduler::Scheduler;

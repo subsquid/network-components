@@ -11,7 +11,7 @@ use duration_string::DurationString;
 use flate2::write::GzDecoder;
 use serde::Deserialize;
 
-use router_controller::messages::OkResult;
+use subsquid_messages::OkResult;
 
 use crate::client::{QueryClient, QueryResult};
 use crate::config::{DatasetId, PeerId};

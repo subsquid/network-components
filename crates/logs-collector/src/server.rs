@@ -5,8 +5,9 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
-use router_controller::messages::envelope::Msg;
-use router_controller::messages::{Envelope, LogsCollected, ProstMsg, QueryLogs};
+use subsquid_messages::envelope::Msg;
+use subsquid_messages::signatures::SignedMessage;
+use subsquid_messages::{Envelope, LogsCollected, ProstMsg, QueryLogs};
 use subsquid_network_transport::{MsgContent, PeerId};
 
 use crate::collector::LogsCollector;
@@ -65,7 +66,11 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
         }
     }
 
-    async fn collect_logs(&self, worker_id: PeerId, query_logs: QueryLogs) {
+    async fn collect_logs(&self, worker_id: PeerId, mut query_logs: QueryLogs) {
+        if !query_logs.verify_signature(&worker_id) {
+            log::warn!("Invalid query logs signature worker_id = {worker_id}");
+            return;
+        }
         self.logs_collector
             .write()
             .await

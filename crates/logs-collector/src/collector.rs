@@ -1,6 +1,6 @@
 use crate::storage::LogsStorage;
-use router_controller::messages::{QueryExecuted, QueryLogs};
 use std::collections::HashMap;
+use subsquid_messages::{QueryExecuted, QueryLogs};
 use subsquid_network_transport::PeerId;
 
 pub struct LogsCollector<T: LogsStorage> {
@@ -23,9 +23,11 @@ impl<T: LogsStorage> LogsCollector<T> {
         worker_id: PeerId,
         QueryLogs {
             mut queries_executed,
+            ..
         }: QueryLogs,
     ) {
         log::debug!("Collecting logs from {worker_id}: {queries_executed:?}");
+
         let buffered = self.queries_executed.entry(worker_id).or_default();
 
         // Sequence number of the last buffered log, or last stored log if there is none buffered,

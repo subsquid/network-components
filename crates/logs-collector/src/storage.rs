@@ -1,10 +1,10 @@
 use crate::cli::ClickhouseArgs;
 use async_trait::async_trait;
 use clickhouse::{Client, Row};
-use router_controller::messages::{query_executed, QueryExecuted};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
+use subsquid_messages::{query_executed, QueryExecuted};
 
 const LOGS_TABLE: &str = "worker_query_logs";
 const LOGS_TABLE_DEFINITION: &str = "
@@ -172,7 +172,7 @@ impl LogsStorage for ClickhouseStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use router_controller::messages::{InputAndOutput, Query, SizeAndHash};
+    use subsquid_messages::{InputAndOutput, Query, SizeAndHash};
 
     // To run this test, start a local clickhouse instance first
     // docker run --rm \

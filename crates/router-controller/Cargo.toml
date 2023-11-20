@@ -5,13 +5,8 @@ edition = "2021"
 
 [dependencies]
 base64 = "0.21"
-hex = { version = "0.4", features = ["serde"] }
 log = "0.4"
 parking_lot = "0.12"
-prost = "0.11"
 rand = "0.8"
-serde = { version = "1", features = ["derive"] }
-sha3 = "0.10"
 
-[build-dependencies]
-prost-build = "0.11"
+subsquid-messages = { version = "0.1", path = "../messages" }

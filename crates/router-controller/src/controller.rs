@@ -1,6 +1,3 @@
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
-use rand::prelude::SliceRandom;
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
@@ -8,10 +5,13 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use rand::prelude::SliceRandom;
+
+use subsquid_messages::{data_chunk::DataChunk, Ping, Range, RangeSet, WorkerState};
+
 use crate::atom::Atom;
-use crate::data_chunk::DataChunk;
-use crate::messages::{Ping, WorkerState};
-use crate::range::{Range, RangeSet};
 
 pub type WorkerId = String;
 pub type Url = String;
@@ -504,8 +504,10 @@ impl ControllerBuilder {
 mod tests {
     use std::ops::Deref;
 
-    use crate::controller::{ControllerBuilder, Ping};
-    use crate::data_chunk::DataChunk;
+    use subsquid_messages::Ping;
+
+    use crate::controller::ControllerBuilder;
+    use subsquid_messages::data_chunk::DataChunk;
 
     #[test]
     fn basic() {
@@ -535,6 +537,7 @@ mod tests {
                 pause: false,
                 stored_bytes: 0,
                 version: "".to_string(),
+                signature: vec![],
             });
         }
 
@@ -549,6 +552,7 @@ mod tests {
                     pause: false,
                     stored_bytes: 0,
                     version: "".to_string(),
+                    signature: vec![],
                 })
             })
             .collect();
@@ -563,6 +567,7 @@ mod tests {
                 pause: false,
                 stored_bytes: 0,
                 version: "".to_string(),
+                signature: vec![],
             });
         }
 

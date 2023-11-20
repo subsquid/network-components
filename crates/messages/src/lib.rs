@@ -4,6 +4,11 @@ use std::ops::{Deref, DerefMut};
 pub use prost::Message as ProstMsg;
 use sha3::{Digest, Sha3_256};
 
+pub mod data_chunk;
+pub mod range;
+#[cfg(feature = "signatures")]
+pub mod signatures;
+
 include!(concat!(env!("OUT_DIR"), "/messages.rs"));
 
 impl Deref for WorkerState {

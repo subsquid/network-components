@@ -61,6 +61,7 @@ message Query {
   string dataset = 2;
   string query = 3;
   bool profiling = 4;
+  bytes signature = 5;
 }
 
 message QueryResult {
@@ -119,6 +120,7 @@ message QueryExecuted {
 
 message QueryLogs {
   repeated QueryExecuted queries_executed = 1;
+  bytes signature = 2;
 }
 
 message InputAndOutput {

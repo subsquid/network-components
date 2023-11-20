@@ -8,7 +8,7 @@ use itertools::Itertools;
 use serde::Serialize;
 use tokio::sync::RwLock;
 
-use router_controller::messages::RangeSet;
+use subsquid_messages::RangeSet;
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;

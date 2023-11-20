@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, TimestampMilliSeconds};
 
 use contract_client::{Address, Worker};
-use router_controller::messages::{pong::Status as WorkerStatus, Ping};
-use router_controller::range::RangeSet;
+use subsquid_messages::range::RangeSet;
+use subsquid_messages::{pong::Status as WorkerStatus, Ping};
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;

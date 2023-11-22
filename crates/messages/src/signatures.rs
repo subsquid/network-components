@@ -2,7 +2,7 @@ use sha3::{Digest, Sha3_256};
 
 use subsquid_network_transport::{Keypair, PeerId, PublicKey};
 
-use crate::{Ping, ProstMsg, Query, QueryLogs};
+use crate::{Ping, ProstMsg, Query, QueryExecuted};
 
 pub fn msg_hash<M: ProstMsg>(msg: &M) -> Vec<u8> {
     let mut result = [0u8; 32];
@@ -12,11 +12,15 @@ pub fn msg_hash<M: ProstMsg>(msg: &M) -> Vec<u8> {
     result.to_vec()
 }
 
-fn verify_signature(peer_id: &PeerId, msg: &[u8], sig: &[u8]) -> bool {
-    match PublicKey::try_decode_protobuf(&peer_id.to_bytes()[2..]) {
-        Ok(pubkey) => pubkey.verify(msg, sig),
+fn verify_signature<T: SignedMessage>(peer_id: &PeerId, msg: &mut T) -> bool {
+    let sig = msg.detach_signature();
+    let encoded = msg.encode_to_vec();
+    let result = match PublicKey::try_decode_protobuf(&peer_id.to_bytes()[2..]) {
+        Ok(pubkey) => pubkey.verify(&encoded, &sig),
         Err(_) => false,
-    }
+    };
+    msg.attach_signature(sig);
+    result
 }
 
 pub trait SignedMessage: ProstMsg + Sized {
@@ -31,11 +35,7 @@ pub trait SignedMessage: ProstMsg + Sized {
     }
 
     fn verify_signature(&mut self, peer_id: &PeerId) -> bool {
-        let sig = self.detach_signature();
-        let msg = self.encode_to_vec();
-        let result = verify_signature(peer_id, &msg, &sig);
-        self.attach_signature(sig);
-        result
+        verify_signature(peer_id, self)
     }
 }
 
@@ -59,12 +59,25 @@ impl SignedMessage for Query {
     }
 }
 
-impl SignedMessage for QueryLogs {
+impl SignedMessage for QueryExecuted {
     fn detach_signature(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.signature)
     }
 
     fn attach_signature(&mut self, signature: Vec<u8>) {
         self.signature = signature
+    }
+
+    fn verify_signature(&mut self, peer_id: &PeerId) -> bool {
+        if !verify_signature(peer_id, self) {
+            return false;
+        }
+        let client_id = match self.client_id.parse() {
+            Ok(id) => id,
+            Err(_) => return false,
+        };
+        self.query
+            .as_mut()
+            .is_some_and(|q| verify_signature(&client_id, q))
     }
 }

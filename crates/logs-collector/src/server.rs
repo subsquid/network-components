@@ -66,15 +66,28 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
         }
     }
 
-    async fn collect_logs(&self, worker_id: PeerId, mut query_logs: QueryLogs) {
-        if !query_logs.verify_signature(&worker_id) {
-            log::warn!("Invalid query logs signature worker_id = {worker_id}");
-            return;
-        }
+    async fn collect_logs(
+        &self,
+        worker_id: PeerId,
+        QueryLogs {
+            mut queries_executed,
+        }: QueryLogs,
+    ) {
+        queries_executed = queries_executed
+            .into_iter()
+            .filter_map(|mut log| {
+                if log.verify_signature(&worker_id) {
+                    Some(log)
+                } else {
+                    log::error!("Invalid log signature worker_id = {worker_id}");
+                    None
+                }
+            })
+            .collect();
         self.logs_collector
             .write()
             .await
-            .collect_logs(worker_id, query_logs);
+            .collect_logs(worker_id, queries_executed);
     }
 
     fn spawn_saving_task(&self, store_logs_interval: Duration) -> JoinHandle<()> {

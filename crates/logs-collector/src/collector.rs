@@ -1,6 +1,6 @@
 use crate::storage::LogsStorage;
 use std::collections::HashMap;
-use subsquid_messages::{QueryExecuted, QueryLogs};
+use subsquid_messages::QueryExecuted;
 use subsquid_network_transport::PeerId;
 
 pub struct LogsCollector<T: LogsStorage> {
@@ -18,14 +18,7 @@ impl<T: LogsStorage> LogsCollector<T> {
         }
     }
 
-    pub fn collect_logs(
-        &mut self,
-        worker_id: PeerId,
-        QueryLogs {
-            mut queries_executed,
-            ..
-        }: QueryLogs,
-    ) {
+    pub fn collect_logs(&mut self, worker_id: PeerId, mut queries_executed: Vec<QueryExecuted>) {
         log::debug!("Collecting logs from {worker_id}: {queries_executed:?}");
 
         let buffered = self.queries_executed.entry(worker_id).or_default();

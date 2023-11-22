@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS worker_query_logs
     output_size UInt32 NULL,
     output_hash String NULL,
     error_msg String NULL,
-    seq_no UInt32 NOT NULL
+    seq_no UInt32 NOT NULL,
+    client_signature String NOT NULL,
+    worker_signature String NOT NULL
 )
 ENGINE = MergeTree
 ORDER BY (worker_id, seq_no);
@@ -66,15 +68,22 @@ struct QueryExecutedRow<'a> {
     output_hash: Option<&'a [u8]>,
     error_msg: Option<&'a str>,
     seq_no: u32,
+    client_signature: &'a [u8],
+    worker_signature: &'a [u8],
 }
 
-impl<'a> From<&'a QueryExecuted> for QueryExecutedRow<'a> {
-    fn from(query_executed: &'a QueryExecuted) -> Self {
-        let query = query_executed.query.as_ref().unwrap();
-        let result = query_executed.result.as_ref().unwrap();
+impl<'a> TryFrom<&'a QueryExecuted> for QueryExecutedRow<'a> {
+    type Error = &'static str;
+
+    fn try_from(query_executed: &'a QueryExecuted) -> Result<Self, Self::Error> {
+        let query = query_executed.query.as_ref().ok_or("Query field missing")?;
+        let result = query_executed
+            .result
+            .as_ref()
+            .ok_or("Result field missing")?;
         let (result, num_read_chunks, output_size, output_hash, error_msg) = match result {
             query_executed::Result::Ok(res) => {
-                let output = res.output.as_ref().unwrap();
+                let output = res.output.as_ref().ok_or("Output field missing")?;
                 (
                     QueryResult::Ok,
                     Some(res.num_read_chunks),
@@ -98,7 +107,7 @@ impl<'a> From<&'a QueryExecuted> for QueryExecutedRow<'a> {
                 Some(err_msg.as_str()),
             ),
         };
-        Self {
+        Ok(Self {
             client_id: &query_executed.client_id,
             worker_id: &query_executed.worker_id,
             query_id: &query.query_id,
@@ -113,7 +122,9 @@ impl<'a> From<&'a QueryExecuted> for QueryExecutedRow<'a> {
             output_hash,
             error_msg,
             seq_no: query_executed.seq_no,
-        }
+            client_signature: &query.signature,
+            worker_signature: &query_executed.signature,
+        })
     }
 }
 
@@ -143,7 +154,15 @@ impl LogsStorage for ClickhouseStorage {
     ) -> anyhow::Result<()> {
         log::debug!("Storing logs in clickhouse");
         let mut insert = self.0.insert(LOGS_TABLE)?;
-        let rows: Vec<QueryExecutedRow> = query_logs.map(Into::into).collect();
+        let rows: Vec<QueryExecutedRow> = query_logs
+            .filter_map(|log| match log.try_into() {
+                Ok(log) => Some(log),
+                Err(e) => {
+                    log::error!("Invalid log message: {e}");
+                    None
+                }
+            })
+            .collect();
         for row in rows {
             log::debug!("Storing query log {:?}", row);
             insert.write(&row).await?;

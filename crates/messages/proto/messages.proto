@@ -116,11 +116,11 @@ message QueryExecuted {
     string server_error = 9;
   }
   uint32 seq_no = 10;
+  bytes signature = 11;
 }
 
 message QueryLogs {
   repeated QueryExecuted queries_executed = 1;
-  bytes signature = 2;
 }
 
 message InputAndOutput {

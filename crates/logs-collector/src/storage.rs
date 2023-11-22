@@ -60,15 +60,19 @@ struct QueryExecutedRow<'a> {
     dataset: &'a str,
     query: &'a str,
     profiling: bool,
+    #[serde(with = "serde_bytes")]
     query_hash: &'a [u8],
     exec_time_ms: u32,
     result: QueryResult,
     num_read_chunks: Option<u32>,
     output_size: Option<u32>,
+    #[serde(with = "serde_bytes")]
     output_hash: Option<&'a [u8]>,
     error_msg: Option<&'a str>,
     seq_no: u32,
+    #[serde(with = "serde_bytes")]
     client_signature: &'a [u8],
+    #[serde(with = "serde_bytes")]
     worker_signature: &'a [u8],
 }
 

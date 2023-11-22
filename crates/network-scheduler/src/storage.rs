@@ -46,7 +46,7 @@ impl TryFrom<Object> for S3Object {
             Some((prefix, file_name)) => (prefix.to_string(), file_name.to_string()),
             None => return Err("Invalid key (no prefix)"),
         };
-        let size = obj.size as u64;
+        let size = obj.size.unwrap_or_default() as u64;
         Ok(Self {
             prefix,
             file_name,

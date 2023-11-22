@@ -1,15 +1,16 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use async_trait::async_trait;
 use clap::Args;
 use ethers::prelude::{abigen, ContractError, Http, JsonRpcClient, Middleware};
 use ethers::providers::{Provider, Ws};
+pub use ethers::types::{Address, U256};
 use futures::{Stream, StreamExt};
 use lazy_static::lazy_static;
 use libp2p::PeerId;
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::mpsc;
 
-pub use ethers::types::{Address, U256};
 pub use tokio::sync::mpsc::Receiver;
 
 abigen!(TSQD, "abi/tSQD.json");

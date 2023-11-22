@@ -68,14 +68,11 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     // Subscribe to worker set updates (from blockchain)
-    let worker_updates = contract_client::get_client(&args.rpc)
-        .await?
-        .active_workers_stream()
-        .await?;
+    let contract_client = contract_client::get_client(&args.rpc).await?;
 
     // Start query client
     let query_client =
-        client::get_client(config, keypair, msg_receiver, msg_sender, worker_updates).await?;
+        client::get_client(config, keypair, msg_receiver, msg_sender, contract_client).await?;
 
     // Wait one worker ping cycle before starting to serve
     tokio::time::sleep(Duration::from_secs(20)).await;

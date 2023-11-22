@@ -1,6 +1,6 @@
 [package]
 name = "query-gateway"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 
 [dependencies]
@@ -13,17 +13,14 @@ derivative = "2"
 duration-string = { version = "0.3", features = ["serde"] }
 env_logger = "0.10"
 flate2 = "1"
-futures = "0.3"
 log = "0.4"
-prost = "0.11"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 tabled = "0.14"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
-tokio-stream = { version  = "0.1", features = ["sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1", features = ["v4", "fast-rng"] }
 
-contract-client = { version = "0.1", path = "../contract-client"}
-subsquid-messages = { version = "0.1", path = "../messages" }
+contract-client = { version = "0.1", path = "../contract-client" }
+subsquid-messages = { version = "0.1", path = "../messages", features = ["signatures"] }
 subsquid-network-transport = { version = "0.1", path = "../../subsquid-network/transport" }

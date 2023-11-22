@@ -5,14 +5,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use derivative::Derivative;
-use futures::stream::StreamExt;
 use rand::prelude::IteratorRandom;
 use tabled::settings::Style;
 use tabled::{Table, Tabled};
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
-use tokio::time::interval;
-use tokio_stream::wrappers::IntervalStream;
 
 use contract_client::Worker;
 use subsquid_messages::signatures::SignedMessage;
@@ -31,6 +28,8 @@ type Message = subsquid_network_transport::Message<Box<[u8]>>;
 const WORKER_INACTIVE_THRESHOLD: Duration = Duration::from_secs(120);
 const WORKER_GREYLIST_TIME: Duration = Duration::from_secs(600);
 const DEFAULT_QUERY_TIMEOUT: Duration = Duration::from_secs(60);
+const SUMMARY_PRINT_INTERVAL: Duration = Duration::from_secs(30);
+const WORKERS_UPDATE_INTERVAL: Duration = Duration::from_secs(180);
 
 #[derive(Derivative, Debug)]
 struct Query {
@@ -228,6 +227,7 @@ impl NetworkState {
     }
 
     fn update_registered_workers(&mut self, workers: Vec<Worker>) {
+        log::debug!("Updating registered workers: {workers:?}");
         self.registered_workers = workers.into_iter().map(|w| w.peer_id).collect();
     }
 
@@ -255,7 +255,6 @@ struct QueryHandler {
     query_receiver: mpsc::Receiver<Query>,
     timeout_sender: mpsc::Sender<String>,
     timeout_receiver: mpsc::Receiver<String>,
-    worker_updates: mpsc::Receiver<Vec<Worker>>,
     tasks: HashMap<String, Task>,
     network_state: Arc<RwLock<NetworkState>>,
     keypair: Keypair,
@@ -264,11 +263,11 @@ struct QueryHandler {
 }
 
 impl QueryHandler {
-    async fn run(mut self) {
-        let mut summary_timer = IntervalStream::new(interval(Duration::from_secs(30))).fuse();
+    async fn run(mut self, contract_client: Box<dyn contract_client::Client>) {
+        let summary_task = self.spawn_summary_task();
+        let workers_update_task = self.spawn_workers_update_task(contract_client);
         loop {
             let _ = tokio::select! {
-                _ = summary_timer.select_next_some() => self.print_summary().await,
                 Some(query) = self.query_receiver.recv() => self.handle_query(query)
                     .await
                     .map_err(|e| log::error!("Error handling query: {e:?}")),
@@ -278,17 +277,48 @@ impl QueryHandler {
                 Some(msg) = self.msg_receiver.recv() => self.handle_message(msg)
                     .await
                     .map_err(|e| log::error!("Error handling incoming message: {e:?}")),
-                Some(workers) = self.worker_updates.recv() => self.handle_worker_update(workers).await,
                 else => break
             };
         }
+        summary_task.abort();
+        workers_update_task.abort();
     }
 
-    async fn print_summary(&self) -> Result<(), ()> {
-        let mut summary = Table::new(self.network_state.read().await.summary());
-        summary.with(Style::sharp());
-        log::info!("Datasets summary:\n{summary}");
-        Ok(())
+    fn spawn_summary_task(&self) -> JoinHandle<()> {
+        let network_state = self.network_state.clone();
+        tokio::task::spawn(async move {
+            log::info!("Starting datasets summary task");
+            loop {
+                tokio::time::sleep(SUMMARY_PRINT_INTERVAL).await;
+                let mut summary = Table::new(network_state.read().await.summary());
+                summary.with(Style::sharp());
+                log::info!("Datasets summary:\n{summary}");
+            }
+        })
+    }
+
+    fn spawn_workers_update_task(
+        &self,
+        contract_client: Box<dyn contract_client::Client>,
+    ) -> JoinHandle<()> {
+        let network_state = self.network_state.clone();
+        tokio::task::spawn(async move {
+            log::info!("Starting workers update task");
+            loop {
+                let workers = match contract_client.active_workers().await {
+                    Ok(workers) => workers,
+                    Err(e) => {
+                        log::error!("Error getting registered workers: {e:?}");
+                        continue;
+                    }
+                };
+                network_state
+                    .write()
+                    .await
+                    .update_registered_workers(workers);
+                tokio::time::sleep(WORKERS_UPDATE_INTERVAL).await;
+            }
+        })
     }
 
     fn generate_query_id() -> String {
@@ -476,14 +506,6 @@ impl QueryHandler {
             Entry::Vacant(entry) => anyhow::bail!("Unknown query: {}", entry.key()),
         }
     }
-
-    async fn handle_worker_update(&self, workers: Vec<Worker>) -> Result<(), ()> {
-        self.network_state
-            .write()
-            .await
-            .update_registered_workers(workers);
-        Ok(())
-    }
 }
 
 pub struct QueryClient {
@@ -540,7 +562,7 @@ pub async fn get_client(
     keypair: Keypair,
     msg_receiver: mpsc::Receiver<Message>,
     msg_sender: mpsc::Sender<Message>,
-    worker_updates: mpsc::Receiver<Vec<Worker>>,
+    contact_client: Box<dyn contract_client::Client>,
 ) -> anyhow::Result<QueryClient> {
     let (query_sender, query_receiver) = mpsc::channel(100);
     let (timeout_sender, timeout_receiver) = mpsc::channel(100);
@@ -552,14 +574,13 @@ pub async fn get_client(
         query_receiver,
         timeout_sender,
         timeout_receiver,
-        worker_updates,
         tasks: Default::default(),
         network_state: network_state.clone(),
         keypair,
         scheduler_id: config.scheduler_id.0,
         send_metrics: config.send_metrics,
     };
-    tokio::spawn(handler.run());
+    tokio::spawn(handler.run(contact_client));
 
     let client = QueryClient {
         network_state,

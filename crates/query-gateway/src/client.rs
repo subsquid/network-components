@@ -369,6 +369,7 @@ impl QueryHandler {
             dataset: dataset.clone(),
             query: query.clone(),
             profiling,
+            client_state_json: "{}".to_string(), // This is a placeholder field
             signature: vec![],
         };
         worker_msg.sing(&self.keypair)?;

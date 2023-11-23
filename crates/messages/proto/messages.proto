@@ -61,7 +61,8 @@ message Query {
   string dataset = 2;
   string query = 3;
   bool profiling = 4;
-  bytes signature = 5;
+  string client_state_json = 5;
+  bytes signature = 6;
 }
 
 message QueryResult {
@@ -115,8 +116,9 @@ message QueryExecuted {
     string bad_request = 8;
     string server_error = 9;
   }
-  uint32 seq_no = 10;
-  bytes signature = 11;
+  uint64 seq_no = 10;
+  uint64 timestamp_ms = 11;
+  bytes signature = 12;
 }
 
 message QueryLogs {
@@ -134,5 +136,5 @@ message SizeAndHash {
 }
 
 message LogsCollected {
-  map<string, uint32> sequence_numbers = 1; // peer ID -> last saved seq no
+  map<string, uint64> sequence_numbers = 1; // peer ID -> last saved seq no
 }

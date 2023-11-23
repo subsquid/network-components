@@ -13,6 +13,7 @@ mod cli;
 mod collector;
 mod server;
 mod storage;
+mod utils;
 
 const LOGS_TOPIC: &str = "worker_query_logs";
 

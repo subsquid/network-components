@@ -1,4 +1,5 @@
 use crate::cli::ClickhouseArgs;
+use crate::utils::timestamp_now_ms;
 use async_trait::async_trait;
 use clickhouse::{Client, Row};
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,7 @@ CREATE TABLE IF NOT EXISTS worker_query_logs
     dataset String NOT NULL,
     query String NOT NULL,
     profiling Boolean NOT NULL,
+    client_state_json String NOT NULL,
     query_hash String NOT NULL,
     exec_time_ms UInt32 NOT NULL,
     result Enum8('ok' = 1, 'bad_request' = 2, 'server_error' = 3) NOT NULL,
@@ -23,9 +25,11 @@ CREATE TABLE IF NOT EXISTS worker_query_logs
     output_size UInt32 NULL,
     output_hash String NULL,
     error_msg String NULL,
-    seq_no UInt32 NOT NULL,
+    seq_no UInt64 NOT NULL,
     client_signature String NOT NULL,
-    worker_signature String NOT NULL
+    worker_signature String NOT NULL,
+    worker_timestamp_ms UInt64 NOT NULL,
+    collector_timestamp_ms UInt64 NOT NULL
 )
 ENGINE = MergeTree
 ORDER BY (worker_id, seq_no);
@@ -38,8 +42,8 @@ pub trait LogsStorage {
         query_logs: T,
     ) -> anyhow::Result<()>;
 
-    /// Get the last stored sequence number for each worker
-    async fn get_last_seq_numbers(&self) -> anyhow::Result<HashMap<String, u32>>;
+    /// Get the sequence number & timestamp of the last stored log for each worker
+    async fn get_last_stored(&self) -> anyhow::Result<HashMap<String, (u64, u64)>>;
 }
 
 pub struct ClickhouseStorage(Client);
@@ -60,6 +64,7 @@ struct QueryExecutedRow<'a> {
     dataset: &'a str,
     query: &'a str,
     profiling: bool,
+    client_state_json: &'a str,
     #[serde(with = "serde_bytes")]
     query_hash: &'a [u8],
     exec_time_ms: u32,
@@ -69,11 +74,13 @@ struct QueryExecutedRow<'a> {
     #[serde(with = "serde_bytes")]
     output_hash: Option<&'a [u8]>,
     error_msg: Option<&'a str>,
-    seq_no: u32,
+    seq_no: u64,
     #[serde(with = "serde_bytes")]
     client_signature: &'a [u8],
     #[serde(with = "serde_bytes")]
     worker_signature: &'a [u8],
+    worker_timestamp_ms: u64,
+    collector_timestamp_ms: u64,
 }
 
 impl<'a> TryFrom<&'a QueryExecuted> for QueryExecutedRow<'a> {
@@ -85,6 +92,7 @@ impl<'a> TryFrom<&'a QueryExecuted> for QueryExecutedRow<'a> {
             .result
             .as_ref()
             .ok_or("Result field missing")?;
+        let collector_timestamp_ms = timestamp_now_ms();
         let (result, num_read_chunks, output_size, output_hash, error_msg) = match result {
             query_executed::Result::Ok(res) => {
                 let output = res.output.as_ref().ok_or("Output field missing")?;
@@ -118,6 +126,7 @@ impl<'a> TryFrom<&'a QueryExecuted> for QueryExecutedRow<'a> {
             dataset: &query.dataset,
             query: &query.query,
             profiling: query.profiling,
+            client_state_json: &query.client_state_json,
             query_hash: &query_executed.query_hash,
             exec_time_ms: query_executed.exec_time_ms,
             result,
@@ -128,6 +137,8 @@ impl<'a> TryFrom<&'a QueryExecuted> for QueryExecutedRow<'a> {
             seq_no: query_executed.seq_no,
             client_signature: &query.signature,
             worker_signature: &query_executed.signature,
+            worker_timestamp_ms: query_executed.timestamp_ms,
+            collector_timestamp_ms,
         })
     }
 }
@@ -135,7 +146,8 @@ impl<'a> TryFrom<&'a QueryExecuted> for QueryExecutedRow<'a> {
 #[derive(Row, Debug, Deserialize)]
 struct SeqNoRow {
     worker_id: String,
-    seq_no: u32,
+    seq_no: u64,
+    timestamp: u64,
 }
 
 impl ClickhouseStorage {
@@ -175,17 +187,17 @@ impl LogsStorage for ClickhouseStorage {
         Ok(())
     }
 
-    async fn get_last_seq_numbers(&self) -> anyhow::Result<HashMap<String, u32>> {
+    async fn get_last_stored(&self) -> anyhow::Result<HashMap<String, (u64, u64)>> {
         log::debug!("Retrieving latest sequence from clickhouse");
         let mut cursor = self
             .0
             .query(&format!(
-                "SELECT worker_id, MAX(seq_no) FROM {LOGS_TABLE} GROUP BY worker_id"
+                "SELECT worker_id, MAX(seq_no), MAX(worker_timestamp_ms) FROM {LOGS_TABLE} GROUP BY worker_id"
             ))
             .fetch::<SeqNoRow>()?;
         let mut result = HashMap::new();
         while let Some(row) = cursor.next().await? {
-            result.insert(row.worker_id, row.seq_no);
+            result.insert(row.worker_id, (row.seq_no, row.timestamp));
         }
         log::debug!("Retrieved sequence numbers: {:?}", result);
         Ok(result)
@@ -228,10 +240,14 @@ mod tests {
                         dataset: "dataset".to_string(),
                         query: "{\"from\": \"0xdeadbeef\"}".to_string(),
                         profiling: false,
+                        client_state_json: "{}".to_string(),
+                        signature: vec![],
                     }),
                     query_hash: vec![0xde, 0xad, 0xbe, 0xef],
                     exec_time_ms: 2137,
                     seq_no: 69,
+                    timestamp_ms: 123456789000,
+                    signature: vec![],
                     result: Some(query_executed::Result::Ok(InputAndOutput {
                         num_read_chunks: 10,
                         output: Some(SizeAndHash {
@@ -245,7 +261,7 @@ mod tests {
             .await
             .unwrap();
 
-        let seq_numbers = storage.get_last_seq_numbers().await.unwrap();
-        assert_eq!(*seq_numbers.get("worker").unwrap(), 69);
+        let last_stored = storage.get_last_stored().await.unwrap();
+        assert_eq!(*last_stored.get("worker").unwrap(), (69, 123456789000));
     }
 }

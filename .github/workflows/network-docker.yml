@@ -72,3 +72,25 @@ jobs:
           tags: |
             subsquid/query-gateway:${{ env.GATEWAY_VERSION }}
             subsquid/query-gateway:${{ inputs.tag }}
+
+      - name: Build logs collector
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: logs-collector
+          load: true
+          tags: subsquid/logs-collector:test
+
+      - name: Get logs collector version
+        run: echo "COLLECTOR_VERSION=$(docker run --rm subsquid/logs-collector:test logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
+
+      - name: Build & publish logs collector
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
+          target: logs-collector
+          push: true
+          tags: |
+            subsquid/logs-collector:${{ env.COLLECTOR_VERSION }}
+            subsquid/logs-collector:${{ inputs.tag }}

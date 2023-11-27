@@ -15,6 +15,7 @@ pub struct ClickhouseArgs {
 }
 
 #[derive(Parser)]
+#[command(version)]
 pub struct Cli {
     #[command(flatten)]
     pub transport: TransportArgs,

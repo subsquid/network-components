@@ -5,7 +5,7 @@ use clickhouse::{Client, Row};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
-use subsquid_messages::{query_executed, QueryExecuted};
+use subsquid_messages::{query_executed, InputAndOutput, Query, QueryExecuted, SizeAndHash};
 
 const LOGS_TABLE: &str = "worker_query_logs";
 const LOGS_TABLE_DEFINITION: &str = "
@@ -70,11 +70,11 @@ struct QueryExecutedRow<'a> {
     query_hash: &'a [u8],
     exec_time_ms: u32,
     result: QueryResult,
-    num_read_chunks: Option<u32>,
-    output_size: Option<u32>,
+    num_read_chunks: u32,
+    output_size: u32,
     #[serde(with = "serde_bytes")]
-    output_hash: Option<&'a [u8]>,
-    error_msg: Option<&'a str>,
+    output_hash: &'a [u8],
+    error_msg: &'a str,
     seq_no: u64,
     #[serde(with = "serde_bytes")]
     client_signature: &'a [u8],
@@ -99,25 +99,25 @@ impl<'a> TryFrom<&'a QueryExecuted> for QueryExecutedRow<'a> {
                 let output = res.output.as_ref().ok_or("Output field missing")?;
                 (
                     QueryResult::Ok,
-                    Some(res.num_read_chunks),
-                    Some(output.size),
-                    Some(output.sha3_256.as_slice()),
-                    None,
+                    res.num_read_chunks,
+                    output.size,
+                    output.sha3_256.as_slice(),
+                    "",
                 )
             }
             query_executed::Result::BadRequest(err_msg) => (
                 QueryResult::BadRequest,
-                None,
-                None,
-                None,
-                Some(err_msg.as_str()),
+                0u32,
+                0u32,
+                &[] as &[u8],
+                err_msg.as_str(),
             ),
             query_executed::Result::ServerError(err_msg) => (
                 QueryResult::ServerError,
-                None,
-                None,
-                None,
-                Some(err_msg.as_str()),
+                0u32,
+                0u32,
+                &[] as &[u8],
+                err_msg.as_str(),
             ),
         };
         Ok(Self {
@@ -141,6 +141,44 @@ impl<'a> TryFrom<&'a QueryExecuted> for QueryExecutedRow<'a> {
             worker_timestamp: query_executed.timestamp_ms,
             collector_timestamp,
         })
+    }
+}
+
+impl<'a> From<QueryExecutedRow<'a>> for QueryExecuted {
+    fn from(row: QueryExecutedRow<'a>) -> Self {
+        let result = match row.result {
+            QueryResult::Ok => query_executed::Result::Ok(InputAndOutput {
+                num_read_chunks: row.num_read_chunks,
+                output: Some(SizeAndHash {
+                    size: row.output_size,
+                    sha3_256: row.output_hash.to_vec(),
+                }),
+            }),
+            QueryResult::BadRequest => {
+                query_executed::Result::BadRequest(row.error_msg.to_string())
+            }
+            QueryResult::ServerError => {
+                query_executed::Result::ServerError(row.error_msg.to_string())
+            }
+        };
+        QueryExecuted {
+            client_id: row.client_id.to_string(),
+            worker_id: row.worker_id.to_string(),
+            query: Some(Query {
+                query_id: row.query_id.to_string(),
+                dataset: row.dataset.to_string(),
+                query: row.query.to_string(),
+                profiling: row.profiling,
+                client_state_json: row.client_state_json.to_string(),
+                signature: row.client_signature.to_vec(),
+            }),
+            query_hash: row.query_hash.to_vec(),
+            exec_time_ms: row.exec_time_ms,
+            seq_no: row.seq_no,
+            timestamp_ms: row.worker_timestamp,
+            signature: row.worker_signature.to_vec(),
+            result: Some(result),
+        }
     }
 }
 
@@ -208,7 +246,9 @@ impl LogsStorage for ClickhouseStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use subsquid_messages::signatures::SignedMessage;
     use subsquid_messages::{InputAndOutput, Query, SizeAndHash};
+    use subsquid_network_transport::{Keypair, PeerId};
 
     // To run this test, start a local clickhouse instance first
     // docker run --rm \
@@ -229,40 +269,84 @@ mod tests {
             clickhouse_password: "password".to_string(),
         })
         .await
-        .unwrap();
+        .expect("Cannot connect to clickhouse");
 
+        // Clean up database
         storage
-            .store_logs(
-                vec![QueryExecuted {
-                    client_id: "client".to_string(),
-                    worker_id: "worker".to_string(),
-                    query: Some(Query {
-                        query_id: "query_id".to_string(),
-                        dataset: "dataset".to_string(),
-                        query: "{\"from\": \"0xdeadbeef\"}".to_string(),
-                        profiling: false,
-                        client_state_json: "{}".to_string(),
-                        signature: vec![],
-                    }),
-                    query_hash: vec![0xde, 0xad, 0xbe, 0xef],
-                    exec_time_ms: 2137,
-                    seq_no: 69,
-                    timestamp_ms: 123456789000,
-                    signature: vec![],
-                    result: Some(query_executed::Result::Ok(InputAndOutput {
-                        num_read_chunks: 10,
-                        output: Some(SizeAndHash {
-                            size: 666,
-                            sha3_256: vec![0xbe, 0xbe, 0xf0, 0x00],
-                        }),
-                    })),
-                }]
-                .iter(),
-            )
+            .0
+            .query(&format!("TRUNCATE TABLE {LOGS_TABLE}"))
+            .execute()
             .await
             .unwrap();
 
+        let client_keypair = Keypair::from_protobuf_encoding(&[
+            8, 1, 18, 64, 246, 13, 52, 78, 165, 229, 195, 19, 180, 208, 225, 55, 240, 115, 159, 6,
+            9, 123, 239, 172, 245, 55, 141, 57, 41, 185, 78, 191, 141, 74, 8, 242, 152, 79, 38,
+            199, 39, 192, 209, 175, 147, 85, 150, 22, 192, 22, 89, 173, 61, 11, 207, 219, 48, 43,
+            48, 151, 232, 105, 234, 80, 19, 205, 172, 92,
+        ])
+        .unwrap();
+        let worker_keypair = Keypair::from_protobuf_encoding(&[
+            8, 1, 18, 64, 212, 50, 184, 182, 239, 153, 10, 166, 254, 122, 105, 16, 51, 223, 126,
+            105, 10, 134, 204, 224, 42, 135, 92, 76, 32, 60, 197, 56, 128, 22, 131, 84, 233, 166,
+            242, 11, 16, 14, 160, 254, 4, 185, 170, 32, 157, 3, 144, 53, 230, 39, 150, 221, 142, 2,
+            37, 101, 100, 63, 24, 116, 110, 6, 156, 78,
+        ])
+        .unwrap();
+
+        let client_id = PeerId::from_public_key(&client_keypair.public());
+        let worker_id = PeerId::from_public_key(&worker_keypair.public());
+
+        let mut query = Query {
+            query_id: "query_id".to_string(),
+            dataset: "dataset".to_string(),
+            query: "{\"from\": \"0xdeadbeef\"}".to_string(),
+            profiling: false,
+            client_state_json: "{}".to_string(),
+            signature: vec![],
+        };
+        query.sing(&client_keypair).unwrap();
+
+        let mut query_log = QueryExecuted {
+            client_id: client_id.to_string(),
+            worker_id: worker_id.to_string(),
+            query: Some(query),
+            query_hash: vec![0xde, 0xad, 0xbe, 0xef],
+            exec_time_ms: 2137,
+            seq_no: 69,
+            timestamp_ms: 123456789000,
+            signature: vec![],
+            result: Some(query_executed::Result::Ok(InputAndOutput {
+                num_read_chunks: 10,
+                output: Some(SizeAndHash {
+                    size: 666,
+                    sha3_256: vec![0xbe, 0xbe, 0xf0, 0x00],
+                }),
+            })),
+        };
+        query_log.sing(&worker_keypair).unwrap();
+
+        storage
+            .store_logs(std::iter::once(&query_log))
+            .await
+            .unwrap();
+
+        // Verify the last stored sequence number and timestamp
         let last_stored = storage.get_last_stored().await.unwrap();
-        assert_eq!(*last_stored.get("worker").unwrap(), (69, 123456789000));
+        assert_eq!(
+            last_stored.get(&worker_id.to_string()),
+            Some(&(69, 123456789000))
+        );
+
+        // Verify the signatures
+        let mut cursor = storage
+            .0
+            .query(&format!("SELECT * FROM {LOGS_TABLE}"))
+            .fetch::<QueryExecutedRow>()
+            .unwrap();
+        let row = cursor.next().await.unwrap().unwrap();
+        let mut saved_log: QueryExecuted = row.into();
+        assert_eq!(query_log, saved_log);
+        assert!(saved_log.verify_signature(&worker_id))
     }
 }

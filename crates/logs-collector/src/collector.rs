@@ -46,8 +46,8 @@ impl<T: LogsStorage> LogsCollector<T> {
             }
             let timestamp = query_executed.timestamp_ms;
             let now = timestamp_now_ms();
-            if timestamp > now || timestamp < last_timestamp {
-                log::error!("Invalid log timestamp: {last_timestamp} <?= {timestamp} <?= {now}");
+            if timestamp >= now || timestamp <= last_timestamp {
+                log::error!("Invalid log timestamp: {last_timestamp} <?< {timestamp} <?< {now}");
                 continue;
             }
             buffered.push(query_executed);

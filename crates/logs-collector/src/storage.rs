@@ -21,18 +21,19 @@ CREATE TABLE IF NOT EXISTS worker_query_logs
     query_hash String NOT NULL,
     exec_time_ms UInt32 NOT NULL,
     result Enum8('ok' = 1, 'bad_request' = 2, 'server_error' = 3) NOT NULL,
-    num_read_chunks UInt32 NULL,
-    output_size UInt32 NULL,
-    output_hash String NULL,
-    error_msg String NULL,
+    num_read_chunks UInt32 NOT NULL DEFAULT 0,
+    output_size UInt32 NOT NULL DEFAULT 0,
+    output_hash String NOT NULL DEFAULT '',
+    error_msg String NOT NULL DEFAULT '',
     seq_no UInt64 NOT NULL,
     client_signature String NOT NULL,
     worker_signature String NOT NULL,
-    worker_timestamp_ms UInt64 NOT NULL,
-    collector_timestamp_ms UInt64 NOT NULL
+    worker_timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD),
+    collector_timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD)
 )
 ENGINE = MergeTree
-ORDER BY (worker_id, seq_no);
+PARTITION BY toYYYYMM(worker_timestamp)
+ORDER BY (worker_timestamp, worker_id);
 ";
 
 #[async_trait]
@@ -79,8 +80,8 @@ struct QueryExecutedRow<'a> {
     client_signature: &'a [u8],
     #[serde(with = "serde_bytes")]
     worker_signature: &'a [u8],
-    worker_timestamp_ms: u64,
-    collector_timestamp_ms: u64,
+    worker_timestamp: u64,
+    collector_timestamp: u64,
 }
 
 impl<'a> TryFrom<&'a QueryExecuted> for QueryExecutedRow<'a> {
@@ -92,7 +93,7 @@ impl<'a> TryFrom<&'a QueryExecuted> for QueryExecutedRow<'a> {
             .result
             .as_ref()
             .ok_or("Result field missing")?;
-        let collector_timestamp_ms = timestamp_now_ms();
+        let collector_timestamp = timestamp_now_ms();
         let (result, num_read_chunks, output_size, output_hash, error_msg) = match result {
             query_executed::Result::Ok(res) => {
                 let output = res.output.as_ref().ok_or("Output field missing")?;
@@ -137,8 +138,8 @@ impl<'a> TryFrom<&'a QueryExecuted> for QueryExecutedRow<'a> {
             seq_no: query_executed.seq_no,
             client_signature: &query.signature,
             worker_signature: &query_executed.signature,
-            worker_timestamp_ms: query_executed.timestamp_ms,
-            collector_timestamp_ms,
+            worker_timestamp: query_executed.timestamp_ms,
+            collector_timestamp,
         })
     }
 }
@@ -192,7 +193,7 @@ impl LogsStorage for ClickhouseStorage {
         let mut cursor = self
             .0
             .query(&format!(
-                "SELECT worker_id, MAX(seq_no), MAX(worker_timestamp_ms) FROM {LOGS_TABLE} GROUP BY worker_id"
+                "SELECT worker_id, MAX(seq_no), MAX(worker_timestamp) FROM {LOGS_TABLE} GROUP BY worker_id"
             ))
             .fetch::<SeqNoRow>()?;
         let mut result = HashMap::new();

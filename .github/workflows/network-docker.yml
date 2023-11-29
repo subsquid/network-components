@@ -36,6 +36,8 @@ jobs:
           target: network-scheduler
           load: true
           tags: subsquid/network-scheduler:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Get scheduler version
         run: echo "SCHEDULER_VERSION=$(docker run --rm subsquid/network-scheduler:test network-scheduler --version | cut -d ' ' -f2)" >> $GITHUB_ENV
@@ -50,6 +52,8 @@ jobs:
           tags: |
             subsquid/network-scheduler:${{ env.SCHEDULER_VERSION }}
             subsquid/network-scheduler:${{ inputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Build query gateway
         uses: docker/build-push-action@v5
@@ -58,6 +62,8 @@ jobs:
           target: query-gateway
           load: true
           tags: subsquid/query-gateway:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Get query gateway version
         run: echo "GATEWAY_VERSION=$(docker run --rm subsquid/query-gateway:test query-gateway --version | cut -d ' ' -f2)" >> $GITHUB_ENV
@@ -72,6 +78,8 @@ jobs:
           tags: |
             subsquid/query-gateway:${{ env.GATEWAY_VERSION }}
             subsquid/query-gateway:${{ inputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Build logs collector
         uses: docker/build-push-action@v5
@@ -80,6 +88,8 @@ jobs:
           target: logs-collector
           load: true
           tags: subsquid/logs-collector:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Get logs collector version
         run: echo "COLLECTOR_VERSION=$(docker run --rm subsquid/logs-collector:test logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
@@ -94,3 +104,5 @@ jobs:
           tags: |
             subsquid/logs-collector:${{ env.COLLECTOR_VERSION }}
             subsquid/logs-collector:${{ inputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

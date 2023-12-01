@@ -6,7 +6,8 @@ message Envelope {
   oneof msg {
     // router <-> worker
     Ping ping = 1;
-    Pong pong = 2;
+    WorkerState state_update = 2 [deprecated = true];
+    Pong pong = 3;
 
     // client <-> worker
     Query query = 5;
@@ -16,10 +17,11 @@ message Envelope {
     // client metrics
     QuerySubmitted query_submitted = 8;
     QueryFinished query_finished = 9;
+    QueryExecuted query_executed = 10 [deprecated = true];
 
     // collector <-> worker
-    QueryLogs query_logs = 10;
-    LogsCollected logs_collected = 11;
+    QueryLogs query_logs = 11;
+    LogsCollected logs_collected = 12;
   }
 }
 

@@ -30,8 +30,11 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM --platform=$BUILDPLATFORM chef AS network-builder
 
-RUN apt update
-RUN apt install -y -V protobuf-compiler
+RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
+    --mount=target=/var/cache/apt,type=cache,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
+    && apt-get -y install protobuf-compiler
 
 COPY --from=network-planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
@@ -46,9 +49,15 @@ COPY subsquid-network/transport ./subsquid-network/transport
 
 RUN cargo build --release --workspace
 
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim as network-scheduler
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim as network-base
 
-RUN apt-get update && apt-get install ca-certificates net-tools -y
+RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
+    --mount=target=/var/cache/apt,type=cache,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
+    && apt-get -y install ca-certificates net-tools
+
+FROM --platform=$BUILDPLATFORM network-base as network-scheduler
 
 WORKDIR /run
 
@@ -65,9 +74,7 @@ RUN echo "PORT=\${HTTP_LISTEN_ADDR##*:}; netstat -an | grep \$PORT > /dev/null; 
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
 
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim as query-gateway
-
-RUN apt-get update && apt-get install ca-certificates net-tools -y
+FROM --platform=$BUILDPLATFORM network-base as query-gateway
 
 WORKDIR /run
 
@@ -85,9 +92,7 @@ RUN echo "PORT=\${HTTP_LISTEN_ADDR##*:}; netstat -an | grep \$PORT > /dev/null; 
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
 
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim as logs-collector
-
-RUN apt-get update && apt-get install ca-certificates -y
+FROM --platform=$BUILDPLATFORM network-base as logs-collector
 
 COPY --from=network-builder /app/target/release/logs-collector /usr/local/bin/logs-collector
 

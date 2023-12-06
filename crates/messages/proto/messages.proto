@@ -58,12 +58,12 @@ message Pong {
   }
 }
 
-message Query {
-  string query_id = 1;
-  string dataset = 2;
-  string query = 3;
-  bool profiling = 4;
-  string client_state_json = 5;
+message Query { // Optional fields enforce serializing default values
+  optional string query_id = 1;
+  optional string dataset = 2;
+  optional string query = 3;
+  optional bool profiling = 4;
+  optional string client_state_json = 5;
   bytes signature = 6;
 }
 
@@ -112,14 +112,14 @@ message QueryExecuted {
   Query query = 3;
   bytes query_hash = 5;
 
-  uint32 exec_time_ms = 6;
+  optional uint32 exec_time_ms = 6; // optional to enforce serializing 0
   oneof result {
     InputAndOutput ok = 7;
     string bad_request = 8;
     string server_error = 9;
   }
-  uint64 seq_no = 10;
-  uint64 timestamp_ms = 11;
+  optional uint64 seq_no = 10; // optional to enforce serializing 0
+  optional uint64 timestamp_ms = 11; // optional to enforce serializing 0
   bytes signature = 12;
 }
 
@@ -128,12 +128,12 @@ message QueryLogs {
 }
 
 message InputAndOutput {
-  uint32 num_read_chunks = 1;
+  optional uint32 num_read_chunks = 1; // optional to enforce serializing 0
   SizeAndHash output = 2;
 }
 
 message SizeAndHash {
-  uint32 size = 1;
+  optional uint32 size = 1; // optional to enforce serializing 0
   bytes sha3_256 = 2;
 }
 

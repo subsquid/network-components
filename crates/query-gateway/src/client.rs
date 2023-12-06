@@ -365,11 +365,11 @@ impl QueryHandler {
         self.tasks.insert(query_id.clone(), task);
 
         let mut worker_msg = QueryMsg {
-            query_id: query_id.clone(),
-            dataset: dataset.clone(),
-            query: query.clone(),
-            profiling,
-            client_state_json: "{}".to_string(), // This is a placeholder field
+            query_id: Some(query_id.clone()),
+            dataset: Some(dataset.clone()),
+            query: Some(query.clone()),
+            profiling: Some(profiling),
+            client_state_json: Some("{}".to_string()), // This is a placeholder field
             signature: vec![],
         };
         worker_msg.sing(&self.keypair)?;
@@ -474,15 +474,12 @@ impl QueryHandler {
         let (query_id, task) = task_entry.remove_entry();
 
         // Greylist worker if server error occurred during query execution
-        match &result {
-            query_result::Result::ServerError(e) => {
-                log::warn!("Server error returned for query {query_id}: {e}");
-                self.network_state
-                    .write()
-                    .await
-                    .greylist_worker(task.worker_id);
-            }
-            _ => {}
+        if let query_result::Result::ServerError(ref e) = result {
+            log::warn!("Server error returned for query {query_id}: {e}");
+            self.network_state
+                .write()
+                .await
+                .greylist_worker(task.worker_id);
         }
 
         if self.send_metrics {

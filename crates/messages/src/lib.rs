@@ -48,7 +48,7 @@ impl SizeAndHash {
         hasher.update(data);
         let hash = hasher.finalize();
         Self {
-            size,
+            size: Some(size),
             sha3_256: hash.to_vec(),
         }
     }

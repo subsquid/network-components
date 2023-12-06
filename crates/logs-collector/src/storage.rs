@@ -38,7 +38,7 @@ ORDER BY (worker_timestamp, worker_id);
 
 #[async_trait]
 pub trait LogsStorage {
-    async fn store_logs<'a, T: Iterator<Item = &'a QueryExecuted> + Sized + Send>(
+    async fn store_logs<'a, T: Iterator<Item = QueryExecutedRow> + Sized + Send>(
         &self,
         query_logs: T,
     ) -> anyhow::Result<()>;
@@ -49,7 +49,7 @@ pub trait LogsStorage {
 
 pub struct ClickhouseStorage(Client);
 
-#[derive(Debug, Serialize_repr, Deserialize_repr)]
+#[derive(Debug, Clone, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
 enum QueryResult {
     Ok = 1,
@@ -57,126 +57,123 @@ enum QueryResult {
     ServerError = 3,
 }
 
-#[derive(Row, Debug, Serialize, Deserialize)]
-struct QueryExecutedRow<'a> {
-    client_id: &'a str,
-    worker_id: &'a str,
-    query_id: &'a str,
-    dataset: &'a str,
-    query: &'a str,
+#[derive(Row, Debug, Clone, Serialize, Deserialize)]
+pub struct QueryExecutedRow {
+    client_id: String,
+    worker_id: String,
+    query_id: String,
+    dataset: String,
+    query: String,
     profiling: bool,
-    client_state_json: &'a str,
+    client_state_json: String,
     #[serde(with = "serde_bytes")]
-    query_hash: &'a [u8],
+    query_hash: Vec<u8>,
     exec_time_ms: u32,
     result: QueryResult,
     num_read_chunks: u32,
     output_size: u32,
     #[serde(with = "serde_bytes")]
-    output_hash: &'a [u8],
-    error_msg: &'a str,
-    seq_no: u64,
+    output_hash: Vec<u8>,
+    error_msg: String,
+    pub seq_no: u64,
     #[serde(with = "serde_bytes")]
-    client_signature: &'a [u8],
+    client_signature: Vec<u8>,
     #[serde(with = "serde_bytes")]
-    worker_signature: &'a [u8],
-    worker_timestamp: u64,
+    worker_signature: Vec<u8>,
+    pub worker_timestamp: u64,
     collector_timestamp: u64,
 }
 
-impl<'a> TryFrom<&'a QueryExecuted> for QueryExecutedRow<'a> {
+impl TryFrom<QueryExecuted> for QueryExecutedRow {
     type Error = &'static str;
 
-    fn try_from(query_executed: &'a QueryExecuted) -> Result<Self, Self::Error> {
-        let query = query_executed.query.as_ref().ok_or("Query field missing")?;
-        let result = query_executed
-            .result
-            .as_ref()
-            .ok_or("Result field missing")?;
+    fn try_from(query_executed: QueryExecuted) -> Result<Self, Self::Error> {
+        let query = query_executed.query.ok_or("Query field missing")?;
+        let result = query_executed.result.ok_or("Result field missing")?;
         let collector_timestamp = timestamp_now_ms();
         let (result, num_read_chunks, output_size, output_hash, error_msg) = match result {
             query_executed::Result::Ok(res) => {
-                let output = res.output.as_ref().ok_or("Output field missing")?;
+                let output = res.output.ok_or("Output field missing")?;
                 (
                     QueryResult::Ok,
                     res.num_read_chunks,
                     output.size,
-                    output.sha3_256.as_slice(),
-                    "",
+                    output.sha3_256,
+                    "".to_string(),
                 )
             }
             query_executed::Result::BadRequest(err_msg) => (
                 QueryResult::BadRequest,
-                0u32,
-                0u32,
-                &[] as &[u8],
-                err_msg.as_str(),
+                Some(0u32),
+                Some(0u32),
+                vec![],
+                err_msg,
             ),
             query_executed::Result::ServerError(err_msg) => (
                 QueryResult::ServerError,
-                0u32,
-                0u32,
-                &[] as &[u8],
-                err_msg.as_str(),
+                Some(0u32),
+                Some(0u32),
+                vec![],
+                err_msg,
             ),
         };
         Ok(Self {
-            client_id: &query_executed.client_id,
-            worker_id: &query_executed.worker_id,
-            query_id: &query.query_id,
-            dataset: &query.dataset,
-            query: &query.query,
-            profiling: query.profiling,
-            client_state_json: &query.client_state_json,
-            query_hash: &query_executed.query_hash,
-            exec_time_ms: query_executed.exec_time_ms,
+            client_id: query_executed.client_id,
+            worker_id: query_executed.worker_id,
+            query_id: query.query_id.ok_or("query_id field missing")?,
+            dataset: query.dataset.ok_or("dataset field missing")?,
+            query: query.query.ok_or("query field missing")?,
+            profiling: query.profiling.ok_or("profiling field missing")?,
+            client_state_json: query.client_state_json.unwrap(),
+            query_hash: query_executed.query_hash,
+            exec_time_ms: query_executed
+                .exec_time_ms
+                .ok_or("exec_time field missing")?,
             result,
-            num_read_chunks,
-            output_size,
+            num_read_chunks: num_read_chunks.ok_or("num_read_chunks field missing")?,
+            output_size: output_size.ok_or("output_size field missing")?,
             output_hash,
             error_msg,
-            seq_no: query_executed.seq_no,
-            client_signature: &query.signature,
-            worker_signature: &query_executed.signature,
-            worker_timestamp: query_executed.timestamp_ms,
+            seq_no: query_executed.seq_no.ok_or("seq_no field missing")?,
+            client_signature: query.signature,
+            worker_signature: query_executed.signature,
+            worker_timestamp: query_executed
+                .timestamp_ms
+                .ok_or("timestamp field missing")?,
             collector_timestamp,
         })
     }
 }
 
-impl<'a> From<QueryExecutedRow<'a>> for QueryExecuted {
-    fn from(row: QueryExecutedRow<'a>) -> Self {
+impl From<QueryExecutedRow> for QueryExecuted {
+    fn from(row: QueryExecutedRow) -> Self {
         let result = match row.result {
             QueryResult::Ok => query_executed::Result::Ok(InputAndOutput {
-                num_read_chunks: row.num_read_chunks,
+                num_read_chunks: Some(row.num_read_chunks),
                 output: Some(SizeAndHash {
-                    size: row.output_size,
-                    sha3_256: row.output_hash.to_vec(),
+                    size: Some(row.output_size),
+                    sha3_256: row.output_hash,
                 }),
             }),
-            QueryResult::BadRequest => {
-                query_executed::Result::BadRequest(row.error_msg.to_string())
-            }
-            QueryResult::ServerError => {
-                query_executed::Result::ServerError(row.error_msg.to_string())
-            }
+            QueryResult::BadRequest => query_executed::Result::BadRequest(row.error_msg),
+            QueryResult::ServerError => query_executed::Result::ServerError(row.error_msg),
         };
         QueryExecuted {
-            client_id: row.client_id.to_string(),
-            worker_id: row.worker_id.to_string(),
+            client_id: row.client_id,
+            worker_id: row.worker_id,
             query: Some(Query {
-                query_id: row.query_id.to_string(),
-                dataset: row.dataset.to_string(),
-                query: row.query.to_string(),
-                profiling: row.profiling,
-                client_state_json: row.client_state_json.to_string(),
-                signature: row.client_signature.to_vec(),
+                query_id: Some(row.query_id),
+                dataset: Some(row.dataset),
+                query: Some(row.query),
+                profiling: Some(row.profiling),
+                client_state_json: Some(row.client_state_json),
+                signature: row.client_signature,
             }),
-            query_hash: row.query_hash.to_vec(),
-            exec_time_ms: row.exec_time_ms,
-            seq_no: row.seq_no,
-            timestamp_ms: row.worker_timestamp,
-            signature: row.worker_signature.to_vec(),
+            query_hash: row.query_hash,
+            exec_time_ms: Some(row.exec_time_ms),
+            seq_no: Some(row.seq_no),
+            timestamp_ms: Some(row.worker_timestamp),
+            signature: row.worker_signature,
             result: Some(result),
         }
     }
@@ -203,22 +200,13 @@ impl ClickhouseStorage {
 
 #[async_trait]
 impl LogsStorage for ClickhouseStorage {
-    async fn store_logs<'a, T: Iterator<Item = &'a QueryExecuted> + Sized + Send>(
+    async fn store_logs<'a, T: Iterator<Item = QueryExecutedRow> + Sized + Send>(
         &self,
         query_logs: T,
     ) -> anyhow::Result<()> {
         log::debug!("Storing logs in clickhouse");
         let mut insert = self.0.insert(LOGS_TABLE)?;
-        let rows: Vec<QueryExecutedRow> = query_logs
-            .filter_map(|log| match log.try_into() {
-                Ok(log) => Some(log),
-                Err(e) => {
-                    log::error!("Invalid log message: {e}");
-                    None
-                }
-            })
-            .collect();
-        for row in rows {
+        for row in query_logs {
             log::debug!("Storing query log {:?}", row);
             insert.write(&row).await?;
         }
@@ -247,7 +235,7 @@ impl LogsStorage for ClickhouseStorage {
 mod tests {
     use super::*;
     use subsquid_messages::signatures::SignedMessage;
-    use subsquid_messages::{InputAndOutput, Query, SizeAndHash};
+    use subsquid_messages::{InputAndOutput, ProstMsg, Query, SizeAndHash};
     use subsquid_network_transport::{Keypair, PeerId};
 
     // To run this test, start a local clickhouse instance first
@@ -298,11 +286,11 @@ mod tests {
         let worker_id = PeerId::from_public_key(&worker_keypair.public());
 
         let mut query = Query {
-            query_id: "query_id".to_string(),
-            dataset: "dataset".to_string(),
-            query: "{\"from\": \"0xdeadbeef\"}".to_string(),
-            profiling: false,
-            client_state_json: "{}".to_string(),
+            query_id: Some("query_id".to_string()),
+            dataset: Some("dataset".to_string()),
+            query: Some("{\"from\": \"0xdeadbeef\"}".to_string()),
+            profiling: Some(false),
+            client_state_json: Some("".to_string()),
             signature: vec![],
         };
         query.sing(&client_keypair).unwrap();
@@ -312,14 +300,14 @@ mod tests {
             worker_id: worker_id.to_string(),
             query: Some(query),
             query_hash: vec![0xde, 0xad, 0xbe, 0xef],
-            exec_time_ms: 2137,
-            seq_no: 69,
-            timestamp_ms: 123456789000,
+            exec_time_ms: Some(2137),
+            seq_no: Some(69),
+            timestamp_ms: Some(123456789000),
             signature: vec![],
             result: Some(query_executed::Result::Ok(InputAndOutput {
-                num_read_chunks: 10,
+                num_read_chunks: Some(10),
                 output: Some(SizeAndHash {
-                    size: 666,
+                    size: Some(666),
                     sha3_256: vec![0xbe, 0xbe, 0xf0, 0x00],
                 }),
             })),
@@ -327,7 +315,7 @@ mod tests {
         query_log.sing(&worker_keypair).unwrap();
 
         storage
-            .store_logs(std::iter::once(&query_log))
+            .store_logs(std::iter::once(query_log.clone().try_into().unwrap()))
             .await
             .unwrap();
 

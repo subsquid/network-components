@@ -13,7 +13,7 @@ use subsquid_network_transport::{MsgContent, PeerId};
 use crate::cli::Config;
 use crate::metrics::{MetricsEvent, MetricsWriter};
 use crate::metrics_server;
-use crate::scheduler::Scheduler;
+use crate::scheduler::{Scheduler, SUPPORTED_WORKER_VERSIONS};
 use crate::scheduling_unit::SchedulingUnit;
 use crate::storage::S3Storage;
 
@@ -94,8 +94,13 @@ impl Server {
         if peer_id.to_string() != msg.worker_id {
             return log::debug!("Worker ID mismatch in ping");
         }
-        if !msg.verify_signature(&peer_id) {
-            return log::debug!("Invalid ping signature");
+        // if !msg.verify_signature(&peer_id) {
+        //     return log::debug!("Invalid ping signature");
+        // }
+        if SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == msg.version)
+            && !msg.verify_signature(&peer_id)
+        {
+            log::warn!("Invalid ping signature: msg={msg:?}")
         }
         let ping_hash = msg_hash(&msg);
         let status = self.scheduler.write().await.ping(peer_id, msg.clone());

@@ -92,10 +92,10 @@ impl Server {
 
     async fn ping(&mut self, peer_id: PeerId, mut msg: Ping) {
         if peer_id.to_string() != msg.worker_id {
-            return log::warn!("Worker ID mismatch in ping");
+            return log::debug!("Worker ID mismatch in ping");
         }
         if !msg.verify_signature(&peer_id) {
-            return log::warn!("Invalid ping signature");
+            return log::debug!("Invalid ping signature");
         }
         let ping_hash = msg_hash(&msg);
         let status = self.scheduler.write().await.ping(peer_id, msg.clone());

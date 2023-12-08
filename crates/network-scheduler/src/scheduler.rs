@@ -19,7 +19,7 @@ use crate::cli::Config;
 use crate::data_chunk::{chunks_to_worker_state, DataChunk};
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 
-pub const SUPPORTED_WORKER_VERSIONS: [&str; 2] = ["0.1.4", "0.1.5"];
+pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.1.5"];
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]

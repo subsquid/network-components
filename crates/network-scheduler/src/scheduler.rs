@@ -199,6 +199,36 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
+    pub fn clear_deprecated_units(&mut self) {
+        let dataset_urls: HashSet<String> = Config::get()
+            .dataset_buckets
+            .iter()
+            .map(|bucket| format!("s3://{bucket}"))
+            .collect();
+        let deprecated_unit_ids: Vec<UnitId> = self
+            .known_units
+            .iter()
+            .filter_map(|(unit_id, unit)| {
+                (!dataset_urls.contains(unit.dataset_url())).then_some(*unit_id)
+            })
+            .collect();
+        for unit_id in deprecated_unit_ids.iter() {
+            let unit = self.known_units.remove(unit_id).expect("unknown unit");
+            log::info!("Removing deprecated scheduling unit {unit}");
+            let unit_size = unit.size_bytes();
+            self.units_assignments
+                .remove(unit_id)
+                .unwrap_or_default()
+                .into_iter()
+                .for_each(|worker_id| {
+                    self.worker_states
+                        .get_mut(&worker_id)
+                        .expect("unknown worker")
+                        .remove_unit(unit_id, unit_size)
+                });
+        }
+    }
+
     /// Register ping msg from a worker. Returns worker status if ping was accepted, otherwise None
     pub fn ping(&mut self, worker_id: PeerId, msg: Ping) -> WorkerStatus {
         if !SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == msg.version) {

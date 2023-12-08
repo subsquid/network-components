@@ -241,7 +241,10 @@ impl S3Storage {
             }
             Err(e) => return Err(anyhow::anyhow!(e)),
         };
-        Ok(serde_json::from_slice(&bytes)?)
+        let mut scheduler: Scheduler = serde_json::from_slice(&bytes)?;
+        // List of datasets could have changed since last run, need to clear deprecated units
+        scheduler.clear_deprecated_units();
+        Ok(scheduler)
     }
 
     pub async fn save_scheduler<T: Deref<Target = Scheduler>>(

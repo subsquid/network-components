@@ -14,9 +14,9 @@ use tokio::task::JoinHandle;
 use contract_client::Worker;
 use subsquid_messages::signatures::SignedMessage;
 use subsquid_messages::{
-    envelope::Msg, query_finished, query_result, DatasetRanges, Envelope, OkResult, PingV1, PingV2,
-    ProstMsg, Query as QueryMsg, QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted,
-    RangeSet, SizeAndHash,
+    envelope::Msg, query_finished, query_result, Envelope, OkResult, PingV1, PingV2, ProstMsg,
+    Query as QueryMsg, QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, RangeSet,
+    SizeAndHash,
 };
 use subsquid_network_transport::{Keypair, MsgContent, PeerId};
 
@@ -218,12 +218,21 @@ impl NetworkState {
         )
     }
 
-    fn update_dataset_state(&mut self, peer_id: PeerId, dataset_id: DatasetId, state: RangeSet) {
-        self.last_pings.insert(peer_id, Instant::now());
-        self.dataset_states
-            .entry(dataset_id)
-            .or_default()
-            .update(peer_id, state);
+    fn update_dataset_states(
+        &mut self,
+        worker_id: PeerId,
+        mut worker_state: HashMap<DatasetId, RangeSet>,
+    ) {
+        self.last_pings.insert(worker_id, Instant::now());
+        for dataset_id in self.available_datasets.values() {
+            let dataset_state = worker_state
+                .remove(dataset_id)
+                .unwrap_or_else(RangeSet::empty);
+            self.dataset_states
+                .entry(dataset_id.clone())
+                .or_default()
+                .update(worker_id, dataset_state);
+        }
     }
 
     fn update_registered_workers(&mut self, workers: Vec<Worker>) {
@@ -450,26 +459,31 @@ impl QueryHandler {
     async fn ping_v1(&mut self, peer_id: PeerId, ping: PingV1) {
         log::debug!("Got ping from {peer_id}");
         log::trace!("Ping from {peer_id}: {ping:?}");
-        let datasets = ping.state.map(|s| s.datasets).unwrap_or_default();
-        for (dataset_url, range_set) in datasets.into_iter() {
-            self.network_state.write().await.update_dataset_state(
-                peer_id,
-                DatasetId::from_url(dataset_url),
-                range_set,
-            )
-        }
+        let worker_state = ping
+            .state
+            .map(|s| s.datasets)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(url, ranges)| (DatasetId::from_url(url), ranges))
+            .collect();
+        self.network_state
+            .write()
+            .await
+            .update_dataset_states(peer_id, worker_state);
     }
 
     async fn ping_v2(&mut self, peer_id: PeerId, ping: PingV2) {
         log::debug!("Got ping from {peer_id}");
         log::trace!("Ping from {peer_id}: {ping:?}");
-        for DatasetRanges { url, ranges } in ping.stored_ranges.into_iter() {
-            self.network_state.write().await.update_dataset_state(
-                peer_id,
-                DatasetId::from_url(url),
-                ranges.into(),
-            )
-        }
+        let worker_state = ping
+            .stored_ranges
+            .into_iter()
+            .map(|r| (DatasetId::from_url(r.url), r.ranges.into()))
+            .collect();
+        self.network_state
+            .write()
+            .await
+            .update_dataset_states(peer_id, worker_state);
     }
     async fn query_result(
         &mut self,

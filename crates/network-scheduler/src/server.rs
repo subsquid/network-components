@@ -114,7 +114,8 @@ impl Server {
             return log::warn!("Worker ID mismatch in ping");
         }
         if !msg.verify_signature(&peer_id) {
-            return log::warn!("Invalid ping signature");
+            // TODO: Add return to reject ping with invalid signatures
+            log::warn!("Invalid ping signature");
         }
         let ping_hash = msg_hash(&msg);
         let status = self.scheduler.write().await.ping_v2(peer_id, msg.clone());

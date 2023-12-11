@@ -524,9 +524,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-s3"
-version = "0.39.1"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29223b1074621f1d011bac836d995c002936663052b1e7ad02927551b17d6625"
+checksum = "959a7325827d882819a2ac77e27e26626b9713b9cfec44686785e0db6e73388f"
 dependencies = [
  "aws-credential-types",
  "aws-http 0.60.0",
@@ -1970,6 +1970,17 @@ name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "derive-enum-from-into"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adc2a1b7c0031fb651e9bc1fa4255da82747c187b9ac1dc36b3783d71fadd9d5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4449,10 +4460,11 @@ dependencies = [
  "anyhow",
  "async-trait",
  "aws-config 1.0.3",
- "aws-sdk-s3 0.39.1",
+ "aws-sdk-s3 1.5.0",
  "axum",
  "clap",
  "contract-client",
+ "derive-enum-from-into",
  "env_logger",
  "hex",
  "iter_num_tools",

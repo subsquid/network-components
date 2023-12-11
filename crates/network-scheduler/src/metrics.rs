@@ -1,12 +1,13 @@
 use std::pin::Pin;
 use std::time::SystemTime;
 
+use derive_enum_from_into::EnumFrom;
 use serde::Serialize;
 use serde_with::{serde_as, TimestampMilliSeconds};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use subsquid_messages::{Ping, QueryExecuted, QueryFinished, QuerySubmitted};
+use subsquid_messages::{PingV1, PingV2, QueryExecuted, QueryFinished, QuerySubmitted};
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Cli;
@@ -28,7 +29,7 @@ impl Metrics {
             MetricsEvent::QuerySubmitted(QuerySubmitted { client_id, .. }) => Some(client_id),
             MetricsEvent::QueryFinished(QueryFinished { client_id, .. }) => Some(client_id),
             MetricsEvent::QueryExecuted(QueryExecuted { worker_id, .. }) => Some(worker_id),
-            MetricsEvent::Ping(Ping { worker_id, .. }) => Some(worker_id),
+            MetricsEvent::Ping(PingV1 { worker_id, .. }) => Some(worker_id),
             _ => None,
         };
         anyhow::ensure!(
@@ -49,10 +50,10 @@ impl Metrics {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, EnumFrom)]
 #[serde(tag = "event")]
 pub enum MetricsEvent {
-    Ping(Ping),
+    Ping(PingV1),
     QuerySubmitted(QuerySubmitted),
     QueryFinished(QueryFinished),
     QueryExecuted(QueryExecuted),
@@ -71,27 +72,23 @@ impl MetricsEvent {
     }
 }
 
-impl From<Ping> for MetricsEvent {
-    fn from(value: Ping) -> Self {
-        Self::Ping(value)
-    }
-}
-
-impl From<QuerySubmitted> for MetricsEvent {
-    fn from(value: QuerySubmitted) -> Self {
-        Self::QuerySubmitted(value)
-    }
-}
-
-impl From<QueryFinished> for MetricsEvent {
-    fn from(value: QueryFinished) -> Self {
-        Self::QueryFinished(value)
-    }
-}
-
-impl From<QueryExecuted> for MetricsEvent {
-    fn from(value: QueryExecuted) -> Self {
-        Self::QueryExecuted(value)
+impl From<PingV2> for MetricsEvent {
+    fn from(value: PingV2) -> Self {
+        Self::Ping(PingV1 {
+            worker_id: value.worker_id.unwrap_or_default(),
+            worker_url: "".to_string(),
+            state: Some(subsquid_messages::WorkerState {
+                datasets: value
+                    .stored_ranges
+                    .into_iter()
+                    .map(|r| (r.url, r.ranges.into()))
+                    .collect(),
+            }),
+            pause: false,
+            stored_bytes: value.stored_bytes.unwrap_or_default(),
+            version: value.version.unwrap_or_default(),
+            signature: value.signature,
+        })
     }
 }
 

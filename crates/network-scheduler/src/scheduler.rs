@@ -12,14 +12,14 @@ use serde_with::{serde_as, TimestampMilliSeconds};
 
 use contract_client::{Address, Worker};
 use subsquid_messages::range::RangeSet;
-use subsquid_messages::{pong::Status as WorkerStatus, Ping};
+use subsquid_messages::{pong::Status as WorkerStatus, PingV1, PingV2};
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;
 use crate::data_chunk::{chunks_to_worker_state, DataChunk};
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 
-pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.1.5"];
+pub const SUPPORTED_WORKER_VERSIONS: [&str; 2] = ["0.1.5", "0.1.6"];
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,11 +59,23 @@ impl WorkerState {
     }
 
     /// Register ping msg from a worker.
-    pub fn ping(&mut self, msg: Ping) {
+    pub fn ping_v1(&mut self, msg: PingV1) {
         self.last_ping = Some(SystemTime::now());
         self.version = Some(msg.version);
         self.stored_ranges = msg.state.unwrap_or_default().datasets;
         self.stored_bytes = msg.stored_bytes;
+    }
+
+    /// Register ping msg from a worker.
+    pub fn ping_v2(&mut self, msg: PingV2) {
+        self.last_ping = Some(SystemTime::now());
+        self.version = msg.version;
+        self.stored_ranges = msg
+            .stored_ranges
+            .into_iter()
+            .map(|r| (r.url, r.ranges.into()))
+            .collect();
+        self.stored_bytes = msg.stored_bytes.unwrap_or_default();
     }
 
     pub fn is_active(&self) -> bool {
@@ -230,7 +242,7 @@ impl Scheduler {
     }
 
     /// Register ping msg from a worker. Returns worker status if ping was accepted, otherwise None
-    pub fn ping(&mut self, worker_id: PeerId, msg: Ping) -> WorkerStatus {
+    pub fn ping_v1(&mut self, worker_id: PeerId, msg: PingV1) -> WorkerStatus {
         if !SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == msg.version) {
             log::debug!("Worker {worker_id} version not supported: {}", msg.version);
             return WorkerStatus::UnsupportedVersion(());
@@ -242,7 +254,29 @@ impl Scheduler {
             }
             Some(worker_state) => worker_state,
         };
-        worker_state.ping(msg);
+        worker_state.ping_v1(msg);
+        if worker_state.jailed {
+            return WorkerStatus::Jailed(());
+        }
+        let state = chunks_to_worker_state(worker_state.assigned_chunks(&self.known_units));
+        WorkerStatus::Active(state)
+    }
+
+    /// Register ping msg from a worker. Returns worker status if ping was accepted, otherwise None
+    pub fn ping_v2(&mut self, worker_id: PeerId, msg: PingV2) -> WorkerStatus {
+        let version = msg.version.clone().unwrap_or_default();
+        if !SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == version) {
+            log::debug!("Worker {worker_id} version not supported: {}", version);
+            return WorkerStatus::UnsupportedVersion(());
+        }
+        let worker_state = match self.worker_states.get_mut(&worker_id) {
+            None => {
+                log::debug!("Worker {worker_id} not registered");
+                return WorkerStatus::NotRegistered(());
+            }
+            Some(worker_state) => worker_state,
+        };
+        worker_state.ping_v2(msg);
         if worker_state.jailed {
             return WorkerStatus::Jailed(());
         }

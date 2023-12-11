@@ -9,7 +9,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use rand::prelude::SliceRandom;
 
-use subsquid_messages::{data_chunk::DataChunk, Ping, Range, RangeSet, WorkerState};
+use subsquid_messages::{data_chunk::DataChunk, PingV1 as Ping, Range, RangeSet, WorkerState};
 
 use crate::atom::Atom;
 

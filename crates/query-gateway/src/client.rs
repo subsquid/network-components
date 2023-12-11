@@ -14,9 +14,9 @@ use tokio::task::JoinHandle;
 use contract_client::Worker;
 use subsquid_messages::signatures::SignedMessage;
 use subsquid_messages::{
-    envelope::Msg, query_finished, query_result, Envelope, OkResult, Ping, ProstMsg,
-    Query as QueryMsg, QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, RangeSet,
-    SizeAndHash,
+    envelope::Msg, query_finished, query_result, DatasetRanges, Envelope, OkResult, PingV1, PingV2,
+    ProstMsg, Query as QueryMsg, QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted,
+    RangeSet, SizeAndHash,
 };
 use subsquid_network_transport::{Keypair, MsgContent, PeerId};
 
@@ -436,15 +436,18 @@ impl QueryHandler {
         let Envelope { msg } = Envelope::decode(content.as_slice())?;
         match msg {
             Some(Msg::QueryResult(result)) => self.query_result(peer_id, result).await?,
-            Some(Msg::Ping(ping)) if topic.is_some_and(|t| t == PING_TOPIC) => {
-                self.ping(peer_id, ping).await
+            Some(Msg::PingV1(ping)) if topic.as_ref().is_some_and(|t| t == PING_TOPIC) => {
+                self.ping_v1(peer_id, ping).await
+            }
+            Some(Msg::PingV2(ping)) if topic.as_ref().is_some_and(|t| t == PING_TOPIC) => {
+                self.ping_v2(peer_id, ping).await
             }
             _ => log::warn!("Unexpected message received: {msg:?}"),
         }
         Ok(())
     }
 
-    async fn ping(&mut self, peer_id: PeerId, ping: Ping) {
+    async fn ping_v1(&mut self, peer_id: PeerId, ping: PingV1) {
         log::debug!("Got ping from {peer_id}");
         log::trace!("Ping from {peer_id}: {ping:?}");
         let datasets = ping.state.map(|s| s.datasets).unwrap_or_default();
@@ -457,6 +460,17 @@ impl QueryHandler {
         }
     }
 
+    async fn ping_v2(&mut self, peer_id: PeerId, ping: PingV2) {
+        log::debug!("Got ping from {peer_id}");
+        log::trace!("Ping from {peer_id}: {ping:?}");
+        for DatasetRanges { url, ranges } in ping.stored_ranges.into_iter() {
+            self.network_state.write().await.update_dataset_state(
+                peer_id,
+                DatasetId::from_url(url),
+                ranges.into(),
+            )
+        }
+    }
     async fn query_result(
         &mut self,
         peer_id: PeerId,

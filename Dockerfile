@@ -75,6 +75,18 @@ RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
 
 FROM --platform=$BUILDPLATFORM network-base as query-gateway
+ARG TARGETOS
+ARG TARGETARCH
+ARG YQ_VERSION="4.40.5"
+
+RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
+    --mount=target=/var/cache/apt,type=cache,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
+    && apt-get -y install curl
+
+RUN curl -sL https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_${TARGETOS}_${TARGETARCH} -o /usr/bin/yq \
+    && chmod +x /usr/bin/yq
 
 WORKDIR /run
 
@@ -85,10 +97,13 @@ ENV P2P_LISTEN_ADDR="/ip4/0.0.0.0/tcp/12345"
 ENV HTTP_LISTEN_ADDR="0.0.0.0:8000"
 ENV BOOTSTRAP="true"
 ENV PRIVATE_NODE="true"
+ENV CONFIG_PATH="/run/config.yml"
 
 CMD ["query-gateway"]
 
-RUN echo "PORT=\${HTTP_LISTEN_ADDR##*:}; netstat -an | grep \$PORT > /dev/null; if [ 0 != \$? ]; then exit 1; fi;" > ./healthcheck.sh
+RUN echo "PORT=\${HTTP_LISTEN_ADDR##*:}; \
+    yq '.available_datasets.[] | key' \$CONFIG_PATH \
+    | xargs -I % curl -s http://localhost:\$PORT/network/%/height > /dev/null  " > ./healthcheck.sh
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
 

@@ -36,6 +36,9 @@ pub struct WorkerState {
     pub stored_bytes: u64,
     #[serde(default)]
     pub num_missing_chunks: u32,
+    #[serde_as(as = "TimestampMilliSeconds")]
+    #[serde(default = "SystemTime::now")]
+    pub last_assignment: SystemTime,
 }
 
 impl WorkerState {
@@ -51,6 +54,7 @@ impl WorkerState {
             stored_bytes: 0,
             assigned_bytes: 0,
             num_missing_chunks: 0,
+            last_assignment: SystemTime::now(),
         }
     }
 
@@ -149,6 +153,14 @@ impl WorkerState {
         units: &'a HashMap<UnitId, SchedulingUnit>,
     ) -> Result<(), Vec<UnitId>> {
         assert!(!self.jailed);
+        if self
+            .last_assignment
+            .elapsed()
+            .is_ok_and(|d| d < Config::get().worker_stale_timeout)
+        {
+            return Ok(());
+        }
+
         let num_missing_chunks = self.count_missing_chunks(units);
         if num_missing_chunks == 0 {
             log::debug!("Worker {} is fully synced", self.peer_id);
@@ -174,6 +186,7 @@ impl WorkerState {
 
     pub fn reset_download_progress<'a>(&'a mut self, units: &'a HashMap<UnitId, SchedulingUnit>) {
         self.num_missing_chunks = self.count_missing_chunks(units);
+        self.last_assignment = SystemTime::now();
     }
 
     /// Jail the worker, unassign all units and return their IDs.

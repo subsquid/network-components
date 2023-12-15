@@ -504,7 +504,7 @@ impl ControllerBuilder {
 mod tests {
     use std::ops::Deref;
 
-    use subsquid_messages::Ping;
+    use super::Ping;
 
     use crate::controller::ControllerBuilder;
     use subsquid_messages::data_chunk::DataChunk;

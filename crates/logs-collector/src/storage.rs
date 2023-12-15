@@ -235,7 +235,7 @@ impl LogsStorage for ClickhouseStorage {
 mod tests {
     use super::*;
     use subsquid_messages::signatures::SignedMessage;
-    use subsquid_messages::{InputAndOutput, ProstMsg, Query, SizeAndHash};
+    use subsquid_messages::{InputAndOutput, Query, SizeAndHash};
     use subsquid_network_transport::{Keypair, PeerId};
 
     // To run this test, start a local clickhouse instance first

@@ -80,7 +80,7 @@ impl Server {
         };
         let envelope = match Envelope::decode(msg.content.as_slice()) {
             Ok(envelope) => envelope,
-            Err(e) => return log::warn!("Error decoding message: {e:?}"),
+            Err(e) => return log::warn!("Error decoding message: {e:?} peer_id={peer_id}"),
         };
         match envelope.msg {
             Some(Msg::PingV1(msg)) => self.ping_v1(peer_id, msg).await,

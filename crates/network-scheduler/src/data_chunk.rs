@@ -67,7 +67,6 @@ pub fn chunks_to_worker_state(chunks: impl IntoIterator<Item = DataChunk>) -> Wo
 #[cfg(test)]
 mod tests {
     use subsquid_messages::range::RangeSet;
-    use subsquid_network_transport::PeerId;
 
     use super::*;
 
@@ -87,26 +86,6 @@ mod tests {
                 0x52, 0xea, 0x53, 0x90
             ])
         );
-    }
-
-    #[test]
-    fn test_distance() {
-        let peer_id: PeerId = "12D3KooWQER7HEpwsvqSzqzaiV36d3Bn6DZrnwEunnzS76pgZkMU"
-            .parse()
-            .unwrap();
-        let chunk = DataChunk {
-            dataset_url: "s3://squidnet".to_string(),
-            block_range: Range::new(0, 1000),
-            size_bytes: 0,
-        };
-        assert_eq!(
-            chunk.id().distance(&peer_id),
-            [
-                0x1b, 0x4e, 0x42, 0x76, 0x72, 0x9c, 0x4b, 0xab, 0x9f, 0x86, 0x7c, 0xc3, 0xb4, 0xcd,
-                0xe6, 0x01, 0x05, 0x18, 0x16, 0x62, 0x8b, 0x1d, 0x00, 0x25, 0x41, 0x2f, 0x8a, 0xe0,
-                0xed, 0xa9, 0xc2, 0x2f
-            ]
-        )
     }
 
     #[test]

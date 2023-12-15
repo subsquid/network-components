@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     // Subscribe to worker set updates (from blockchain)
-    let contract_client = contract_client::get_client(&args.rpc).await?;
+    let contract_client = contract_client::get_workers_client(&args.rpc).await?;
 
     // Start query client
     let query_client =

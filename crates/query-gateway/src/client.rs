@@ -290,7 +290,7 @@ struct QueryHandler {
 impl QueryHandler {
     async fn run(
         mut self,
-        contract_client: Box<dyn contract_client::Client>,
+        contract_client: Box<dyn contract_client::WorkersClient>,
         summary_print_interval: Duration,
         workers_update_interval: Duration,
     ) {
@@ -330,7 +330,7 @@ impl QueryHandler {
 
     fn spawn_workers_update_task(
         &self,
-        contract_client: Box<dyn contract_client::Client>,
+        contract_client: Box<dyn contract_client::WorkersClient>,
         workers_update_interval: Duration,
     ) -> JoinHandle<()> {
         let network_state = self.network_state.clone();
@@ -614,7 +614,7 @@ pub async fn get_client(
     keypair: Keypair,
     msg_receiver: mpsc::Receiver<Message>,
     msg_sender: mpsc::Sender<Message>,
-    contact_client: Box<dyn contract_client::Client>,
+    contact_client: Box<dyn contract_client::WorkersClient>,
 ) -> anyhow::Result<QueryClient> {
     let (query_sender, query_receiver) = mpsc::channel(100);
     let (timeout_sender, timeout_receiver) = mpsc::channel(100);

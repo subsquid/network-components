@@ -8,7 +8,6 @@ edition = "2021"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
 ethers = {version = "2", features = ["ws"]}
-futures = "0.3"
 lazy_static = "1"
 libp2p = "0.53"
 log = "0.4"

@@ -25,12 +25,6 @@ use crate::PING_TOPIC;
 
 type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
-const WORKER_INACTIVE_THRESHOLD: Duration = Duration::from_secs(120);
-const WORKER_GREYLIST_TIME: Duration = Duration::from_secs(600);
-const DEFAULT_QUERY_TIMEOUT: Duration = Duration::from_secs(60);
-const SUMMARY_PRINT_INTERVAL: Duration = Duration::from_secs(30);
-const WORKERS_UPDATE_INTERVAL: Duration = Duration::from_secs(180);
-
 #[derive(Derivative, Debug)]
 struct Query {
     pub dataset_id: DatasetId,
@@ -168,12 +162,20 @@ struct NetworkState {
     worker_greylist: HashMap<PeerId, Instant>,
     registered_workers: HashSet<PeerId>,
     available_datasets: HashMap<String, DatasetId>,
+    worker_inactive_threshold: Duration,
+    worker_greylist_time: Duration,
 }
 
 impl NetworkState {
-    pub fn new(available_datasets: HashMap<String, DatasetId>) -> Self {
+    pub fn new(
+        available_datasets: HashMap<String, DatasetId>,
+        worker_inactive_threshold: Duration,
+        worker_greylist_time: Duration,
+    ) -> Self {
         Self {
             available_datasets,
+            worker_inactive_threshold,
+            worker_greylist_time,
             ..Default::default()
         }
     }
@@ -190,13 +192,23 @@ impl NetworkState {
         };
 
         // Choose a random active worker having the requested start_block
-        dataset_state
+        let mut worker = dataset_state
             .get_workers_with_block(start_block)
-            .filter(|peer_id| self.worker_is_active(peer_id))
-            .choose(&mut rand::thread_rng())
+            .filter(|peer_id| self.worker_is_active(peer_id, false))
+            .choose(&mut rand::thread_rng());
+
+        // If no worker is found, try grey-listed workers
+        if worker.is_none() {
+            worker = dataset_state
+                .get_workers_with_block(start_block)
+                .filter(|peer_id| self.worker_is_active(peer_id, true))
+                .choose(&mut rand::thread_rng());
+        }
+
+        worker
     }
 
-    fn worker_is_active(&self, worker_id: &PeerId) -> bool {
+    fn worker_is_active(&self, worker_id: &PeerId, allow_greylisted: bool) -> bool {
         // Check if worker is registered on chain
         if !self.registered_workers.contains(worker_id) {
             return false;
@@ -207,14 +219,18 @@ impl NetworkState {
         // Check if the last ping wasn't too long ago
         match self.last_pings.get(worker_id) {
             None => return false,
-            Some(ping) if (*ping + WORKER_INACTIVE_THRESHOLD) < now => return false,
+            Some(ping) if (*ping + self.worker_inactive_threshold) < now => return false,
             _ => (),
         };
 
-        // Check if the worker is (still) greylisted
+        if allow_greylisted {
+            return true;
+        }
+
+        // Check if the worker is (still) grey-listed
         !matches!(
             self.worker_greylist.get(worker_id),
-            Some(instant) if (*instant + WORKER_GREYLIST_TIME) > now
+            Some(instant) if (*instant + self.worker_greylist_time) > now
         )
     }
 
@@ -272,9 +288,15 @@ struct QueryHandler {
 }
 
 impl QueryHandler {
-    async fn run(mut self, contract_client: Box<dyn contract_client::Client>) {
-        let summary_task = self.spawn_summary_task();
-        let workers_update_task = self.spawn_workers_update_task(contract_client);
+    async fn run(
+        mut self,
+        contract_client: Box<dyn contract_client::Client>,
+        summary_print_interval: Duration,
+        workers_update_interval: Duration,
+    ) {
+        let summary_task = self.spawn_summary_task(summary_print_interval);
+        let workers_update_task =
+            self.spawn_workers_update_task(contract_client, workers_update_interval);
         loop {
             let _ = tokio::select! {
                 Some(query) = self.query_receiver.recv() => self.handle_query(query)
@@ -293,12 +315,12 @@ impl QueryHandler {
         workers_update_task.abort();
     }
 
-    fn spawn_summary_task(&self) -> JoinHandle<()> {
+    fn spawn_summary_task(&self, summary_print_interval: Duration) -> JoinHandle<()> {
         let network_state = self.network_state.clone();
         tokio::task::spawn(async move {
             log::info!("Starting datasets summary task");
             loop {
-                tokio::time::sleep(SUMMARY_PRINT_INTERVAL).await;
+                tokio::time::sleep(summary_print_interval).await;
                 let mut summary = Table::new(network_state.read().await.summary());
                 summary.with(Style::sharp());
                 log::info!("Datasets summary:\n{summary}");
@@ -309,6 +331,7 @@ impl QueryHandler {
     fn spawn_workers_update_task(
         &self,
         contract_client: Box<dyn contract_client::Client>,
+        workers_update_interval: Duration,
     ) -> JoinHandle<()> {
         let network_state = self.network_state.clone();
         tokio::task::spawn(async move {
@@ -325,7 +348,7 @@ impl QueryHandler {
                     .write()
                     .await
                     .update_registered_workers(workers);
-                tokio::time::sleep(WORKERS_UPDATE_INTERVAL).await;
+                tokio::time::sleep(workers_update_interval).await;
             }
         })
     }
@@ -537,6 +560,7 @@ impl QueryHandler {
 pub struct QueryClient {
     network_state: Arc<RwLock<NetworkState>>,
     query_sender: mpsc::Sender<Query>,
+    default_query_timeout: Duration,
 }
 
 impl QueryClient {
@@ -563,7 +587,9 @@ impl QueryClient {
         timeout: Option<impl Into<Duration>>,
         profiling: bool,
     ) -> anyhow::Result<QueryResult> {
-        let timeout = timeout.map(Into::into).unwrap_or(DEFAULT_QUERY_TIMEOUT);
+        let timeout = timeout
+            .map(Into::into)
+            .unwrap_or(self.default_query_timeout);
         let (result_sender, result_receiver) = oneshot::channel();
         let query = Query {
             dataset_id,
@@ -592,7 +618,11 @@ pub async fn get_client(
 ) -> anyhow::Result<QueryClient> {
     let (query_sender, query_receiver) = mpsc::channel(100);
     let (timeout_sender, timeout_receiver) = mpsc::channel(100);
-    let network_state = Arc::new(RwLock::new(NetworkState::new(config.available_datasets)));
+    let network_state = Arc::new(RwLock::new(NetworkState::new(
+        config.available_datasets,
+        config.worker_inactive_threshold,
+        config.worker_greylist_time,
+    )));
 
     let handler = QueryHandler {
         msg_receiver,
@@ -606,11 +636,16 @@ pub async fn get_client(
         scheduler_id: config.scheduler_id.0,
         send_metrics: config.send_metrics,
     };
-    tokio::spawn(handler.run(contact_client));
+    tokio::spawn(handler.run(
+        contact_client,
+        config.summary_print_interval,
+        config.workers_update_interval,
+    ));
 
     let client = QueryClient {
         network_state,
         query_sender,
+        default_query_timeout: config.default_query_timeout,
     };
     Ok(client)
 }

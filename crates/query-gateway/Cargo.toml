@@ -1,6 +1,6 @@
 [package]
 name = "query-gateway"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 
 [dependencies]
@@ -16,6 +16,7 @@ flate2 = "1"
 log = "0.4"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
+serde_with = "3"
 serde_yaml = "0.9"
 tabled = "0.14"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -22,7 +22,7 @@ async fn main() {
     let args = Cli::parse();
     logger::init();
 
-    let mut storages: HashMap<String, Box<dyn Storage + Send>> = HashMap::new();
+    let mut storages: HashMap<String, Arc<dyn Storage + Sync + Send>> = HashMap::new();
     for (_name, dataset) in &args.dataset {
         let storage = create_storage(dataset).await;
         storages.insert(dataset.clone(), storage);
@@ -43,7 +43,7 @@ async fn main() {
     Server::new(controller).run().await;
 }
 
-async fn create_storage(dataset: &String) -> Box<dyn Storage + Send> {
+async fn create_storage(dataset: &String) -> Arc<dyn Storage + Sync + Send> {
     let url = Url::parse(dataset);
     match url {
         Ok(url) => match url.scheme() {
@@ -60,7 +60,7 @@ async fn create_storage(dataset: &String) -> Box<dyn Storage + Send> {
                 let client = aws_sdk_s3::Client::new(&config);
                 let host = url.host_str().expect("invalid dataset host").to_string();
                 let bucket = host + url.path();
-                Box::new(S3Storage::new(client, bucket))
+                Arc::new(S3Storage::new(client, bucket))
             }
             _ => panic!("unsupported filesystem - {}", url.scheme()),
         },

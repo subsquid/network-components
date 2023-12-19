@@ -206,17 +206,7 @@ impl Controller {
             if Self::import_new_chunks(chunks, |next_block| {
                 f(dataset, next_block)
             }) {
-                let height = self.datasets_height.get(dataset).unwrap();
-                if let Some(chunk) = chunks.last() {
-                    let last_block = chunk.last_block();
-                    height.store(last_block.into(), Ordering::Relaxed);
-                } else {
-                    let value = height.load(Ordering::Relaxed);
-                    if value == INITIAL_VALUE {
-                        height.store(EMPTY_VALUE, Ordering::Relaxed);
-                    }
-                }
-
+                self.update_dataset_height(dataset, chunks);
                 let plan = self.schedule_dataset(
                     &managed_workers,
                     &mut schedule.assignment,
@@ -235,6 +225,34 @@ impl Controller {
         }
 
         self.workers.set(Arc::new(workers));
+    }
+
+    pub fn sync_datasets<F>(&self, mut f: F)
+        where F: FnMut(&Dataset, u32) -> Result<Vec<DataChunk>, ()>
+    {
+        let mut schedule_lock = self.schedule.lock();
+        let schedule = schedule_lock.deref_mut();
+
+        for (dataset, chunks) in schedule.datasets.iter_mut() {
+            if Self::import_new_chunks(chunks, |next_block| {
+                f(dataset, next_block)
+            }) {
+                self.update_dataset_height(dataset, chunks);
+            }
+        }
+    }
+
+    fn update_dataset_height(&self, dataset: &Dataset, chunks: &[DataChunk]) {
+        let height = self.datasets_height.get(dataset).unwrap();
+        if let Some(chunk) = chunks.last() {
+            let last_block = chunk.last_block();
+            height.store(last_block.into(), Ordering::Relaxed);
+        } else {
+            let value = height.load(Ordering::Relaxed);
+            if value == INITIAL_VALUE {
+                height.store(EMPTY_VALUE, Ordering::Relaxed);
+            }
+        }
     }
 
     fn remove_dead_workers(workers: &mut Vec<Worker>) {

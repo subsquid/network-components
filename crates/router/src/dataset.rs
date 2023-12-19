@@ -6,7 +6,7 @@ use tokio::runtime::Handle;
 
 pub trait Storage {
     /// Get data chunks in the dataset.
-    fn get_chunks(&mut self, next_block: u32) -> Result<Vec<DataChunk>, String>;
+    fn get_chunks(&self, next_block: u32) -> Result<Vec<DataChunk>, String>;
 }
 
 fn invalid_object_key(key: &str) -> String {
@@ -25,7 +25,7 @@ pub struct S3Storage {
 }
 
 impl Storage for S3Storage {
-    fn get_chunks(&mut self, next_block: u32) -> Result<Vec<DataChunk>, String> {
+    fn get_chunks(&self, next_block: u32) -> Result<Vec<DataChunk>, String> {
         let mut objects = vec![];
 
         let prefix = None;

@@ -4,9 +4,10 @@ use aws_sdk_s3::Client;
 use router_controller::data_chunk::DataChunk;
 use tokio::runtime::Handle;
 
+#[async_trait::async_trait]
 pub trait Storage {
     /// Get data chunks in the dataset.
-    fn get_chunks(&self, next_block: u32) -> Result<Vec<DataChunk>, String>;
+    async fn get_chunks(&self, next_block: u32) -> Result<Vec<DataChunk>, String>;
 }
 
 fn invalid_object_key(key: &str) -> String {
@@ -24,12 +25,13 @@ pub struct S3Storage {
     bucket: String,
 }
 
+#[async_trait::async_trait]
 impl Storage for S3Storage {
-    fn get_chunks(&self, next_block: u32) -> Result<Vec<DataChunk>, String> {
+    async fn get_chunks(&self, next_block: u32) -> Result<Vec<DataChunk>, String> {
         let mut objects = vec![];
 
         let prefix = None;
-        let tops = self.ls(prefix)?;
+        let tops = self.ls(prefix).await?;
 
         let mut top: Option<String> = None;
         if tops.len() == 1 {
@@ -46,7 +48,7 @@ impl Storage for S3Storage {
 
         if let Some(top) = top {
             let prefix = format!("{}/", top);
-            let top_chunks = self.ls(Some(&prefix))?;
+            let top_chunks = self.ls(Some(&prefix)).await?;
 
             let mut next_chunk: Option<DataChunk> = None;
             for chunk in top_chunks {
@@ -61,26 +63,27 @@ impl Storage for S3Storage {
             if let Some(chunk) = next_chunk {
                 let handle = Handle::current();
                 let start_after = chunk.to_string();
-                let builder = self
+                let output = self
                     .client
                     .list_objects_v2()
                     .bucket(&self.bucket)
-                    .start_after(start_after);
-                let output = handle
-                    .block_on(builder.send())
+                    .start_after(start_after)
+                    .send()
+                    .await
                     .map_err(|err| err.to_string())?;
                 let mut continuation_token = output.next_continuation_token.clone();
                 if let Some(contents) = output.contents() {
                     objects.extend_from_slice(contents);
                 }
                 while let Some(token) = continuation_token {
-                    let future = self
+                    let output = self
                         .client
                         .list_objects_v2()
                         .bucket(&self.bucket)
                         .continuation_token(token)
-                        .send();
-                    let output = handle.block_on(future).map_err(|err| err.to_string())?;
+                        .send()
+                        .await
+                        .map_err(|err| err.to_string())?;
                     continuation_token = output.next_continuation_token.clone();
                     if let Some(contents) = output.contents() {
                         objects.extend_from_slice(contents);
@@ -110,7 +113,7 @@ impl S3Storage {
         S3Storage { client, bucket }
     }
 
-    fn ls(&self, prefix: Option<&str>) -> Result<Vec<String>, String> {
+    async fn ls(&self, prefix: Option<&str>) -> Result<Vec<String>, String> {
         let handle = Handle::current();
         let mut builder = self
             .client

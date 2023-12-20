@@ -10,3 +10,7 @@ available_datasets:
   binance-mainnet: "czM6Ly9ic2MtbWFpbm5ldC0x"
   base-mainnet: "czM6Ly9iYXNlLTE"
   moonbeam-mainnet: "czM6Ly9tb29uYmVhbS1ldm0tMQ"
+allocate_interval_sec: 120
+compute_units:
+  minimum: 10
+  allocate: 25

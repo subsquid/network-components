@@ -12,9 +12,11 @@ use flate2::write::GzDecoder;
 use serde::Deserialize;
 
 use subsquid_messages::OkResult;
+use subsquid_network_transport::PeerId;
 
-use crate::client::{QueryClient, QueryResult};
-use crate::config::{DatasetId, PeerId};
+use crate::client::QueryClient;
+use crate::config::DatasetId;
+use crate::query::QueryResult;
 
 async fn get_height(
     Path(dataset): Path<String>,
@@ -70,7 +72,7 @@ struct ExecuteParams {
 }
 
 async fn execute_query(
-    Path((dataset_id, PeerId(worker_id))): Path<(DatasetId, PeerId)>,
+    Path((dataset_id, worker_id)): Path<(DatasetId, PeerId)>,
     Query(ExecuteParams { timeout, profiling }): Query<ExecuteParams>,
     Extension(client): Extension<Arc<QueryClient>>,
     headers: HeaderMap,

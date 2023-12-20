@@ -10,9 +10,13 @@ use subsquid_network_transport::Subscription;
 
 use crate::config::Config;
 
+mod allocations;
 mod client;
 mod config;
 mod http_server;
+mod network_state;
+mod query;
+mod server;
 
 #[derive(Parser)]
 #[command(version)]
@@ -32,13 +36,20 @@ struct Cli {
     http_listen: String,
 
     #[arg(
-        short,
-        long,
+        long = "config-path",
         env = "CONFIG_PATH",
         help = "Path to config file",
         default_value = "config.yml"
     )]
     config: PathBuf,
+
+    #[arg(
+        long,
+        env,
+        help = "Path to allocations database file",
+        default_value = "allocations.db"
+    )]
+    allocations_db_path: PathBuf,
 }
 
 const PING_TOPIC: &str = "worker_ping";
@@ -67,11 +78,20 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     // Subscribe to worker set updates (from blockchain)
-    let contract_client = contract_client::get_workers_client(&args.rpc).await?;
+    let workers_client = contract_client::get_workers_client(&args.rpc).await?;
+    let allocations_client = contract_client::get_allocations_client(&args.rpc).await?;
 
     // Start query client
-    let query_client =
-        client::get_client(config, keypair, msg_receiver, msg_sender, contract_client).await?;
+    let query_client = client::get_client(
+        config,
+        keypair,
+        msg_receiver,
+        msg_sender,
+        workers_client,
+        allocations_client,
+        args.allocations_db_path,
+    )
+    .await?;
 
     // Start HTTP server
     http_server::run_server(query_client, &http_listen_addr).await

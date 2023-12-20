@@ -27,7 +27,7 @@ pub trait SignedMessage: ProstMsg + Sized {
     fn detach_signature(&mut self) -> Vec<u8>;
     fn attach_signature(&mut self, signature: Vec<u8>);
 
-    fn sing(&mut self, keypair: &Keypair) -> anyhow::Result<()> {
+    fn sign(&mut self, keypair: &Keypair) -> anyhow::Result<()> {
         let bytes = self.encode_to_vec();
         let signature = keypair.sign(&bytes)?;
         self.attach_signature(signature);

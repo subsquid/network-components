@@ -293,7 +293,7 @@ mod tests {
             client_state_json: Some("".to_string()),
             signature: vec![],
         };
-        query.sing(&client_keypair).unwrap();
+        query.sign(&client_keypair).unwrap();
 
         let mut query_log = QueryExecuted {
             client_id: client_id.to_string(),
@@ -312,7 +312,7 @@ mod tests {
                 }),
             })),
         };
-        query_log.sing(&worker_keypair).unwrap();
+        query_log.sign(&worker_keypair).unwrap();
 
         storage
             .store_logs(std::iter::once(query_log.clone().try_into().unwrap()))

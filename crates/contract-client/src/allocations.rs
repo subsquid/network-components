@@ -71,7 +71,7 @@ pub trait Client: Send + Sync {
     async fn available_cus(&self) -> Result<U256, ClientError>;
 
     /// Get allocated computation units and last scanned block number
-    async fn allocated_cus(
+    async fn get_allocations(
         &self,
         from_block: Option<u64>,
     ) -> Result<(Vec<Allocation>, u64), ClientError>;
@@ -103,6 +103,7 @@ struct RpcProviderWithSigner<T: JsonRpcClient + Clone + 'static> {
     provider: Provider<T>,
     address: Address,
     max_log_blocks: U64,
+    #[allow(clippy::type_complexity)]
     contract: GatewayRegistry<
         NonceManagerMiddleware<
             SignerMiddleware<
@@ -150,7 +151,7 @@ impl<M: JsonRpcClient + Clone + 'static> Client for RpcProviderWithSigner<M> {
         Ok(self.contract.computation_units(self.address).call().await?)
     }
 
-    async fn allocated_cus(
+    async fn get_allocations(
         &self,
         from_block: Option<u64>,
     ) -> Result<(Vec<Allocation>, u64), ClientError> {
@@ -180,6 +181,9 @@ impl<M: JsonRpcClient + Clone + 'static> Client for RpcProviderWithSigner<M> {
     }
 
     async fn allocate_cus(&self, allocations: Vec<Allocation>) -> Result<(), ClientError> {
+        if allocations.is_empty() {
+            return Ok(());
+        }
         log::info!("Allocating compute units: {allocations:?}");
         let (worker_ids, cus) = allocations
             .into_iter()

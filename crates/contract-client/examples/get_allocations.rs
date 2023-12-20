@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     if let Some(Command::List { from_block }) = cli.command {
-        let (allocations, last_block) = client.allocated_cus(from_block).await?;
+        let (allocations, last_block) = client.get_allocations(from_block).await?;
         println!("Allocations up to block {last_block}:");
         allocations.into_iter().for_each(|a| println!("{a:?}"));
     }

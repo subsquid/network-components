@@ -1,10 +1,11 @@
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine;
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use serde_with::{serde_as, DurationSeconds};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
+use subsquid_network_transport::PeerId;
 
 fn default_worker_inactive_threshold() -> Duration {
     Duration::from_secs(120)
@@ -42,20 +43,13 @@ impl DatasetId {
     }
 }
 
-/// This struct exists because `PeerId` doesn't implement `Deserialize`
-#[derive(Debug, Clone, Copy)]
-pub struct PeerId(pub subsquid_network_transport::PeerId);
-
-impl<'de> Deserialize<'de> for PeerId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let peer_id = String::deserialize(deserializer)?
-            .parse()
-            .map_err(|_| serde::de::Error::custom("Invalid peer ID"))?;
-        Ok(Self(peer_id))
-    }
+#[serde_as]
+#[derive(Debug, Clone, Deserialize)]
+pub struct ComputeUnitsConfig {
+    /// Threshold below which new computation units will be allocated to the worker
+    pub minimum: u32,
+    /// How many computation units to allocate when remaining units drop below threshold
+    pub allocate: u32,
 }
 
 #[serde_as]
@@ -94,4 +88,10 @@ pub struct Config {
     )]
     pub workers_update_interval: Duration,
     pub available_datasets: HashMap<String, DatasetId>,
+
+    /// How often new computation units will be allocated
+    #[serde_as(as = "DurationSeconds")]
+    #[serde(rename = "allocate_interval_sec")]
+    pub allocate_interval: Duration,
+    pub compute_units: ComputeUnitsConfig,
 }

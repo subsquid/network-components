@@ -2,7 +2,6 @@ use std::str::FromStr;
 
 use aws_sdk_s3::Client;
 use router_controller::data_chunk::DataChunk;
-use tokio::runtime::Handle;
 
 #[async_trait::async_trait]
 pub trait Storage {
@@ -61,7 +60,6 @@ impl Storage for S3Storage {
             }
 
             if let Some(chunk) = next_chunk {
-                let handle = Handle::current();
                 let start_after = chunk.to_string();
                 let output = self
                     .client
@@ -114,7 +112,6 @@ impl S3Storage {
     }
 
     async fn ls(&self, prefix: Option<&str>) -> Result<Vec<String>, String> {
-        let handle = Handle::current();
         let mut builder = self
             .client
             .list_objects_v2()
@@ -123,8 +120,8 @@ impl S3Storage {
         if let Some(prefix) = prefix {
             builder = builder.prefix(prefix)
         }
-        let output = handle
-            .block_on(builder.send())
+        let output = builder.send()
+            .await
             .map_err(|err| err.to_string())?;
         let mut items = vec![];
         if let Some(prefixes) = output.common_prefixes() {

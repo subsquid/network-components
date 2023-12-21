@@ -183,9 +183,30 @@ impl Controller {
         desired_state.unwrap()
     }
 
-    pub fn schedule<F>(&self, mut f: F)
-        where F: FnMut(&Dataset, u32) -> Result<Vec<DataChunk>, ()>
-    {
+    pub fn update_dataset(&self, dataset: &Dataset, mut new_chunks: Vec<DataChunk>) -> Result<(), &str> {
+        let mut schedule = self.schedule.lock();
+        let chunks = match schedule.datasets.get_mut(dataset) {
+            Some(chunks) => chunks,
+            None => return Err("unknown dataset")
+        };
+
+        if Self::import_new_chunks(chunks, &mut new_chunks) {
+            let height = self.datasets_height.get(dataset).unwrap();
+            if let Some(chunk) = chunks.last() {
+                let last_block = chunk.last_block();
+                height.store(last_block.into(), Ordering::Relaxed);
+            } else {
+                let value = height.load(Ordering::Relaxed);
+                if value == INITIAL_VALUE {
+                    height.store(EMPTY_VALUE, Ordering::Relaxed);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn schedule(&self) {
         let mut schedule_lock = self.schedule.lock();
         let schedule = schedule_lock.deref_mut();
         let mut workers = self.workers.get().deref().clone();
@@ -203,19 +224,14 @@ impl Controller {
             .collect();
 
         for (dataset, chunks) in schedule.datasets.iter_mut() {
-            if Self::import_new_chunks(chunks, |next_block| {
-                f(dataset, next_block)
-            }) {
-                self.update_dataset_height(dataset, chunks);
-                let plan = self.schedule_dataset(
-                    &managed_workers,
-                    &mut schedule.assignment,
-                    dataset,
-                    chunks
-                );
-                for (w, ranges) in plan.into_iter().enumerate() {
-                    desired_state[w].insert(dataset.clone(), ranges);
-                }
+            let plan = self.schedule_dataset(
+                &managed_workers,
+                &mut schedule.assignment,
+                dataset,
+                chunks
+            );
+            for (w, ranges) in plan.into_iter().enumerate() {
+                desired_state[w].insert(dataset.clone(), ranges);
             }
         }
 
@@ -225,34 +241,6 @@ impl Controller {
         }
 
         self.workers.set(Arc::new(workers));
-    }
-
-    pub fn sync_datasets<F>(&self, mut f: F)
-        where F: FnMut(&Dataset, u32) -> Result<Vec<DataChunk>, ()>
-    {
-        let mut schedule_lock = self.schedule.lock();
-        let schedule = schedule_lock.deref_mut();
-
-        for (dataset, chunks) in schedule.datasets.iter_mut() {
-            if Self::import_new_chunks(chunks, |next_block| {
-                f(dataset, next_block)
-            }) {
-                self.update_dataset_height(dataset, chunks);
-            }
-        }
-    }
-
-    fn update_dataset_height(&self, dataset: &Dataset, chunks: &[DataChunk]) {
-        let height = self.datasets_height.get(dataset).unwrap();
-        if let Some(chunk) = chunks.last() {
-            let last_block = chunk.last_block();
-            height.store(last_block.into(), Ordering::Relaxed);
-        } else {
-            let value = height.load(Ordering::Relaxed);
-            if value == INITIAL_VALUE {
-                height.store(EMPTY_VALUE, Ordering::Relaxed);
-            }
-        }
     }
 
     fn remove_dead_workers(workers: &mut Vec<Worker>) {
@@ -267,36 +255,29 @@ impl Controller {
         })
     }
 
-    fn import_new_chunks<F>(chunks: &mut Vec<DataChunk>, f: F) -> bool
-        where F: FnOnce(u32) -> Result<Vec<DataChunk>, ()>
-    {
+    fn import_new_chunks(chunks: &mut Vec<DataChunk>, new_chunks: &mut Vec<DataChunk>) -> bool {
         let mut next_block = chunks.last().map_or(0, |c| c.last_block() + 1);
-        match f(next_block) {
-            Err(_) => false,
-            Ok(mut new_chunks) => {
-                new_chunks.sort();
-                // check, that the new chunks are non-overlapping and span a continuous range
-                for (i, c) in new_chunks.iter().enumerate() {
-                    if next_block != c.first_block() && next_block != 0 {
-                        let p = if i > 0 {
-                            &new_chunks[i - 1]
-                        } else {
-                            chunks.last().unwrap()
-                        };
-                        if next_block > c.first_block() {
-                            log::error!("Received overlapping chunks: {} and {}", p, c);
-                            return false
-                        } else {
-                            log::error!("There is a gap between {} and {}", p, c);
-                            return false
-                        }
-                    }
-                    next_block = c.last_block() + 1
+        new_chunks.sort();
+        // check, that the new chunks are non-overlapping and span a continuous range
+        for (i, c) in new_chunks.iter().enumerate() {
+            if next_block != c.first_block() && next_block != 0 {
+                let p = if i > 0 {
+                    &new_chunks[i - 1]
+                } else {
+                    chunks.last().unwrap()
+                };
+                if next_block > c.first_block() {
+                    log::error!("Received overlapping chunks: {} and {}", p, c);
+                    return false
+                } else {
+                    log::error!("There is a gap between {} and {}", p, c);
+                    return false
                 }
-                chunks.append(&mut new_chunks);
-                true
             }
+            next_block = c.last_block() + 1
         }
+        chunks.append(new_chunks);
+        true
     }
 
     fn schedule_dataset(
@@ -550,9 +531,9 @@ mod tests {
             });
         }
 
-        controller.schedule(|ds, _from_block| {
-            Ok(chunks[ds.parse::<usize>().unwrap()].clone())
-        });
+        controller.update_dataset(&"0".to_string(), chunks[0].clone()).unwrap();
+        controller.update_dataset(&"1".to_string(), chunks[1].clone()).unwrap();
+        controller.schedule();
 
         let desired_state: Vec<_> = (0..8).map(|w| {
             controller.ping(PingMessage {

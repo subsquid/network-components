@@ -3,7 +3,6 @@ use cli::Cli;
 use dataset::{S3Storage, Storage};
 use router_controller::controller::ControllerBuilder;
 use server::Server;
-use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,10 +21,10 @@ async fn main() {
     let args = Cli::parse();
     logger::init();
 
-    let mut storages: HashMap<String, Arc<dyn Storage + Sync + Send>> = HashMap::new();
-    for (_name, dataset) in &args.dataset {
+    let mut datasets: Vec<_> = Vec::with_capacity(args.dataset.len());
+    for (name, dataset) in &args.dataset {
         let storage = create_storage(dataset).await;
-        storages.insert(dataset.clone(), storage);
+        datasets.push((name.clone(), dataset.clone(), storage));
     }
 
     let controller = ControllerBuilder::new()
@@ -38,7 +37,7 @@ async fn main() {
     let controller = Arc::new(controller);
 
     let scheduling_interval = Duration::from_secs(args.scheduling_interval);
-    scheduler::start(controller.clone(), storages, scheduling_interval);
+    scheduler::start(controller.clone(), datasets, scheduling_interval);
 
     Server::new(controller).run().await;
 }

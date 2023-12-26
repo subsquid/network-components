@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tracing::{error, info};
 
@@ -56,8 +56,16 @@ pub fn start(
     interval: Duration,
 ) {
     tokio::spawn(async move {
+        let schedule_time = Instant::now() + Duration::from_secs(90);
+
         info!("updating datasets before scheduling");
         update_datasets(&controller, &datasets).await;
+
+        let now = Instant::now();
+        if let Some(duration) = schedule_time.checked_duration_since(now) {
+            tokio::time::sleep(duration).await;
+        }
+        controller.schedule();
 
         info!("started scheduling task with {:?} interval", interval);
         loop {

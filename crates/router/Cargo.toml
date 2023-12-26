@@ -10,6 +10,7 @@ aws-sdk-s3 = "0.21.0"
 aws-config = "0.51.0"
 axum = "0.5.17"
 axum-macros = "0.2.3"
+async-trait = "0.1.74"
 clap = { version = "4.0.18", features = ["derive"] }
 tokio = { version = "1.21.2", features = ["full"] }
 url = "2.3.1"

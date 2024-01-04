@@ -15,14 +15,16 @@ use subsquid_messages::{
     envelope::Msg, query_finished, query_result, Envelope, PingV1, PingV2, ProstMsg,
     Query as QueryMsg, QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, SizeAndHash,
 };
-use subsquid_network_transport::{Keypair, MsgContent, PeerId};
+use subsquid_network_transport::transport::P2PTransportHandle;
+use subsquid_network_transport::{Keypair, MsgContent as MsgContentT, PeerId};
 
 use crate::config::DatasetId;
 use crate::network_state::NetworkState;
 use crate::query::{Query, QueryResult};
 use crate::PING_TOPIC;
 
-pub type Message = subsquid_network_transport::Message<Box<[u8]>>;
+pub type MsgContent = Box<[u8]>;
+pub type Message = subsquid_network_transport::Message<MsgContent>;
 
 const COMP_UNITS_PER_QUERY: u32 = 1;
 
@@ -68,7 +70,7 @@ impl Task {
 
 pub struct Server {
     msg_receiver: mpsc::Receiver<Message>,
-    msg_sender: mpsc::Sender<Message>,
+    transport_handle: P2PTransportHandle<MsgContent>,
     query_receiver: mpsc::Receiver<Query>,
     timeout_sender: mpsc::Sender<String>,
     timeout_receiver: mpsc::Receiver<String>,
@@ -83,7 +85,7 @@ pub struct Server {
 impl Server {
     pub fn new(
         msg_receiver: mpsc::Receiver<Message>,
-        msg_sender: mpsc::Sender<Message>,
+        transport_handle: P2PTransportHandle<MsgContent>,
         query_receiver: mpsc::Receiver<Query>,
         network_state: Arc<RwLock<NetworkState>>,
         allocations_manager: Arc<RwLock<AllocationsManager>>,
@@ -94,7 +96,7 @@ impl Server {
         let (timeout_sender, timeout_receiver) = mpsc::channel(100);
         Self {
             msg_receiver,
-            msg_sender,
+            transport_handle,
             query_receiver,
             timeout_sender,
             timeout_receiver,
@@ -203,12 +205,10 @@ impl Server {
 
     async fn send_msg(&mut self, peer_id: PeerId, msg: Msg) -> anyhow::Result<()> {
         let envelope = Envelope { msg: Some(msg) };
-        let msg = Message {
-            peer_id: Some(peer_id),
-            topic: None,
-            content: envelope.encode_to_vec().into(),
-        };
-        self.msg_sender.send(msg).await?;
+        let msg_content = envelope.encode_to_vec().into();
+        self.transport_handle
+            .send_direct_msg(msg_content, peer_id)
+            .await?;
         Ok(())
     }
 

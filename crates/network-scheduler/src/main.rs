@@ -2,7 +2,6 @@ use clap::Parser;
 use env_logger::Env;
 
 use subsquid_network_transport::transport::P2PTransportBuilder;
-use subsquid_network_transport::Subscription;
 
 use crate::cli::Cli;
 use crate::metrics::MetricsWriter;
@@ -36,16 +35,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
-    let (incoming_messages, message_sender, subscription_sender) = transport_builder.run().await?;
+    let (incoming_messages, transport_handle) = transport_builder.run().await?;
 
     // Subscribe to receive worker pings
-    subscription_sender
-        .send(Subscription {
-            topic: PING_TOPIC.to_string(),
-            subscribed: true,
-            allow_unordered: false,
-        })
-        .await?;
+    transport_handle.subscribe(PING_TOPIC).await?;
 
     // Get scheduling units
     let storage = S3Storage::new().await;
@@ -56,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
     Server::new(
         incoming_messages,
         incoming_units,
-        message_sender,
+        transport_handle,
         scheduler,
         metrics_writer,
     )

@@ -1,14 +1,15 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 use subsquid_messages::envelope::Msg;
 use subsquid_messages::signatures::{msg_hash, SignedMessage};
 use subsquid_messages::{Envelope, PingV1, PingV2, Pong, ProstMsg};
-use subsquid_network_transport::{MsgContent, PeerId};
+use subsquid_network_transport::transport::P2PTransportHandle;
+use subsquid_network_transport::{MsgContent as MsgContentT, PeerId};
 
 use crate::cli::Config;
 use crate::metrics::{MetricsEvent, MetricsWriter};
@@ -17,12 +18,13 @@ use crate::scheduler::Scheduler;
 use crate::scheduling_unit::SchedulingUnit;
 use crate::storage::S3Storage;
 
+type MsgContent = Box<[u8]>;
 type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
 pub struct Server {
     incoming_messages: Receiver<Message>,
     incoming_units: Receiver<SchedulingUnit>,
-    message_sender: Sender<Message>,
+    transport_handle: P2PTransportHandle<MsgContent>,
     scheduler: Arc<RwLock<Scheduler>>,
     metrics_writer: Arc<RwLock<MetricsWriter>>,
 }
@@ -31,7 +33,7 @@ impl Server {
     pub fn new(
         incoming_messages: Receiver<Message>,
         incoming_units: Receiver<SchedulingUnit>,
-        message_sender: Sender<Message>,
+        transport_handle: P2PTransportHandle<MsgContent>,
         scheduler: Scheduler,
         metrics_writer: MetricsWriter,
     ) -> Self {
@@ -40,7 +42,7 @@ impl Server {
         Self {
             incoming_messages,
             incoming_units,
-            message_sender,
+            transport_handle,
             scheduler,
             metrics_writer,
         }
@@ -145,12 +147,12 @@ impl Server {
 
     async fn send_msg(&mut self, peer_id: PeerId, msg: Msg) {
         let envelope = Envelope { msg: Some(msg) };
-        let msg = Message {
-            peer_id: Some(peer_id),
-            topic: None,
-            content: envelope.encode_to_vec().into(),
-        };
-        if let Err(e) = self.message_sender.send(msg).await {
+        let msg_content = envelope.encode_to_vec().into();
+        if let Err(e) = self
+            .transport_handle
+            .send_direct_msg(msg_content, peer_id)
+            .await
+        {
             log::error!("Error sending message: {e:?}");
         }
     }

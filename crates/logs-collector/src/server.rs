@@ -1,37 +1,39 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
 use subsquid_messages::envelope::Msg;
 use subsquid_messages::signatures::SignedMessage;
 use subsquid_messages::{Envelope, LogsCollected, ProstMsg, QueryLogs};
-use subsquid_network_transport::{MsgContent, PeerId};
+use subsquid_network_transport::transport::P2PTransportHandle;
+use subsquid_network_transport::{MsgContent as MsgContentT, PeerId};
 
 use crate::collector::LogsCollector;
 use crate::storage::LogsStorage;
 use crate::LOGS_TOPIC;
 
-type Message = subsquid_network_transport::Message<Box<[u8]>>;
+type MsgContent = Box<[u8]>;
+type Message = subsquid_network_transport::Message<MsgContent>;
 
 pub struct Server<T: LogsStorage + Send + Sync + 'static> {
     incoming_messages: Receiver<Message>,
-    message_sender: Sender<Message>,
+    transport_handle: P2PTransportHandle<MsgContent>,
     logs_collector: Arc<RwLock<LogsCollector<T>>>,
 }
 
 impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
     pub fn new(
         incoming_messages: Receiver<Message>,
-        message_sender: Sender<Message>,
+        transport_handle: P2PTransportHandle<MsgContent>,
         logs_collector: LogsCollector<T>,
     ) -> Self {
         let logs_collector = Arc::new(RwLock::new(logs_collector));
         Self {
             incoming_messages,
-            message_sender,
+            transport_handle,
             logs_collector,
         }
     }
@@ -92,7 +94,7 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
 
     fn spawn_saving_task(&self, store_logs_interval: Duration) -> JoinHandle<()> {
         let collector = self.logs_collector.clone();
-        let msg_sender = self.message_sender.clone();
+        let transport_handle = self.transport_handle.clone();
 
         tokio::spawn(async move {
             log::info!("Starting logs saving task");
@@ -108,12 +110,11 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
 
                 let msg = Msg::LogsCollected(LogsCollected { sequence_numbers });
                 let envelope = Envelope { msg: Some(msg) };
-                let msg = Message {
-                    peer_id: None,
-                    topic: Some(LOGS_TOPIC.to_string()),
-                    content: envelope.encode_to_vec().into(),
-                };
-                if let Err(e) = msg_sender.send(msg).await {
+                let msg_content = envelope.encode_to_vec().into();
+                if let Err(e) = transport_handle
+                    .broadcast_msg(msg_content, LOGS_TOPIC)
+                    .await
+                {
                     log::error!("Error sending message: {e:?}");
                 }
             }

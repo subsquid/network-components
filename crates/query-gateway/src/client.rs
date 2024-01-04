@@ -6,12 +6,13 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::allocations::AllocationsManager;
 use contract_client::{AllocationsClient, WorkersClient};
+use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{Keypair, PeerId};
 
 use crate::config::{Config, DatasetId};
 use crate::network_state::NetworkState;
 use crate::query::{Query, QueryResult};
-use crate::server::{Message, Server};
+use crate::server::{Message, MsgContent, Server};
 
 pub struct QueryClient {
     network_state: Arc<RwLock<NetworkState>>,
@@ -69,7 +70,7 @@ pub async fn get_client(
     config: Config,
     keypair: Keypair,
     msg_receiver: mpsc::Receiver<Message>,
-    msg_sender: mpsc::Sender<Message>,
+    transport_handle: P2PTransportHandle<MsgContent>,
     workers_client: Box<dyn WorkersClient>,
     allocations_client: Box<dyn AllocationsClient>,
     allocations_db_path: PathBuf,
@@ -91,7 +92,7 @@ pub async fn get_client(
 
     let server = Server::new(
         msg_receiver,
-        msg_sender,
+        transport_handle,
         query_receiver,
         network_state.clone(),
         allocations_manager,

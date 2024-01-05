@@ -2,7 +2,7 @@ use sha3::{Digest, Sha3_256};
 
 use subsquid_network_transport::{Keypair, PeerId, PublicKey};
 
-use crate::{PingV1, PingV2, ProstMsg, Query, QueryExecuted};
+use crate::{PingV2, ProstMsg, Query, QueryExecuted};
 
 pub fn msg_hash<M: ProstMsg>(msg: &M) -> Vec<u8> {
     let mut result = [0u8; 32];
@@ -36,16 +36,6 @@ pub trait SignedMessage: ProstMsg + Sized {
 
     fn verify_signature(&mut self, peer_id: &PeerId) -> bool {
         verify_signature(peer_id, self)
-    }
-}
-
-impl SignedMessage for PingV1 {
-    fn detach_signature(&mut self) -> Vec<u8> {
-        std::mem::take(&mut self.signature)
-    }
-
-    fn attach_signature(&mut self, signature: Vec<u8>) {
-        self.signature = signature;
     }
 }
 

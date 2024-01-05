@@ -8,5 +8,6 @@ base64 = "0.21"
 log = "0.4"
 parking_lot = "0.12"
 rand = "0.8"
+serde = "1"
 
 subsquid-messages = { version = "0.1", path = "../messages" }

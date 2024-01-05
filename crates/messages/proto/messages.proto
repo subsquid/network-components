@@ -5,20 +5,16 @@ import "google/protobuf/empty.proto";
 message Envelope {
   oneof msg {
     // router <-> worker
-    PingV1 ping_v1 = 1 [deprecated = true];
-    WorkerState state_update = 2 [deprecated = true];
     Pong pong = 3;
     PingV2 ping_v2 = 4;
 
     // client <-> worker
     Query query = 5;
     QueryResult query_result = 6;
-    RangeSet dataset_state = 7;
 
     // client metrics
     QuerySubmitted query_submitted = 8;
     QueryFinished query_finished = 9;
-    QueryExecuted query_executed = 10 [deprecated = true];
 
     // collector <-> worker
     QueryLogs query_logs = 11;
@@ -37,16 +33,6 @@ message RangeSet {
 
 message WorkerState {
   map<string, RangeSet> datasets = 1;
-}
-
-message PingV1 {
-  string worker_id = 1;
-  string worker_url = 2;
-  WorkerState state = 3;
-  bool pause = 4;
-  uint64 stored_bytes = 5;
-  string version = 6;
-  bytes signature = 7;
 }
 
 message DatasetRanges {

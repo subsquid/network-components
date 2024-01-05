@@ -7,7 +7,7 @@ use tokio::task::JoinHandle;
 
 use subsquid_messages::envelope::Msg;
 use subsquid_messages::signatures::{msg_hash, SignedMessage};
-use subsquid_messages::{Envelope, PingV1, PingV2, Pong, ProstMsg};
+use subsquid_messages::{Envelope, PingV2, Pong, ProstMsg};
 use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{MsgContent as MsgContentT, PeerId};
 
@@ -85,26 +85,11 @@ impl Server {
             Err(e) => return log::warn!("Error decoding message: {e:?} peer_id={peer_id}"),
         };
         match envelope.msg {
-            Some(Msg::PingV1(msg)) => self.ping_v1(peer_id, msg).await,
             Some(Msg::PingV2(msg)) => self.ping_v2(peer_id, msg).await,
             Some(Msg::QuerySubmitted(msg)) => self.write_metrics(peer_id, msg).await,
             Some(Msg::QueryFinished(msg)) => self.write_metrics(peer_id, msg).await,
             _ => log::warn!("Unexpected msg received: {envelope:?}"),
         };
-    }
-
-    async fn ping_v1(&mut self, peer_id: PeerId, msg: PingV1) {
-        if peer_id.to_string() != msg.worker_id {
-            return log::warn!("Worker ID mismatch in ping");
-        }
-        let ping_hash = msg_hash(&msg);
-        let status = self.scheduler.write().await.ping_v1(peer_id, msg.clone());
-        self.write_metrics(peer_id, msg).await;
-        let pong = Msg::Pong(Pong {
-            ping_hash,
-            status: Some(status),
-        });
-        self.send_msg(peer_id, pong).await;
     }
 
     async fn ping_v2(&mut self, peer_id: PeerId, mut msg: PingV2) {
@@ -116,8 +101,7 @@ impl Server {
             return log::warn!("Worker ID mismatch in ping");
         }
         if !msg.verify_signature(&peer_id) {
-            // TODO: Add return to reject ping with invalid signatures
-            log::warn!("Invalid ping signature");
+            return log::warn!("Invalid ping signature");
         }
         let ping_hash = msg_hash(&msg);
         let status = self.scheduler.write().await.ping_v2(peer_id, msg.clone());

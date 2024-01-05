@@ -12,8 +12,8 @@ use crate::allocations::AllocationsManager;
 use contract_client::WorkersClient;
 use subsquid_messages::signatures::SignedMessage;
 use subsquid_messages::{
-    envelope::Msg, query_finished, query_result, Envelope, PingV1, PingV2, ProstMsg,
-    Query as QueryMsg, QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, SizeAndHash,
+    envelope::Msg, query_finished, query_result, Envelope, PingV2, ProstMsg, Query as QueryMsg,
+    QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, SizeAndHash,
 };
 use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{Keypair, MsgContent as MsgContentT, PeerId};
@@ -314,31 +314,12 @@ impl Server {
         let Envelope { msg } = Envelope::decode(content.as_slice())?;
         match msg {
             Some(Msg::QueryResult(result)) => self.query_result(peer_id, result).await?,
-            Some(Msg::PingV1(ping)) if topic.as_ref().is_some_and(|t| t == PING_TOPIC) => {
-                self.ping_v1(peer_id, ping).await
-            }
             Some(Msg::PingV2(ping)) if topic.as_ref().is_some_and(|t| t == PING_TOPIC) => {
                 self.ping_v2(peer_id, ping).await
             }
             _ => log::warn!("Unexpected message received: {msg:?}"),
         }
         Ok(())
-    }
-
-    async fn ping_v1(&mut self, peer_id: PeerId, ping: PingV1) {
-        log::debug!("Got ping from {peer_id}");
-        log::trace!("Ping from {peer_id}: {ping:?}");
-        let worker_state = ping
-            .state
-            .map(|s| s.datasets)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(url, ranges)| (DatasetId::from_url(url), ranges))
-            .collect();
-        self.network_state
-            .write()
-            .await
-            .update_dataset_states(peer_id, worker_state);
     }
 
     async fn ping_v2(&mut self, peer_id: PeerId, ping: PingV2) {

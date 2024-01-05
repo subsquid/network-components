@@ -71,7 +71,7 @@ pub struct Cli {
         help = "Choose which metrics should be printed.",
         value_delimiter = ',',
         num_args = 0..,
-        default_value = "QuerySubmitted,QueryFinished,QueryExecuted,WorkersSnapshot"
+        default_value = "QuerySubmitted,QueryFinished,WorkersSnapshot"
     )]
     pub metrics: Vec<String>,
 

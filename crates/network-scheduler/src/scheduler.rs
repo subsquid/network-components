@@ -12,7 +12,7 @@ use serde_with::{serde_as, TimestampMilliSeconds};
 
 use contract_client::{Address, Worker};
 use subsquid_messages::range::RangeSet;
-use subsquid_messages::{pong::Status as WorkerStatus, PingV1, PingV2};
+use subsquid_messages::{pong::Status as WorkerStatus, PingV2};
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;
@@ -60,14 +60,6 @@ impl WorkerState {
 
     fn time_since_last_ping(&self) -> Option<Duration> {
         self.last_ping.and_then(|ping| ping.elapsed().ok())
-    }
-
-    /// Register ping msg from a worker.
-    pub fn ping_v1(&mut self, msg: PingV1) {
-        self.last_ping = Some(SystemTime::now());
-        self.version = Some(msg.version);
-        self.stored_ranges = msg.state.unwrap_or_default().datasets;
-        self.stored_bytes = msg.stored_bytes;
     }
 
     /// Register ping msg from a worker.
@@ -252,27 +244,6 @@ impl Scheduler {
                         .remove_unit(unit_id, unit_size)
                 });
         }
-    }
-
-    /// Register ping msg from a worker. Returns worker status if ping was accepted, otherwise None
-    pub fn ping_v1(&mut self, worker_id: PeerId, msg: PingV1) -> WorkerStatus {
-        if !SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == msg.version) {
-            log::debug!("Worker {worker_id} version not supported: {}", msg.version);
-            return WorkerStatus::UnsupportedVersion(());
-        }
-        let worker_state = match self.worker_states.get_mut(&worker_id) {
-            None => {
-                log::debug!("Worker {worker_id} not registered");
-                return WorkerStatus::NotRegistered(());
-            }
-            Some(worker_state) => worker_state,
-        };
-        worker_state.ping_v1(msg);
-        if worker_state.jailed {
-            return WorkerStatus::Jailed(());
-        }
-        let state = chunks_to_worker_state(worker_state.assigned_chunks(&self.known_units));
-        WorkerStatus::Active(state)
     }
 
     /// Register ping msg from a worker. Returns worker status if ping was accepted, otherwise None

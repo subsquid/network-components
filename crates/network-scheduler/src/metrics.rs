@@ -7,7 +7,7 @@ use serde_with::{serde_as, TimestampMilliSeconds};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use subsquid_messages::{PingV1, PingV2, QueryExecuted, QueryFinished, QuerySubmitted};
+use subsquid_messages::{PingV2, QueryFinished, QuerySubmitted};
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Cli;
@@ -28,8 +28,6 @@ impl Metrics {
         let expected_sender = match &event {
             MetricsEvent::QuerySubmitted(QuerySubmitted { client_id, .. }) => Some(client_id),
             MetricsEvent::QueryFinished(QueryFinished { client_id, .. }) => Some(client_id),
-            MetricsEvent::QueryExecuted(QueryExecuted { worker_id, .. }) => Some(worker_id),
-            MetricsEvent::Ping(PingV1 { worker_id, .. }) => Some(worker_id),
             _ => None,
         };
         anyhow::ensure!(
@@ -53,10 +51,9 @@ impl Metrics {
 #[derive(Debug, Clone, Serialize, EnumFrom)]
 #[serde(tag = "event")]
 pub enum MetricsEvent {
-    Ping(PingV1),
+    Ping(PingV2),
     QuerySubmitted(QuerySubmitted),
     QueryFinished(QueryFinished),
-    QueryExecuted(QueryExecuted),
     WorkersSnapshot { active_workers: Vec<WorkerState> },
 }
 
@@ -66,29 +63,8 @@ impl MetricsEvent {
             MetricsEvent::Ping(_) => "Ping",
             MetricsEvent::QuerySubmitted(_) => "QuerySubmitted",
             MetricsEvent::QueryFinished(_) => "QueryFinished",
-            MetricsEvent::QueryExecuted(_) => "QueryExecuted",
             MetricsEvent::WorkersSnapshot { .. } => "WorkersSnapshot",
         }
-    }
-}
-
-impl From<PingV2> for MetricsEvent {
-    fn from(value: PingV2) -> Self {
-        Self::Ping(PingV1 {
-            worker_id: value.worker_id.unwrap_or_default(),
-            worker_url: "".to_string(),
-            state: Some(subsquid_messages::WorkerState {
-                datasets: value
-                    .stored_ranges
-                    .into_iter()
-                    .map(|r| (r.url, r.ranges.into()))
-                    .collect(),
-            }),
-            pause: false,
-            stored_bytes: value.stored_bytes.unwrap_or_default(),
-            version: value.version.unwrap_or_default(),
-            signature: value.signature,
-        })
     }
 }
 

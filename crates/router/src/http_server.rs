@@ -13,8 +13,8 @@ use axum::{Json, Router};
 use prometheus::{gather, Encoder, TextEncoder};
 use tracing::info;
 
-use router_controller::controller::Controller;
-use subsquid_messages::{PingV1 as Ping, WorkerState};
+use router_controller::controller::{Controller, Ping};
+use subsquid_messages::WorkerState;
 
 mod middleware;
 

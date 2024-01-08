@@ -27,7 +27,7 @@ pub struct RpcArgs {
     pub keystore_password: String,
     #[arg(
         long,
-        env,
+        env = "MAX_GET_LOG_BLOCKS",
         help = "Maximum number of blocks to scan for events in a single RPC call",
         default_value = "1000000000"
     )]

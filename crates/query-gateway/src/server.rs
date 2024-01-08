@@ -12,8 +12,8 @@ use crate::allocations::AllocationsManager;
 use contract_client::WorkersClient;
 use subsquid_messages::signatures::SignedMessage;
 use subsquid_messages::{
-    envelope::Msg, query_finished, query_result, Envelope, PingV2, ProstMsg, Query as QueryMsg,
-    QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, SizeAndHash,
+    envelope::Msg, query_finished, query_result, Envelope, PingV2 as Ping, ProstMsg,
+    Query as QueryMsg, QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, SizeAndHash,
 };
 use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{Keypair, MsgContent as MsgContentT, PeerId};
@@ -27,6 +27,8 @@ pub type MsgContent = Box<[u8]>;
 pub type Message = subsquid_network_transport::Message<MsgContent>;
 
 const COMP_UNITS_PER_QUERY: u32 = 1;
+
+pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.2.0"];
 
 #[derive(Debug)]
 struct Task {
@@ -315,16 +317,22 @@ impl Server {
         match msg {
             Some(Msg::QueryResult(result)) => self.query_result(peer_id, result).await?,
             Some(Msg::PingV2(ping)) if topic.as_ref().is_some_and(|t| t == PING_TOPIC) => {
-                self.ping_v2(peer_id, ping).await
+                self.ping(peer_id, ping).await
             }
             _ => log::warn!("Unexpected message received: {msg:?}"),
         }
         Ok(())
     }
 
-    async fn ping_v2(&mut self, peer_id: PeerId, ping: PingV2) {
+    async fn ping(&mut self, peer_id: PeerId, ping: Ping) {
         log::debug!("Got ping from {peer_id}");
         log::trace!("Ping from {peer_id}: {ping:?}");
+
+        let version = ping.version.clone().unwrap_or_default();
+        if !SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == version) {
+            log::debug!("Worker {peer_id} version not supported: {}", version);
+        }
+
         let worker_state = ping
             .stored_ranges
             .into_iter()

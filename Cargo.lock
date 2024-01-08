@@ -4135,7 +4135,7 @@ checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
 name = "logs-collector"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4424,7 +4424,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "0.1.7"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4435,6 +4435,7 @@ dependencies = [
  "contract-client",
  "derive-enum-from-into",
  "env_logger",
+ "futures",
  "hex",
  "iter_num_tools",
  "itertools 0.12.0",
@@ -5237,7 +5238,7 @@ checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "query-gateway"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "axum",

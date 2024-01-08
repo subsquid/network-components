@@ -7,7 +7,7 @@ use tokio::task::JoinHandle;
 
 use subsquid_messages::envelope::Msg;
 use subsquid_messages::signatures::{msg_hash, SignedMessage};
-use subsquid_messages::{Envelope, PingV2, Pong, ProstMsg};
+use subsquid_messages::{Envelope, PingV2 as Ping, Pong, ProstMsg};
 use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{MsgContent as MsgContentT, PeerId};
 
@@ -60,6 +60,7 @@ impl Server {
         let metrics_server_task = self.spawn_metrics_server_task(metrics_listen_addr);
         let jail_inactive_task = self.spawn_jail_inactive_workers_task();
         let jail_stale_task = self.spawn_jail_stale_workers_task();
+        let jail_unreachable_task = self.spawn_jail_unreachable_workers_task();
         loop {
             tokio::select! {
                 Some(msg) = self.incoming_messages.recv() => self.handle_message(msg).await,
@@ -73,6 +74,7 @@ impl Server {
         metrics_server_task.abort();
         jail_inactive_task.abort();
         jail_stale_task.abort();
+        jail_unreachable_task.abort();
     }
 
     async fn handle_message(&mut self, msg: Message) {
@@ -85,14 +87,14 @@ impl Server {
             Err(e) => return log::warn!("Error decoding message: {e:?} peer_id={peer_id}"),
         };
         match envelope.msg {
-            Some(Msg::PingV2(msg)) => self.ping_v2(peer_id, msg).await,
+            Some(Msg::PingV2(msg)) => self.ping(peer_id, msg).await,
             Some(Msg::QuerySubmitted(msg)) => self.write_metrics(peer_id, msg).await,
             Some(Msg::QueryFinished(msg)) => self.write_metrics(peer_id, msg).await,
             _ => log::warn!("Unexpected msg received: {envelope:?}"),
         };
     }
 
-    async fn ping_v2(&mut self, peer_id: PeerId, mut msg: PingV2) {
+    async fn ping(&mut self, peer_id: PeerId, mut msg: Ping) {
         if !msg
             .worker_id
             .as_ref()
@@ -104,7 +106,7 @@ impl Server {
             return log::warn!("Invalid ping signature");
         }
         let ping_hash = msg_hash(&msg);
-        let status = self.scheduler.write().await.ping_v2(peer_id, msg.clone());
+        let status = self.scheduler.write().await.ping(peer_id, msg.clone());
         self.write_metrics(peer_id, msg).await;
         let pong = Msg::Pong(Pong {
             ping_hash,
@@ -175,11 +177,27 @@ impl Server {
     fn spawn_worker_monitoring_task(&self) -> JoinHandle<()> {
         let scheduler = self.scheduler.clone();
         let metrics_writer = self.metrics_writer.clone();
-        let monitoring_interval = Config::get().worker_inactive_timeout / 2;
+        let transport_handle = self.transport_handle.clone();
+        let monitoring_interval = Config::get().worker_monitoring_interval();
         tokio::spawn(async move {
             log::info!("Starting monitoring task");
             loop {
                 tokio::time::sleep(monitoring_interval).await;
+
+                let workers = scheduler.read().await.workers_to_dial();
+                let futures = workers.into_iter().map(|worker_id| {
+                    let scheduler = scheduler.clone();
+                    let transport_handle = transport_handle.clone();
+                    async move {
+                        log::info!("Dialing worker {worker_id}");
+                        match transport_handle.dial_peer(worker_id).await {
+                            Ok(res) => scheduler.write().await.worker_dialed(worker_id, res),
+                            Err(e) => log::error!("Error dialing worker: {e:?}"),
+                        }
+                    }
+                });
+                futures::future::join_all(futures).await;
+
                 let workers = scheduler.read().await.active_workers();
                 if let Err(e) = metrics_writer
                     .write()
@@ -218,6 +236,16 @@ impl Server {
             loop {
                 tokio::time::sleep(Config::get().worker_stale_timeout).await;
                 scheduler.write().await.jail_stale_workers();
+            }
+        })
+    }
+
+    fn spawn_jail_unreachable_workers_task(&self) -> JoinHandle<()> {
+        let scheduler = self.scheduler.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Config::get().worker_unreachable_timeout).await;
+                scheduler.write().await.jail_unreachable_workers();
             }
         })
     }

@@ -1,6 +1,6 @@
 [package]
 name = "network-scheduler"
-version = "0.1.7"
+version = "0.2.0"
 edition = "2021"
 
 [dependencies]
@@ -12,6 +12,7 @@ axum = { version = "0.6", features = ["json"] }
 clap = { version = "4", features = ["derive", "env"] }
 derive-enum-from-into = "0.1"
 env_logger = "0.10"
+futures = "0.3"
 hex = "0.4"
 itertools = "0.12"
 iter_num_tools = "0.7"

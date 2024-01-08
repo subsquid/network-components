@@ -13,7 +13,8 @@ use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;
 use crate::data_chunk::{chunks_to_worker_state, DataChunk};
-use crate::scheduler::{Scheduler, WorkerState};
+use crate::scheduler::Scheduler;
+use crate::worker_state::WorkerState;
 
 #[derive(Debug, Clone, Serialize)]
 struct ChunkStatus {

@@ -17,6 +17,7 @@ mod scheduler;
 mod scheduling_unit;
 mod server;
 mod storage;
+mod worker_state;
 
 const PING_TOPIC: &str = "worker_ping";
 

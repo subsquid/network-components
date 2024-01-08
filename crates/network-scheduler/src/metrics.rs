@@ -7,11 +7,11 @@ use serde_with::{serde_as, TimestampMilliSeconds};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use subsquid_messages::{PingV2, QueryFinished, QuerySubmitted};
+use subsquid_messages::{PingV2 as Ping, QueryFinished, QuerySubmitted};
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Cli;
-use crate::scheduler::WorkerState;
+use crate::worker_state::WorkerState;
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize)]
@@ -28,6 +28,7 @@ impl Metrics {
         let expected_sender = match &event {
             MetricsEvent::QuerySubmitted(QuerySubmitted { client_id, .. }) => Some(client_id),
             MetricsEvent::QueryFinished(QueryFinished { client_id, .. }) => Some(client_id),
+            MetricsEvent::Ping(Ping { worker_id, .. }) => worker_id.as_ref(),
             _ => None,
         };
         anyhow::ensure!(
@@ -51,7 +52,7 @@ impl Metrics {
 #[derive(Debug, Clone, Serialize, EnumFrom)]
 #[serde(tag = "event")]
 pub enum MetricsEvent {
-    Ping(PingV2),
+    Ping(Ping),
     QuerySubmitted(QuerySubmitted),
     QueryFinished(QueryFinished),
     WorkersSnapshot { active_workers: Vec<WorkerState> },

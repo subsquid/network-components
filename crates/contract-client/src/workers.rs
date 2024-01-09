@@ -20,6 +20,10 @@ lazy_static! {
             .unwrap_or("0x6867E96A0259E68A571a368C0b8d733Aa56E3915")
             .parse()
             .expect("Invalid WorkerRegistration contract address");
+    pub static ref MULTICALL_CONTRACT_ADDR: Option<Address> =
+        std::env::var("MULTICALL_CONTRACT_ADDR")
+            .ok()
+            .map(|addr| addr.parse().expect("Invalid Multicall contract address"));
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -79,7 +83,7 @@ impl<M: JsonRpcClient + Clone + 'static> Client for RpcProvider<M> {
     async fn active_workers(&self) -> Result<Vec<Worker>, ClientError> {
         let workers_call = self.contract.method("getActiveWorkers", ())?;
         let onchain_ids_call = self.contract.method("getActiveWorkerIds", ())?;
-        let mut multicall = Multicall::new(self.client.clone(), None).await?;
+        let mut multicall = Multicall::new(self.client.clone(), *MULTICALL_CONTRACT_ADDR).await?;
         multicall
             .add_call::<Vec<worker_registration::Worker>>(workers_call, false)
             .add_call::<Vec<U256>>(onchain_ids_call, false);

@@ -22,13 +22,13 @@ lazy_static! {
     pub static ref GATEWAY_REGISTRY_CONTRACT_ADDR: Address =
         std::env::var("GATEWAY_REGISTRY_CONTRACT_ADDR")
             .as_deref()
-            .unwrap_or("0x9657d3dB87963d5e17dDa0746972E6958401Ab2a")
+            .unwrap_or("0xC168fD9298141E3a19c624DF5692ABeeb480Fb94")
             .parse()
             .expect("Invalid GatewayRegistry contract address");
     pub static ref GATEWAY_CONTRACT_CREATION_BLOCK: u64 =
         std::env::var("GATEWAY_CONTRACT_CREATION_BLOCK")
             .as_deref()
-            .unwrap_or("53976941")
+            .unwrap_or("6010034")
             .parse()
             .expect("Invalid GatewayRegistry creation block");
 }

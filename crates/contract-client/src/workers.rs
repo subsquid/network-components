@@ -17,7 +17,7 @@ lazy_static! {
     pub static ref WORKER_REGISTRATION_CONTRACT_ADDR: Address =
         std::env::var("WORKER_REGISTRATION_CONTRACT_ADDR")
             .as_deref()
-            .unwrap_or("0x6867E96A0259E68A571a368C0b8d733Aa56E3915")
+            .unwrap_or("0x7Bf0B1ee9767eAc70A857cEbb24b83115093477F")
             .parse()
             .expect("Invalid WorkerRegistration contract address");
     pub static ref MULTICALL_CONTRACT_ADDR: Option<Address> =

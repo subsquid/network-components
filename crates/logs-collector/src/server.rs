@@ -64,7 +64,7 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
         };
         match envelope.msg {
             Some(Msg::QueryLogs(query_logs)) => self.collect_logs(peer_id, query_logs).await,
-            _ => log::warn!("Unexpected msg received: {envelope:?}"),
+            _ => log::debug!("Unexpected msg received: {envelope:?}"),
         }
     }
 

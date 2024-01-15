@@ -319,7 +319,7 @@ impl Server {
             Some(Msg::PingV2(ping)) if topic.as_ref().is_some_and(|t| t == PING_TOPIC) => {
                 self.ping(peer_id, ping).await
             }
-            _ => log::warn!("Unexpected message received: {msg:?}"),
+            _ => log::debug!("Unexpected message received: {msg:?}"),
         }
         Ok(())
     }

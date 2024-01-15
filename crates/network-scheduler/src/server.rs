@@ -90,7 +90,7 @@ impl Server {
             Some(Msg::PingV2(msg)) => self.ping(peer_id, msg).await,
             Some(Msg::QuerySubmitted(msg)) => self.write_metrics(peer_id, msg).await,
             Some(Msg::QueryFinished(msg)) => self.write_metrics(peer_id, msg).await,
-            _ => log::warn!("Unexpected msg received: {envelope:?}"),
+            _ => log::debug!("Unexpected msg received: {envelope:?}"),
         };
     }
 

@@ -97,7 +97,7 @@ impl<M: JsonRpcClient + Clone + 'static> Client for RpcProvider<M> {
                 |(worker, onchain_id)| match Worker::new(worker, onchain_id) {
                     Ok(worker) => Some(worker),
                     Err(e) => {
-                        log::error!("Error reading worker from chain: {e:?}");
+                        log::debug!("Error reading worker from chain: {e:?}");
                         None
                     }
                 },

@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
@@ -184,6 +185,7 @@ impl Server {
             loop {
                 tokio::time::sleep(monitoring_interval).await;
 
+                log::info!("Dialing workers...");
                 let workers = scheduler.read().await.workers_to_dial();
                 let futures = workers.into_iter().map(|worker_id| {
                     let scheduler = scheduler.clone();
@@ -197,6 +199,7 @@ impl Server {
                     }
                 });
                 futures::future::join_all(futures).await;
+                log::info!("Dialing workers complete.");
 
                 let workers = scheduler.read().await.active_workers();
                 if let Err(e) = metrics_writer

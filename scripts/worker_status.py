@@ -8,6 +8,7 @@ CHUNKS_URL = "https://scheduler.testnet.subsquid.io/chunks"
 
 
 def main(worker_id):
+    print("Getting active workers...")
     pings = requests.get(PINGS_URL)
     pings.raise_for_status()
     for ping in pings.json():
@@ -16,6 +17,8 @@ def main(worker_id):
                 'last_ping': datetime.fromtimestamp(ping['last_ping'] / 1000.0).isoformat(),
                 'version': ping['version'],
                 'stored_bytes': ping['stored_bytes'],
+                'jailed': ping['jailed'],
+                'reachable': ping['last_dial_ok'],
             }
             break
     else:
@@ -27,6 +30,7 @@ def main(worker_id):
     status['downloaded_chunks_count'] = 0
     status['downloaded_chunks_size'] = 0
 
+    print("Getting assigned chunks...")
     chunks = requests.get(CHUNKS_URL)
     for ds_chunks in chunks.json().values():
         for chunk in ds_chunks:

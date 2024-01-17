@@ -140,7 +140,7 @@ impl Controller {
                 let now = SystemTime::now();
 
                 if let Some((url, request_time)) = stat.last_requests.remove(&key) {
-                    if now.duration_since(request_time).unwrap() < Duration::from_millis(1500) {
+                    if now.duration_since(request_time).unwrap() < Duration::from_secs(90) {
                         candidates.retain(|info| info.url != url);
                     }
                 }

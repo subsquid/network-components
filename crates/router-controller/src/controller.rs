@@ -13,6 +13,7 @@ use serde::Deserialize;
 use crate::atom::Atom;
 use crate::data_chunk::DataChunk;
 use crate::range::{Range, RangeSet};
+use crate::rate::RateMeter;
 
 pub type WorkerId = String;
 pub type Url = String;
@@ -62,10 +63,17 @@ struct Schedule {
 }
 
 
+struct WorkersStat {
+    workers_rate: HashMap<Url, RateMeter>,
+    last_requests: HashMap<(Dataset, u32), (Url, SystemTime)>,
+}
+
+
 pub struct Controller {
     schedule: parking_lot::Mutex<Schedule>,
     workers: Atom<Vec<Worker>>,
-    datasets_height: HashMap<String, AtomicI64>,
+    workers_stat: parking_lot::Mutex<WorkersStat>,
+    datasets_height: HashMap<Dataset, AtomicI64>,
     managed_datasets: HashMap<String, Dataset>,
     managed_workers: HashSet<WorkerId>,
     data_replication: usize,
@@ -108,7 +116,7 @@ impl Controller {
 
         let workers = self.workers.get();
 
-        let candidates = {
+        let mut candidates = {
             let managed: Vec<_> = workers.iter()
                 .filter(|w| w.is_managed)
                 .filter_map(select_candidate)
@@ -126,9 +134,34 @@ impl Controller {
         match candidates.len() {
             0 => None,
             1 => Some(&candidates[0].url),
-            len => {
-                let i: usize = rand::random();
-                Some(&candidates[i % len].url)
+            _ => {
+                let mut stat = self.workers_stat.lock();
+                let key = (dataset.clone(), first_block);
+                let now = SystemTime::now();
+
+                if let Some((url, request_time)) = stat.last_requests.remove(&key) {
+                    if now.duration_since(request_time).unwrap() < Duration::from_millis(1500) {
+                        candidates.retain(|info| info.url != url);
+                    }
+                }
+
+                candidates.sort_by_key(|info| {
+                    let rate = stat.workers_rate.get(&info.url)
+                        .map(|rate| rate.get_rate(None))
+                        .unwrap_or(0);
+                    rate
+                });
+                let least_used_worker = &candidates[candidates.len() - 1];
+                stat.last_requests.insert(key, (least_used_worker.url.clone(), now));
+                stat.workers_rate.entry(least_used_worker.url.clone())
+                    .and_modify(|rate| rate.inc(1, None))
+                    .or_insert_with(|| {
+                        let mut rate = RateMeter::new();
+                        rate.inc(1, None);
+                        rate
+                    });
+
+                Some(&least_used_worker.url)
             }
         }.map(|url| Self::format_worker_url(url, dataset))
     }
@@ -485,6 +518,10 @@ impl ControllerBuilder {
                 .map(|name| (name.clone(), AtomicI64::new(INITIAL_VALUE)))
                 .collect(),
             workers: Atom::new(Arc::new(Vec::new())),
+            workers_stat: parking_lot::Mutex::new(WorkersStat {
+                workers_rate: HashMap::new(),
+                last_requests: HashMap::new(),
+            }),
             managed_datasets: self.managed_datasets.clone(),
             managed_workers: self.managed_workers.clone(),
             data_replication: self.replication,

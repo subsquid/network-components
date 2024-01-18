@@ -392,6 +392,7 @@ impl Server {
     }
 }
 
+#[allow(clippy::borrowed_box)]
 async fn update_workers(
     workers_client: &Box<dyn WorkersClient>,
     network_state: &Arc<RwLock<NetworkState>>,

@@ -37,7 +37,7 @@ impl DatasetState {
             .cloned()
             .flat_map(|r| r.ranges)
             .into();
-        match range_set.ranges.get(0) {
+        match range_set.ranges.first() {
             Some(range) if range.begin == 0 => range.end,
             _ => 0,
         }

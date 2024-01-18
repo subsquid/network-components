@@ -1,4 +1,4 @@
-use crate::config::ComputeUnitsConfig;
+use crate::config::Config;
 use contract_client::{Allocation, AllocationsClient, Worker};
 use rusqlite::Transaction;
 use std::collections::HashSet;
@@ -9,7 +9,6 @@ use tokio_rusqlite::Connection;
 pub struct AllocationsManager {
     client: Box<dyn AllocationsClient>,
     db_conn: Connection,
-    config: ComputeUnitsConfig,
     worker_peer_ids: HashSet<PeerId>,
     worker_onchain_ids: HashSet<u32>,
 }
@@ -18,7 +17,6 @@ impl AllocationsManager {
     pub async fn new(
         client: Box<dyn AllocationsClient>,
         db_path: impl AsRef<Path>,
-        config: ComputeUnitsConfig,
     ) -> anyhow::Result<Self> {
         log::info!("Initializing allocations manager");
         let db_conn = Connection::open(&db_path).await?;
@@ -36,7 +34,6 @@ impl AllocationsManager {
         Ok(Self {
             client,
             db_conn,
-            config,
             worker_peer_ids: Default::default(),
             worker_onchain_ids: Default::default(),
         })
@@ -116,7 +113,7 @@ impl AllocationsManager {
     /// Get onchain IDs of workers that need to be allocated more compute units
     async fn get_worker_ids_to_allocate(&self) -> anyhow::Result<Vec<u32>> {
         // Select workers which have less than minimum remaining CUs
-        let min_cus = self.config.minimum;
+        let min_cus = Config::get().compute_units.minimum;
         let mut worker_ids = self
             .db_exec(move |tx| {
                 let mut select_stmt = tx.prepare(sql::GET_WORKERS_TO_ALLOCATE)?;
@@ -143,12 +140,13 @@ impl AllocationsManager {
 
         // Make new allocations if necessary
         let worker_ids_to_allocate = self.get_worker_ids_to_allocate().await?;
+        let cus_to_allocate = Config::get().compute_units.allocate.into();
         log::info!("{} workers need allocation", worker_ids_to_allocate.len());
         let allocations = worker_ids_to_allocate
             .into_iter()
             .map(|id| Allocation {
                 worker_onchain_id: id.into(),
-                computation_units: self.config.allocate.into(),
+                computation_units: cus_to_allocate,
             })
             .collect();
         self.client.allocate_cus(allocations).await?;

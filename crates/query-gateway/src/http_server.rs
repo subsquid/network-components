@@ -15,7 +15,7 @@ use subsquid_messages::OkResult;
 use subsquid_network_transport::PeerId;
 
 use crate::client::QueryClient;
-use crate::config::DatasetId;
+use crate::config::{Config, DatasetId};
 use crate::query::QueryResult;
 
 async fn get_height(
@@ -23,7 +23,7 @@ async fn get_height(
     Extension(client): Extension<Arc<QueryClient>>,
 ) -> impl IntoResponse {
     log::debug!("Get height dataset={dataset}");
-    let dataset_id = match client.get_dataset_id(&dataset).await {
+    let dataset_id = match Config::get().dataset_id(&dataset) {
         Some(dataset_id) => dataset_id,
         None => return (StatusCode::NOT_FOUND, format!("Unknown dataset: {dataset}")),
     };
@@ -43,7 +43,7 @@ async fn get_worker(
     Extension(client): Extension<Arc<QueryClient>>,
 ) -> impl IntoResponse {
     log::debug!("Get worker dataset={dataset} start_block={start_block}");
-    let dataset_id = match client.get_dataset_id(&dataset).await {
+    let dataset_id = match Config::get().dataset_id(&dataset) {
         Some(dataset_id) => dataset_id,
         None => return (StatusCode::NOT_FOUND, format!("Unknown dataset: {dataset}")),
     };

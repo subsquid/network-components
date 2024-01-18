@@ -17,14 +17,9 @@ use crate::server::{Message, MsgContent, Server};
 pub struct QueryClient {
     network_state: Arc<RwLock<NetworkState>>,
     query_sender: mpsc::Sender<Query>,
-    default_query_timeout: Duration,
 }
 
 impl QueryClient {
-    pub async fn get_dataset_id(&self, dataset: &str) -> Option<DatasetId> {
-        self.network_state.read().await.get_dataset_id(dataset)
-    }
-
     pub async fn get_height(&self, dataset_id: &DatasetId) -> Option<u32> {
         self.network_state.read().await.get_height(dataset_id)
     }
@@ -46,7 +41,7 @@ impl QueryClient {
     ) -> anyhow::Result<QueryResult> {
         let timeout = timeout
             .map(Into::into)
-            .unwrap_or(self.default_query_timeout);
+            .unwrap_or(Config::get().default_query_timeout);
         let (result_sender, result_receiver) = oneshot::channel();
         let query = Query {
             dataset_id,
@@ -67,7 +62,6 @@ impl QueryClient {
 }
 
 pub async fn get_client(
-    config: Config,
     keypair: Keypair,
     msg_receiver: mpsc::Receiver<Message>,
     transport_handle: P2PTransportHandle<MsgContent>,
@@ -76,18 +70,9 @@ pub async fn get_client(
     allocations_db_path: PathBuf,
 ) -> anyhow::Result<QueryClient> {
     let (query_sender, query_receiver) = mpsc::channel(100);
-    let network_state = Arc::new(RwLock::new(NetworkState::new(
-        config.available_datasets,
-        config.worker_inactive_threshold,
-        config.worker_greylist_time,
-    )));
+    let network_state = Arc::new(RwLock::new(NetworkState::default()));
     let allocations_manager = Arc::new(RwLock::new(
-        AllocationsManager::new(
-            allocations_client,
-            allocations_db_path,
-            config.compute_units,
-        )
-        .await?,
+        AllocationsManager::new(allocations_client, allocations_db_path).await?,
     ));
 
     let server = Server::new(
@@ -97,20 +82,12 @@ pub async fn get_client(
         network_state.clone(),
         allocations_manager,
         keypair,
-        config.scheduler_id,
-        config.send_metrics,
     );
-    tokio::spawn(server.run(
-        workers_client,
-        config.summary_print_interval,
-        config.workers_update_interval,
-        config.allocate_interval,
-    ));
+    tokio::spawn(server.run(workers_client));
 
     let client = QueryClient {
         network_state,
         query_sender,
-        default_query_timeout: config.default_query_timeout,
     };
     Ok(client)
 }

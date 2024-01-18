@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use clap::Parser;
@@ -32,15 +33,10 @@ struct Cli {
         help = "HTTP server listen addr",
         default_value = "0.0.0.0:8000"
     )]
-    http_listen: String,
+    http_listen: SocketAddr,
 
-    #[arg(
-        long = "config-path",
-        env = "CONFIG_PATH",
-        help = "Path to config file",
-        default_value = "config.yml"
-    )]
-    config: PathBuf,
+    #[arg(long, env, help = "Path to config file", default_value = "config.yml")]
+    config_path: PathBuf,
 
     #[arg(
         long,
@@ -59,8 +55,7 @@ async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info, ethers_providers=warn"))
         .init();
     let args: Cli = Cli::parse();
-    let http_listen_addr = args.http_listen.parse()?;
-    let config: Config = serde_yaml::from_slice(tokio::fs::read(args.config).await?.as_slice())?;
+    Config::read(&args.config_path).await?;
 
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
@@ -72,11 +67,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Subscribe to worker set updates (from blockchain)
     let workers_client = contract_client::get_workers_client(&args.rpc).await?;
+    let _ = workers_client.active_workers().await?; // Check if RPC is available & properly configured
     let allocations_client = contract_client::get_allocations_client(&args.rpc).await?;
 
     // Start query client
     let query_client = client::get_client(
-        config,
         keypair,
         msg_receiver,
         transport_handle,
@@ -87,5 +82,5 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     // Start HTTP server
-    http_server::run_server(query_client, &http_listen_addr).await
+    http_server::run_server(query_client, &args.http_listen).await
 }

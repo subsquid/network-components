@@ -1,11 +1,11 @@
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use rand::prelude::IteratorRandom;
 use tabled::Tabled;
 
-use crate::config::DatasetId;
+use crate::config::{Config, DatasetId};
 use contract_client::Worker;
 use subsquid_messages::RangeSet;
 use subsquid_network_transport::PeerId;
@@ -77,29 +77,9 @@ pub struct NetworkState {
     last_pings: HashMap<PeerId, Instant>,
     worker_greylist: HashMap<PeerId, Instant>,
     registered_workers: HashSet<PeerId>,
-    available_datasets: HashMap<String, DatasetId>,
-    worker_inactive_threshold: Duration,
-    worker_greylist_time: Duration,
 }
 
 impl NetworkState {
-    pub fn new(
-        available_datasets: HashMap<String, DatasetId>,
-        worker_inactive_threshold: Duration,
-        worker_greylist_time: Duration,
-    ) -> Self {
-        Self {
-            available_datasets,
-            worker_inactive_threshold,
-            worker_greylist_time,
-            ..Default::default()
-        }
-    }
-
-    pub fn get_dataset_id(&self, dataset: &str) -> Option<DatasetId> {
-        self.available_datasets.get(dataset).cloned()
-    }
-
     pub fn find_worker(&self, dataset_id: &DatasetId, start_block: u32) -> Option<PeerId> {
         log::debug!("Looking for worker dataset_id={dataset_id}, start_block={start_block}");
         let dataset_state = match self.dataset_states.get(dataset_id) {
@@ -133,9 +113,10 @@ impl NetworkState {
         let now = Instant::now();
 
         // Check if the last ping wasn't too long ago
+        let inactive_threshold = Config::get().worker_inactive_threshold;
         match self.last_pings.get(worker_id) {
             None => return false,
-            Some(ping) if (*ping + self.worker_inactive_threshold) < now => return false,
+            Some(ping) if (*ping + inactive_threshold) < now => return false,
             _ => (),
         };
 
@@ -144,9 +125,10 @@ impl NetworkState {
         }
 
         // Check if the worker is (still) grey-listed
+        let greylist_time = Config::get().worker_greylist_time;
         !matches!(
             self.worker_greylist.get(worker_id),
-            Some(instant) if (*instant + self.worker_greylist_time) > now
+            Some(instant) if (*instant + greylist_time) > now
         )
     }
 
@@ -156,7 +138,7 @@ impl NetworkState {
         mut worker_state: HashMap<DatasetId, RangeSet>,
     ) {
         self.last_pings.insert(worker_id, Instant::now());
-        for dataset_id in self.available_datasets.values() {
+        for dataset_id in Config::get().available_datasets.values() {
             let dataset_state = worker_state
                 .remove(dataset_id)
                 .unwrap_or_else(RangeSet::empty);
@@ -184,7 +166,8 @@ impl NetworkState {
     }
 
     pub fn summary(&self) -> impl Iterator<Item = DatasetSummary> {
-        self.available_datasets
+        Config::get()
+            .available_datasets
             .iter()
             .map(|(name, id)| DatasetSummary::new(name, self.dataset_states.get(id)))
     }

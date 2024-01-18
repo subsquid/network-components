@@ -18,7 +18,7 @@ use subsquid_messages::{
 use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{Keypair, MsgContent as MsgContentT, PeerId};
 
-use crate::config::DatasetId;
+use crate::config::{Config, DatasetId};
 use crate::network_state::NetworkState;
 use crate::query::{Query, QueryResult};
 use crate::PING_TOPIC;
@@ -80,8 +80,6 @@ pub struct Server {
     network_state: Arc<RwLock<NetworkState>>,
     allocations_manager: Arc<RwLock<AllocationsManager>>,
     keypair: Keypair,
-    scheduler_id: PeerId,
-    send_metrics: bool,
 }
 
 impl Server {
@@ -92,8 +90,6 @@ impl Server {
         network_state: Arc<RwLock<NetworkState>>,
         allocations_manager: Arc<RwLock<AllocationsManager>>,
         keypair: Keypair,
-        scheduler_id: PeerId,
-        send_metrics: bool,
     ) -> Self {
         let (timeout_sender, timeout_receiver) = mpsc::channel(100);
         Self {
@@ -106,18 +102,10 @@ impl Server {
             network_state,
             allocations_manager,
             keypair,
-            scheduler_id,
-            send_metrics,
         }
     }
 
-    pub async fn run(
-        mut self,
-        workers_client: Box<dyn WorkersClient>,
-        summary_print_interval: Duration,
-        workers_update_interval: Duration,
-        allocate_interval: Duration,
-    ) {
+    pub async fn run(mut self, workers_client: Box<dyn WorkersClient>) {
         update_workers(
             &workers_client,
             &self.network_state,
@@ -132,10 +120,9 @@ impl Server {
             .await
             .map_err(|e| log::error!("Error updating allocations: {e:?}"));
 
-        let summary_task = self.spawn_summary_task(summary_print_interval);
-        let workers_update_task =
-            self.spawn_workers_update_task(workers_client, workers_update_interval);
-        let allocations_task = self.spawn_allocations_task(allocate_interval);
+        let summary_task = self.spawn_summary_task();
+        let workers_update_task = self.spawn_workers_update_task(workers_client);
+        let allocations_task = self.spawn_allocations_task();
         loop {
             let _ = tokio::select! {
                 Some(query) = self.query_receiver.recv() => self.handle_query(query)
@@ -155,7 +142,8 @@ impl Server {
         allocations_task.abort();
     }
 
-    fn spawn_summary_task(&self, summary_print_interval: Duration) -> JoinHandle<()> {
+    fn spawn_summary_task(&self) -> JoinHandle<()> {
+        let summary_print_interval = Config::get().summary_print_interval;
         let network_state = self.network_state.clone();
         tokio::task::spawn(async move {
             log::info!("Starting datasets summary task");
@@ -168,11 +156,8 @@ impl Server {
         })
     }
 
-    fn spawn_workers_update_task(
-        &self,
-        workers_client: Box<dyn WorkersClient>,
-        workers_update_interval: Duration,
-    ) -> JoinHandle<()> {
+    fn spawn_workers_update_task(&self, workers_client: Box<dyn WorkersClient>) -> JoinHandle<()> {
+        let workers_update_interval = Config::get().workers_update_interval;
         let network_state = self.network_state.clone();
         let allocations_manager = self.allocations_manager.clone();
         tokio::task::spawn(async move {
@@ -184,7 +169,8 @@ impl Server {
         })
     }
 
-    fn spawn_allocations_task(&self, allocate_interval: Duration) -> JoinHandle<()> {
+    fn spawn_allocations_task(&self) -> JoinHandle<()> {
+        let allocate_interval = Config::get().allocate_interval;
         let allocations_manager = self.allocations_manager.clone();
         tokio::task::spawn(async move {
             log::info!("Starting allocations task");
@@ -216,7 +202,7 @@ impl Server {
 
     async fn send_metrics(&mut self, msg: Msg) {
         let _ = self
-            .send_msg(self.scheduler_id, msg)
+            .send_msg(Config::get().scheduler_id, msg)
             .await
             .map_err(|e| log::error!("Failed to send metrics: {e:?}"));
     }
@@ -255,7 +241,7 @@ impl Server {
         worker_msg.sign(&self.keypair)?;
         self.send_msg(worker_id, Msg::Query(worker_msg)).await?;
 
-        if self.send_metrics {
+        if Config::get().send_metrics {
             let query_hash = SizeAndHash::compute(&query).sha3_256;
             let metrics_msg = Msg::QuerySubmitted(QuerySubmitted {
                 client_id: self.client_id(),
@@ -291,7 +277,7 @@ impl Server {
             .await
             .greylist_worker(task.worker_id);
 
-        if self.send_metrics {
+        if Config::get().send_metrics {
             let metrics_msg = Msg::QueryFinished(QueryFinished {
                 client_id: self.client_id(),
                 worker_id: task.worker_id.to_string(),
@@ -368,7 +354,7 @@ impl Server {
                 .greylist_worker(task.worker_id);
         }
 
-        if self.send_metrics {
+        if Config::get().send_metrics {
             let metrics_msg = Msg::QueryFinished(QueryFinished {
                 client_id: self.client_id(),
                 worker_id: peer_id.to_string(),

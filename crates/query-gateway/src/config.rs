@@ -4,8 +4,12 @@ use serde::Deserialize;
 use serde_with::{serde_as, DurationSeconds};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use std::path::Path;
 use std::time::Duration;
 use subsquid_network_transport::PeerId;
+use tokio::sync::OnceCell;
+
+static CONFIG: OnceCell<Config> = OnceCell::const_new();
 
 fn default_worker_inactive_threshold() -> Duration {
     Duration::from_secs(120)
@@ -94,4 +98,22 @@ pub struct Config {
     #[serde(rename = "allocate_interval_sec")]
     pub allocate_interval: Duration,
     pub compute_units: ComputeUnitsConfig,
+}
+
+impl Config {
+    pub async fn read(config_path: impl AsRef<Path>) -> anyhow::Result<()> {
+        let file_contents = tokio::fs::read(config_path).await?;
+        let config = serde_yaml::from_slice(file_contents.as_slice())?;
+        CONFIG.set(config)?;
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn get() -> &'static Self {
+        CONFIG.get().expect("Config not initialized")
+    }
+
+    pub fn dataset_id(&self, dataset: &str) -> Option<DatasetId> {
+        self.available_datasets.get(dataset).cloned()
+    }
 }

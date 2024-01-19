@@ -138,19 +138,38 @@ impl AllocationsManager {
         log::debug!("Allocations retrieved: {allocations:?}");
         self.save_allocations(allocations, last_block).await?;
 
-        // Make new allocations if necessary
+        // Get workers which need allocation and check available CUs
         let worker_ids_to_allocate = self.get_worker_ids_to_allocate().await?;
-        let cus_to_allocate = Config::get().compute_units.allocate.into();
-        log::info!("{} workers need allocation", worker_ids_to_allocate.len());
+        let cus_per_worker = Config::get().compute_units.allocate.into();
+        let available_cus = self.client.available_cus().await?;
+        log::info!(
+            "{} workers need allocation. Available compute units: {available_cus}",
+            worker_ids_to_allocate.len()
+        );
+        anyhow::ensure!(
+            available_cus >= cus_per_worker * worker_ids_to_allocate.len(),
+            "Not enough compute units available"
+        );
+
+        // Make new allocations if necessary
         let allocations = worker_ids_to_allocate
             .into_iter()
             .map(|id| Allocation {
                 worker_onchain_id: id.into(),
-                computation_units: cus_to_allocate,
+                computation_units: cus_per_worker,
             })
             .collect();
         self.client.allocate_cus(allocations).await?;
         Ok(())
+    }
+
+    /// Return total (available, allocated, spent) compute units
+    pub async fn compute_units_summary(&self) -> anyhow::Result<(u32, u32, u32)> {
+        let available = self.client.available_cus().await?.as_u32();
+        let (allocated, spent) = self
+            .db_exec(|tx| tx.query_row(sql::CUS_SUMMARY, (), |row| row.try_into()))
+            .await?;
+        Ok((available, allocated, spent))
     }
 }
 
@@ -192,4 +211,7 @@ mod sql {
     SELECT onchain_id FROM worker_allocations
     WHERE (allocated_cus - spent_cus) < ?1
     ";
+
+    pub const CUS_SUMMARY: &str =
+        "SELECT sum(allocated_cus), sum(spent_cus) FROM worker_allocations";
 }

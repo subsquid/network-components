@@ -178,6 +178,14 @@ impl Server {
                 if let Err(e) = allocations_manager.write().await.update_allocations().await {
                     log::error!("Error updating allocations: {e:?}");
                 }
+                if let Ok((available, allocated, spent)) = allocations_manager
+                    .read()
+                    .await
+                    .compute_units_summary()
+                    .await
+                {
+                    log::info!("Compute units summary: available={available}, allocated={allocated}, spent={spent}");
+                }
                 tokio::time::sleep(allocate_interval).await;
             }
         })

@@ -132,11 +132,12 @@ impl Controller {
             1 => Some(&candidates[0].url),
             len => {
                 let key = (dataset.clone(), first_block);
+                candidates.sort_by_key(|info| self.workers_rate.get_rate(&info.url));
 
                 let next_worker = if let Some(url) = self.request_tracker.get(&key) {
                     let index = candidates.iter().position(|info| info.url == url);
                     if let Some(index) = index {
-                        let worker = &candidates[index % len];
+                        let worker = &candidates[(index + 1) % len];
                         Some(worker)
                     } else {
                         None
@@ -148,7 +149,6 @@ impl Controller {
                 let worker = if let Some(worker) = next_worker {
                     worker
                 } else {
-                    candidates.sort_by_key(|info| self.workers_rate.get_rate(&info.url));
                     &candidates[candidates.len() - 1]
                 };
 

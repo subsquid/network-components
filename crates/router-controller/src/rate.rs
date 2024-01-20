@@ -4,14 +4,16 @@ use std::time::SystemTime;
 pub struct RateMeter {
     window: Vec<u32>,
     time: u64,
+    slot_duration_seconds: u64,
 }
 
 
 impl RateMeter {
-    pub fn new() -> RateMeter {
+    pub fn new(window_size: usize, slot_duration_seconds: u64) -> RateMeter {
         RateMeter {
-            window: vec![0; 37],
+            window: vec![0; window_size],
             time: 0,
+            slot_duration_seconds,
         }
     }
 
@@ -20,12 +22,12 @@ impl RateMeter {
         let now = self.to_time(now);
         let mut cutoff = now.saturating_sub(window_len);
         if self.time > cutoff {
-            while cutoff < self.time - window_len {
+            while cutoff > self.time - window_len {
                 self.window[(cutoff % window_len) as usize] = 0;
-                cutoff += 1;
+                cutoff -= 1;
             }
         } else {
-            self.window.iter_mut().for_each(|x| *x = 0);
+            self.window.fill(0);
         }
         self.window[(now % window_len) as usize] += count;
         self.time = now;
@@ -50,7 +52,7 @@ impl RateMeter {
                 .unwrap()
                 .as_secs()
         });
-        let time_value = (now / 5).max(self.time);
+        let time_value = (now / self.slot_duration_seconds).max(self.time);
         assert!(time_value > self.window.len() as u64);
         time_value
     }

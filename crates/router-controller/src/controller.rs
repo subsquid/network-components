@@ -112,7 +112,7 @@ impl Controller {
 
         let workers = self.workers.get();
 
-        let mut candidates = {
+        let candidates = {
             let managed: Vec<_> = workers.iter()
                 .filter(|w| w.is_managed)
                 .filter_map(select_candidate)
@@ -129,10 +129,13 @@ impl Controller {
 
         match candidates.len() {
             0 => None,
-            1 => Some(&candidates[0].url),
+            1 => {
+                let worker = &candidates[0];
+                self.workers_rate.inc(&worker.url);
+                Some(&worker.url)
+            },
             len => {
                 let key = (dataset.clone(), first_block);
-                candidates.sort_by_key(|info| self.workers_rate.get_rate(&info.url));
 
                 let next_worker = if let Some(url) = self.request_tracker.get(&key) {
                     let index = candidates.iter().position(|info| info.url == url);
@@ -149,7 +152,10 @@ impl Controller {
                 let worker = if let Some(worker) = next_worker {
                     worker
                 } else {
-                    &candidates[candidates.len() - 1]
+                    let least_used_worker = candidates
+                        .iter()
+                        .min_by_key(|info| self.workers_rate.get_rate(&info.url));
+                    least_used_worker.unwrap()
                 };
 
                 self.request_tracker.insert(key, worker.url.clone());

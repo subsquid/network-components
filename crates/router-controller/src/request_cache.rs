@@ -25,12 +25,12 @@ impl RequestInfo {
 }
 
 
-pub struct RequestTracker {
-    inner: parking_lot::RwLock<RequestTrackerInner>,
+pub struct RequestCache {
+    inner: parking_lot::RwLock<RequestCacheInner>,
 }
 
 
-struct RequestTrackerInner {
+struct RequestCacheInner {
     requests: HashMap<(Dataset, u32), RequestInfo>,
     lifetime: Duration,
     cleanup_interval: Duration,
@@ -38,10 +38,10 @@ struct RequestTrackerInner {
 }
 
 
-impl RequestTrackerInner {
-    fn new() -> RequestTrackerInner {
+impl RequestCacheInner {
+    fn new() -> RequestCacheInner {
         let interval = Duration::from_secs(60 * 5);
-        RequestTrackerInner {
+        RequestCacheInner {
             requests: HashMap::new(),
             lifetime: Duration::from_secs(90),
             cleanup_interval: interval,
@@ -74,10 +74,10 @@ impl RequestTrackerInner {
 }
 
 
-impl RequestTracker {
-    pub fn new() -> RequestTracker {
-        RequestTracker {
-            inner: parking_lot::RwLock::new(RequestTrackerInner::new()),
+impl RequestCache {
+    pub fn new() -> RequestCache {
+        RequestCache {
+            inner: parking_lot::RwLock::new(RequestCacheInner::new()),
         }
     }
 

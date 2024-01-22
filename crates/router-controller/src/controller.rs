@@ -13,7 +13,7 @@ use serde::Deserialize;
 use crate::atom::Atom;
 use crate::data_chunk::DataChunk;
 use crate::range::{Range, RangeSet};
-use crate::request_tracker::RequestTracker;
+use crate::request_cache::RequestCache;
 use crate::workers_rate::WorkersRate;
 
 pub type WorkerId = String;
@@ -68,7 +68,7 @@ pub struct Controller {
     schedule: parking_lot::Mutex<Schedule>,
     workers: Atom<Vec<Worker>>,
     workers_rate: WorkersRate,
-    request_tracker: RequestTracker,
+    request_cache: RequestCache,
     datasets_height: HashMap<Dataset, AtomicI64>,
     managed_datasets: HashMap<String, Dataset>,
     managed_workers: HashSet<WorkerId>,
@@ -137,7 +137,7 @@ impl Controller {
             len => {
                 let key = (dataset.clone(), first_block);
 
-                let next_worker = if let Some(url) = self.request_tracker.get(&key) {
+                let next_worker = if let Some(url) = self.request_cache.get(&key) {
                     let index = candidates.iter().position(|info| info.url == url);
                     if let Some(index) = index {
                         let worker = &candidates[(index + 1) % len];
@@ -158,7 +158,7 @@ impl Controller {
                     least_used_worker.unwrap()
                 };
 
-                self.request_tracker.insert(key, worker.url.clone());
+                self.request_cache.insert(key, worker.url.clone());
                 self.workers_rate.inc(&worker.url);
 
                 Some(&worker.url)
@@ -520,7 +520,7 @@ impl ControllerBuilder {
                 .collect(),
             workers: Atom::new(Arc::new(Vec::new())),
             workers_rate: WorkersRate::new(),
-            request_tracker: RequestTracker::new(),
+            request_cache: RequestCache::new(),
             managed_datasets: self.managed_datasets.clone(),
             managed_workers: self.managed_workers.clone(),
             data_replication: self.replication,

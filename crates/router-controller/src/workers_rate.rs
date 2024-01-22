@@ -39,7 +39,7 @@ impl WorkersRate {
             .and_modify(|rate| rate.inc(1, Some(now)))
             .or_insert_with(|| {
                 let mut rate = RateMeter::new(36, 5);
-                rate.inc(1, None);
+                rate.inc(1, Some(now));
                 rate
             });
     }

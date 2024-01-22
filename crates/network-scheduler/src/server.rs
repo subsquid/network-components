@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
@@ -20,6 +21,8 @@ use crate::storage::S3Storage;
 
 type MsgContent = Box<[u8]>;
 type Message = subsquid_network_transport::Message<Box<[u8]>>;
+
+const WORKER_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct Server {
     incoming_messages: Receiver<Message>,
@@ -53,14 +56,16 @@ impl Server {
         contract_client: Box<dyn contract_client::WorkersClient>,
         storage_client: S3Storage,
         metrics_listen_addr: SocketAddr,
-    ) {
+    ) -> anyhow::Result<()> {
         log::info!("Starting scheduler server");
-        let scheduling_task = self.spawn_scheduling_task(contract_client, storage_client);
+        let scheduling_task = self
+            .spawn_scheduling_task(contract_client, storage_client.clone())
+            .await?;
         let monitoring_task = self.spawn_worker_monitoring_task();
         let metrics_server_task = self.spawn_metrics_server_task(metrics_listen_addr);
-        let jail_inactive_task = self.spawn_jail_inactive_workers_task();
-        let jail_stale_task = self.spawn_jail_stale_workers_task();
-        let jail_unreachable_task = self.spawn_jail_unreachable_workers_task();
+        let jail_inactive_task = self.spawn_jail_inactive_workers_task(storage_client.clone());
+        let jail_stale_task = self.spawn_jail_stale_workers_task(storage_client.clone());
+        let jail_unreachable_task = self.spawn_jail_unreachable_workers_task(storage_client);
         loop {
             tokio::select! {
                 Some(msg) = self.incoming_messages.recv() => self.handle_message(msg).await,
@@ -75,6 +80,7 @@ impl Server {
         jail_inactive_task.abort();
         jail_stale_task.abort();
         jail_unreachable_task.abort();
+        Ok(())
     }
 
     async fn handle_message(&mut self, msg: Message) {
@@ -143,35 +149,49 @@ impl Server {
         }
     }
 
-    fn spawn_scheduling_task(
+    async fn spawn_scheduling_task(
         &self,
         contract_client: Box<dyn contract_client::WorkersClient>,
         storage_client: S3Storage,
-    ) -> JoinHandle<()> {
+    ) -> anyhow::Result<JoinHandle<()>> {
         let scheduler = self.scheduler.clone();
-        tokio::spawn(async move {
-            log::info!("Starting scheduling task");
-            // Get worker set immediately to accept pings
-            match contract_client.active_workers().await {
-                Ok(workers) => scheduler.write().await.update_workers(workers),
-                Err(e) => log::error!("Error getting workers: {e:?}"),
-            }
-            // Wait some time to get pings and download chunks
-            tokio::time::sleep(Config::get().worker_inactive_timeout).await;
+        // Get worker set immediately to accept pings
+        let workers = contract_client.active_workers().await?;
+        let mut last_epoch = contract_client.current_epoch().await?;
+        scheduler.write().await.update_workers(workers);
+        let interval = Config::get().schedule_interval_epochs;
 
+        Ok(tokio::spawn(async move {
+            log::info!("Starting scheduling task");
             loop {
-                match contract_client.active_workers().await {
-                    Ok(workers) => scheduler.write().await.update_workers(workers),
-                    Err(e) => log::error!("Error getting workers: {e:?}"),
+                tokio::time::sleep(WORKER_REFRESH_INTERVAL).await;
+
+                // Get current epoch number
+                let current_epoch = match contract_client.current_epoch().await {
+                    Ok(epoch) => epoch,
+                    Err(e) => {
+                        log::error!("Error getting epoch: {e:?}");
+                        continue;
+                    }
+                };
+                let mut scheduler_ref = scheduler.write().await;
+
+                // Update workers every epoch
+                if current_epoch > last_epoch {
+                    match contract_client.active_workers().await {
+                        Ok(workers) => scheduler_ref.update_workers(workers),
+                        Err(e) => log::error!("Error getting workers: {e:?}"),
+                    }
+                    last_epoch = current_epoch;
                 }
-                scheduler.write().await.schedule();
-                let _ = storage_client
-                    .save_scheduler(scheduler.read().await)
-                    .await
-                    .map_err(|e| log::error!("Error saving scheduler state: {e:?}"));
-                tokio::time::sleep(Config::get().schedule_interval).await;
+
+                // Schedule chunks every `schedule_interval_epochs`
+                if current_epoch >= scheduler_ref.last_schedule_epoch() + interval {
+                    scheduler_ref.schedule(current_epoch);
+                    storage_client.save_scheduler(scheduler_ref).await
+                }
             }
-        })
+        }))
     }
 
     fn spawn_worker_monitoring_task(&self) -> JoinHandle<()> {
@@ -222,32 +242,38 @@ impl Server {
         })
     }
 
-    fn spawn_jail_inactive_workers_task(&self) -> JoinHandle<()> {
+    fn spawn_jail_inactive_workers_task(&self, storage_client: S3Storage) -> JoinHandle<()> {
         let scheduler = self.scheduler.clone();
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Config::get().worker_inactive_timeout).await;
-                scheduler.write().await.jail_inactive_workers();
+                let mut scheduler_ref = scheduler.write().await;
+                scheduler_ref.jail_inactive_workers();
+                storage_client.save_scheduler(scheduler_ref).await;
             }
         })
     }
 
-    fn spawn_jail_stale_workers_task(&self) -> JoinHandle<()> {
+    fn spawn_jail_stale_workers_task(&self, storage_client: S3Storage) -> JoinHandle<()> {
         let scheduler = self.scheduler.clone();
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Config::get().worker_stale_timeout).await;
-                scheduler.write().await.jail_stale_workers();
+                let mut scheduler_ref = scheduler.write().await;
+                scheduler_ref.jail_stale_workers();
+                storage_client.save_scheduler(scheduler_ref).await;
             }
         })
     }
 
-    fn spawn_jail_unreachable_workers_task(&self) -> JoinHandle<()> {
+    fn spawn_jail_unreachable_workers_task(&self, storage_client: S3Storage) -> JoinHandle<()> {
         let scheduler = self.scheduler.clone();
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Config::get().worker_unreachable_timeout).await;
-                scheduler.write().await.jail_unreachable_workers();
+                let mut scheduler_ref = scheduler.write().await;
+                scheduler_ref.jail_unreachable_workers();
+                storage_client.save_scheduler(scheduler_ref).await;
             }
         })
     }

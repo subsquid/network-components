@@ -12,6 +12,7 @@ use crate::transport::Transport;
 use crate::{Address, U256};
 
 abigen!(WorkerRegistration, "abi/WorkerRegistration.json");
+abigen!(NetworkController, "abi/NetworkController.json");
 
 lazy_static! {
     pub static ref WORKER_REGISTRATION_CONTRACT_ADDR: Address =
@@ -20,6 +21,12 @@ lazy_static! {
             .unwrap_or("0x7Bf0B1ee9767eAc70A857cEbb24b83115093477F")
             .parse()
             .expect("Invalid WorkerRegistration contract address");
+    pub static ref NETWORK_CONTROLLER_CONTRACT_ADDR: Address =
+        std::env::var("NETWORK_CONTROLLER_CONTRACT_ADDR")
+            .as_deref()
+            .unwrap_or("0xa4285F5503D903BB10978AD652D072e79cc92F0a")
+            .parse()
+            .expect("Invalid NetworkController contract address");
     pub static ref MULTICALL_CONTRACT_ADDR: Option<Address> =
         std::env::var("MULTICALL_CONTRACT_ADDR")
             .ok()
@@ -55,6 +62,9 @@ impl Worker {
 pub trait Client: Send + Sync {
     /// Get current active worker set
     async fn active_workers(&self) -> Result<Vec<Worker>, ClientError>;
+
+    /// Get the current epoch number
+    async fn current_epoch(&self) -> Result<u32, ClientError>;
 }
 
 pub async fn get_client(RpcArgs { rpc_url, .. }: &RpcArgs) -> Result<Box<dyn Client>, ClientError> {
@@ -67,22 +77,30 @@ pub async fn get_client(RpcArgs { rpc_url, .. }: &RpcArgs) -> Result<Box<dyn Cli
 #[derive(Clone)]
 struct RpcProvider<T: JsonRpcClient + Clone + 'static> {
     client: Arc<Provider<T>>,
-    contract: WorkerRegistration<Provider<T>>,
+    worker_registration: WorkerRegistration<Provider<T>>,
+    network_controller: NetworkController<Provider<T>>,
 }
 
 impl<T: JsonRpcClient + Clone + 'static> RpcProvider<T> {
     pub fn new(provider: Provider<T>) -> Box<Self> {
         let client = Arc::new(provider);
-        let contract = WorkerRegistration::new(*WORKER_REGISTRATION_CONTRACT_ADDR, client.clone());
-        Box::new(Self { client, contract })
+        let worker_registration =
+            WorkerRegistration::new(*WORKER_REGISTRATION_CONTRACT_ADDR, client.clone());
+        let network_controller =
+            NetworkController::new(*NETWORK_CONTROLLER_CONTRACT_ADDR, client.clone());
+        Box::new(Self {
+            client,
+            worker_registration,
+            network_controller,
+        })
     }
 }
 
 #[async_trait]
 impl<M: JsonRpcClient + Clone + 'static> Client for RpcProvider<M> {
     async fn active_workers(&self) -> Result<Vec<Worker>, ClientError> {
-        let workers_call = self.contract.method("getActiveWorkers", ())?;
-        let onchain_ids_call = self.contract.method("getActiveWorkerIds", ())?;
+        let workers_call = self.worker_registration.method("getActiveWorkers", ())?;
+        let onchain_ids_call = self.worker_registration.method("getActiveWorkerIds", ())?;
         let mut multicall = Multicall::new(self.client.clone(), *MULTICALL_CONTRACT_ADDR).await?;
         multicall
             .add_call::<Vec<worker_registration::Worker>>(workers_call, false)
@@ -104,5 +122,16 @@ impl<M: JsonRpcClient + Clone + 'static> Client for RpcProvider<M> {
             )
             .collect();
         Ok(workers)
+    }
+
+    async fn current_epoch(&self) -> Result<u32, ClientError> {
+        let epoch = self
+            .network_controller
+            .epoch_number()
+            .call()
+            .await?
+            .try_into()
+            .expect("Epoch number should not exceed u32 range");
+        Ok(epoch)
     }
 }

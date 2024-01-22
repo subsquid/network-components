@@ -194,6 +194,7 @@ impl DatasetStorage {
     }
 }
 
+#[derive(Clone)]
 pub struct S3Storage {
     client: s3::Client,
     config: &'static Config,
@@ -247,18 +248,20 @@ impl S3Storage {
         Ok(scheduler)
     }
 
-    pub async fn save_scheduler<T: Deref<Target = Scheduler>>(
-        &self,
-        scheduler: T,
-    ) -> anyhow::Result<()> {
-        let state = serde_json::to_vec(scheduler.deref())?;
-        self.client
+    pub async fn save_scheduler<T: Deref<Target = Scheduler>>(&self, scheduler: T) {
+        log::debug!("Saving scheduler state");
+        let state = match serde_json::to_vec(scheduler.deref()) {
+            Ok(state) => state,
+            Err(e) => return log::error!("Error serializing scheduler state: {e:?}"),
+        };
+        let _ = self
+            .client
             .put_object()
             .bucket(&self.config.scheduler_state_bucket)
             .key(SCHEDULER_STATE_KEY)
             .body(state.into())
             .send()
-            .await?;
-        Ok(())
+            .await
+            .map_err(|e| log::error!("Error saving scheduler state: {e:?}"));
     }
 }

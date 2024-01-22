@@ -24,9 +24,15 @@ pub struct Scheduler {
     known_units: HashMap<UnitId, SchedulingUnit>,
     units_assignments: HashMap<UnitId, Vec<PeerId>>,
     worker_states: HashMap<PeerId, WorkerState>,
+    #[serde(default)]
+    last_schedule_epoch: u32,
 }
 
 impl Scheduler {
+    pub fn last_schedule_epoch(&self) -> u32 {
+        self.last_schedule_epoch
+    }
+
     pub fn clear_deprecated_units(&mut self) {
         let dataset_urls: HashSet<String> = Config::get()
             .dataset_buckets
@@ -176,7 +182,7 @@ impl Scheduler {
             .unwrap_or_default()
     }
 
-    pub fn schedule(&mut self) {
+    pub fn schedule(&mut self, epoch: u32) {
         log::info!(
             "Starting scheduling. Total registered workers: {} Total units: {}",
             self.worker_states.len(),
@@ -185,6 +191,7 @@ impl Scheduler {
         self.release_jailed_workers();
         self.mix_random_units();
         self.assign_units();
+        self.last_schedule_epoch = epoch;
     }
 
     pub fn update_workers(&mut self, workers: Vec<Worker>) {
@@ -223,25 +230,25 @@ impl Scheduler {
     }
 
     /// Jail workers which don't send pings.
-    pub fn jail_inactive_workers(&mut self) {
+    pub fn jail_inactive_workers(&mut self) -> bool {
         log::info!("Jailing inactive workers");
         self.jail_workers(|w| !w.is_active())
     }
 
     /// Jail workers which don't make download progress.
-    pub fn jail_stale_workers(&mut self) {
+    pub fn jail_stale_workers(&mut self) -> bool {
         log::info!("Jailing stale workers");
         let known_units = self.known_units.clone();
         self.jail_workers(|w| !w.check_download_progress(&known_units))
     }
 
-    pub fn jail_unreachable_workers(&mut self) {
+    pub fn jail_unreachable_workers(&mut self) -> bool {
         log::info!("Jailing unreachable workers");
         self.jail_workers(|w| !w.last_dial_ok)
     }
 
-    fn jail_workers(&mut self, mut criterion: impl FnMut(&mut WorkerState) -> bool) {
-        let mut num_jailed_workers = 0;
+    fn jail_workers(&mut self, mut criterion: impl FnMut(&mut WorkerState) -> bool) -> bool {
+        let mut num_jailed_workers: usize = 0;
         let mut num_unassigned_units = 0;
 
         self.worker_states
@@ -267,6 +274,7 @@ impl Scheduler {
         if num_unassigned_units > 0 {
             self.assign_units();
         }
+        num_jailed_workers > 0
     }
 
     fn mix_random_units(&mut self) {

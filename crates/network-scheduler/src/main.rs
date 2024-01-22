@@ -55,7 +55,5 @@ async fn main() -> anyhow::Result<()> {
         metrics_writer,
     )
     .run(contract_client, storage, args.http_listen_addr)
-    .await;
-
-    Ok(())
+    .await
 }

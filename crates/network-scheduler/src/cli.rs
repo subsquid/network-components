@@ -15,9 +15,7 @@ static CONFIG: OnceCell<Config> = OnceCell::const_new();
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    #[serde_as(as = "DurationSeconds")]
-    #[serde(rename = "schedule_interval_sec")]
-    pub schedule_interval: Duration,
+    pub schedule_interval_epochs: u32,
     #[serde_as(as = "DurationSeconds")]
     #[serde(rename = "worker_inactive_timeout_sec")]
     pub worker_inactive_timeout: Duration,

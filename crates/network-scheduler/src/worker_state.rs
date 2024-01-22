@@ -15,8 +15,9 @@ use subsquid_network_transport::PeerId;
 pub struct WorkerState {
     pub peer_id: PeerId,
     pub address: Address,
-    #[serde_as(as = "Option<TimestampMilliSeconds>")]
-    pub last_ping: Option<SystemTime>,
+    #[serde_as(as = "TimestampMilliSeconds")]
+    #[serde(default = "SystemTime::now")]
+    pub last_ping: SystemTime,
     pub version: Option<String>,
     pub jailed: bool,
     pub assigned_units: HashSet<UnitId>,
@@ -44,7 +45,7 @@ impl WorkerState {
         Self {
             peer_id,
             address,
-            last_ping: None,
+            last_ping: SystemTime::now(),
             version: None,
             jailed: false,
             assigned_units: HashSet::new(),
@@ -58,13 +59,13 @@ impl WorkerState {
         }
     }
 
-    fn time_since_last_ping(&self) -> Option<Duration> {
-        self.last_ping.and_then(|ping| ping.elapsed().ok())
+    fn time_since_last_ping(&self) -> Duration {
+        self.last_ping.elapsed().expect("Time doesn't go backwards")
     }
 
     /// Register ping msg from a worker.
     pub fn ping(&mut self, msg: Ping) {
-        self.last_ping = Some(SystemTime::now());
+        self.last_ping = SystemTime::now();
         self.version = msg.version;
         self.stored_ranges = msg
             .stored_ranges
@@ -75,8 +76,7 @@ impl WorkerState {
     }
 
     pub fn is_active(&self) -> bool {
-        self.time_since_last_ping()
-            .is_some_and(|x| x < Config::get().worker_inactive_timeout)
+        self.time_since_last_ping() < Config::get().worker_inactive_timeout
     }
 
     pub fn remaining_capacity(&self) -> u64 {

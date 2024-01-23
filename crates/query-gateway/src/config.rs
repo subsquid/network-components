@@ -92,12 +92,6 @@ pub struct Config {
     )]
     pub workers_update_interval: Duration,
     pub available_datasets: HashMap<String, DatasetId>,
-
-    /// How often new computation units will be allocated
-    #[serde_as(as = "DurationSeconds")]
-    #[serde(rename = "allocate_interval_sec")]
-    pub allocate_interval: Duration,
-    pub compute_units: ComputeUnitsConfig,
 }
 
 impl Config {

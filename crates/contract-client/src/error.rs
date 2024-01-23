@@ -1,5 +1,5 @@
 use ethers::contract::{ContractError, MulticallError};
-use ethers::prelude::{AbiError, Middleware, WalletError};
+use ethers::prelude::{AbiError, Middleware};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -11,12 +11,8 @@ pub enum ClientError {
     Contract(String),
     #[error("RPC provider error: {0}")]
     Provider(#[from] ethers::providers::ProviderError),
-    #[error("Wallet error: {0}")]
-    Wallet(#[from] WalletError),
     #[error("Unsupported RPC protocol")]
     InvalidProtocol,
-    #[error("Neither private key nor keystore path was provided")]
-    WalletMissing,
     #[error("Transaction receipt missing")]
     TxReceiptMissing,
 }

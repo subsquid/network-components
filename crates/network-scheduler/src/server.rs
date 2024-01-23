@@ -53,7 +53,7 @@ impl Server {
 
     pub async fn run(
         mut self,
-        contract_client: Box<dyn contract_client::WorkersClient>,
+        contract_client: Box<dyn contract_client::Client>,
         storage_client: S3Storage,
         metrics_listen_addr: SocketAddr,
     ) -> anyhow::Result<()> {
@@ -151,7 +151,7 @@ impl Server {
 
     async fn spawn_scheduling_task(
         &self,
-        contract_client: Box<dyn contract_client::WorkersClient>,
+        contract_client: Box<dyn contract_client::Client>,
         storage_client: S3Storage,
     ) -> anyhow::Result<JoinHandle<()>> {
         let scheduler = self.scheduler.clone();

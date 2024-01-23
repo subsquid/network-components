@@ -8,8 +8,6 @@ use tabled::Table;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
 
-use crate::allocations::AllocationsManager;
-use contract_client::WorkersClient;
 use subsquid_messages::signatures::SignedMessage;
 use subsquid_messages::{
     envelope::Msg, query_finished, query_result, Envelope, PingV2 as Ping, ProstMsg,
@@ -18,6 +16,7 @@ use subsquid_messages::{
 use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{Keypair, MsgContent as MsgContentT, PeerId};
 
+use crate::allocations::AllocationsManager;
 use crate::config::{Config, DatasetId};
 use crate::network_state::NetworkState;
 use crate::query::{Query, QueryResult};
@@ -105,24 +104,8 @@ impl Server {
         }
     }
 
-    pub async fn run(mut self, workers_client: Box<dyn WorkersClient>) {
-        update_workers(
-            &workers_client,
-            &self.network_state,
-            &self.allocations_manager,
-        )
-        .await;
-        let _ = self
-            .allocations_manager
-            .write()
-            .await
-            .update_allocations()
-            .await
-            .map_err(|e| log::error!("Error updating allocations: {e:?}"));
-
+    pub async fn run(mut self) -> anyhow::Result<()> {
         let summary_task = self.spawn_summary_task();
-        let workers_update_task = self.spawn_workers_update_task(workers_client);
-        let allocations_task = self.spawn_allocations_task();
         loop {
             let _ = tokio::select! {
                 Some(query) = self.query_receiver.recv() => self.handle_query(query)
@@ -138,8 +121,7 @@ impl Server {
             };
         }
         summary_task.abort();
-        workers_update_task.abort();
-        allocations_task.abort();
+        Ok(())
     }
 
     fn spawn_summary_task(&self) -> JoinHandle<()> {
@@ -152,41 +134,6 @@ impl Server {
                 let mut summary = Table::new(network_state.read().await.summary());
                 summary.with(Style::sharp());
                 log::info!("Datasets summary:\n{summary}");
-            }
-        })
-    }
-
-    fn spawn_workers_update_task(&self, workers_client: Box<dyn WorkersClient>) -> JoinHandle<()> {
-        let workers_update_interval = Config::get().workers_update_interval;
-        let network_state = self.network_state.clone();
-        let allocations_manager = self.allocations_manager.clone();
-        tokio::task::spawn(async move {
-            log::info!("Starting workers update task");
-            loop {
-                update_workers(&workers_client, &network_state, &allocations_manager).await;
-                tokio::time::sleep(workers_update_interval).await;
-            }
-        })
-    }
-
-    fn spawn_allocations_task(&self) -> JoinHandle<()> {
-        let allocate_interval = Config::get().allocate_interval;
-        let allocations_manager = self.allocations_manager.clone();
-        tokio::task::spawn(async move {
-            log::info!("Starting allocations task");
-            loop {
-                if let Err(e) = allocations_manager.write().await.update_allocations().await {
-                    log::error!("Error updating allocations: {e:?}");
-                }
-                if let Ok((available, allocated, spent)) = allocations_manager
-                    .read()
-                    .await
-                    .compute_units_summary()
-                    .await
-                {
-                    log::info!("Compute units summary: available={available}, allocated={allocated}, spent={spent}");
-                }
-                tokio::time::sleep(allocate_interval).await;
             }
         })
     }
@@ -384,26 +331,4 @@ impl Server {
             Entry::Vacant(entry) => anyhow::bail!("Unknown query: {}", entry.key()),
         }
     }
-}
-
-#[allow(clippy::borrowed_box)]
-async fn update_workers(
-    workers_client: &Box<dyn WorkersClient>,
-    network_state: &Arc<RwLock<NetworkState>>,
-    allocations_manager: &Arc<RwLock<AllocationsManager>>,
-) {
-    let workers = match workers_client.active_workers().await {
-        Ok(workers) => workers,
-        Err(e) => return log::error!("Error getting workers: {e:?}"),
-    };
-    network_state
-        .write()
-        .await
-        .update_registered_workers(workers.clone());
-    let _ = allocations_manager
-        .write()
-        .await
-        .update_workers(workers)
-        .await
-        .map_err(|e| log::error!("Error updating workers: {e:?}"));
 }

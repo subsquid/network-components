@@ -1,23 +1,17 @@
-use crate::config::Config;
-use contract_client::{Allocation, AllocationsClient, Worker};
-use rusqlite::Transaction;
-use std::collections::HashSet;
 use std::path::Path;
-use subsquid_network_transport::PeerId;
+
+use rusqlite::Transaction;
 use tokio_rusqlite::Connection;
 
+use contract_client::Allocation;
+use subsquid_network_transport::PeerId;
+
 pub struct AllocationsManager {
-    client: Box<dyn AllocationsClient>,
     db_conn: Connection,
-    worker_peer_ids: HashSet<PeerId>,
-    worker_onchain_ids: HashSet<u32>,
 }
 
 impl AllocationsManager {
-    pub async fn new(
-        client: Box<dyn AllocationsClient>,
-        db_path: impl AsRef<Path>,
-    ) -> anyhow::Result<Self> {
+    pub async fn new(db_path: impl AsRef<Path>) -> anyhow::Result<Self> {
         log::info!("Initializing allocations manager");
         let db_conn = Connection::open(&db_path).await?;
         db_conn
@@ -25,18 +19,12 @@ impl AllocationsManager {
                 conn.trace(Some(|s| log::trace!("SQL trace: {s}")));
                 let tx = conn.transaction()?;
                 tx.execute(sql::ALLOCATIONS_TABLE, ())?;
-                tx.execute(sql::LAST_BLOCK_TABLE, ())?;
                 tx.commit()?;
                 Ok(())
             })
             .await?;
 
-        Ok(Self {
-            client,
-            db_conn,
-            worker_peer_ids: Default::default(),
-            worker_onchain_ids: Default::default(),
-        })
+        Ok(Self { db_conn })
     }
 
     async fn db_exec<T, F>(&self, f: F) -> anyhow::Result<T>
@@ -57,10 +45,6 @@ impl AllocationsManager {
 
     pub async fn spend_cus(&self, worker_id: PeerId, cus: u32) -> anyhow::Result<()> {
         log::info!("Spending {cus} compute units allocated to worker {worker_id}");
-        anyhow::ensure!(
-            self.worker_peer_ids.contains(&worker_id),
-            "{worker_id} not in active workers set"
-        );
         let worker_id = worker_id.to_string();
         let updated = self
             .db_exec(move |tx| tx.execute(sql::SPEND_CUS, (worker_id, cus)))
@@ -69,107 +53,40 @@ impl AllocationsManager {
         Ok(())
     }
 
-    pub async fn update_workers(&mut self, workers: Vec<Worker>) -> anyhow::Result<()> {
-        let worker_ids: Vec<(PeerId, u32)> = workers
-            .iter()
-            .map(|w| (w.peer_id, w.onchain_id.as_u32()))
-            .collect();
-        let (peer_ids, onchain_ids) = worker_ids.iter().cloned().unzip();
+    pub async fn get_last_epoch(&self) -> anyhow::Result<u32> {
+        self.db_exec(|tx| tx.query_row(sql::GET_EPOCH, (), |row| row.get(0)))
+            .await
+    }
+
+    pub async fn update_allocations(
+        &self,
+        allocations: Vec<Allocation>,
+        epoch: u32,
+    ) -> anyhow::Result<()> {
+        log::info!("Updating allocations");
         self.db_exec(move |tx| {
-            let mut insert_stmt = tx.prepare(sql::UPDATE_WORKERS)?;
-            for (peer_id, onchain_id) in worker_ids {
-                insert_stmt.execute((peer_id.to_string(), onchain_id))?;
+            tx.execute(sql::RESET_ALLOCATIONS, ())?;
+            let mut update_stmt = tx.prepare(sql::UPDATE_ALLOCATION)?;
+            for allocation in allocations {
+                update_stmt.execute((
+                    allocation.worker_peer_id.to_string(),
+                    allocation.computation_units.as_u32(),
+                    epoch,
+                ))?;
             }
             Ok(())
         })
         .await?;
-        self.worker_peer_ids = peer_ids;
-        self.worker_onchain_ids = onchain_ids;
-        Ok(())
-    }
 
-    async fn save_allocations(
-        &self,
-        allocations: Vec<Allocation>,
-        last_block: u64,
-    ) -> anyhow::Result<()> {
-        self.db_exec(move |tx| {
-            let mut update_stmt = tx.prepare(sql::ALLOCATE_CUS)?;
-            for a in allocations {
-                update_stmt
-                    .execute((a.worker_onchain_id.as_u32(), a.computation_units.as_u32()))?;
-            }
-            tx.execute(sql::UPDATE_LAST_BLOCK, (last_block,))?;
-            Ok(())
-        })
-        .await
-    }
-
-    async fn get_last_block(&self) -> anyhow::Result<Option<u64>> {
-        self.db_exec(|tx| tx.query_row(sql::GET_LAST_BLOCK, (), |row| row.get(0)))
-            .await
-    }
-
-    /// Get onchain IDs of workers that need to be allocated more compute units
-    async fn get_worker_ids_to_allocate(&self) -> anyhow::Result<Vec<u32>> {
-        // Select workers which have less than minimum remaining CUs
-        let min_cus = Config::get().compute_units.minimum;
-        let mut worker_ids = self
-            .db_exec(move |tx| {
-                let mut select_stmt = tx.prepare(sql::GET_WORKERS_TO_ALLOCATE)?;
-                let worker_ids = select_stmt
-                    .query_map((min_cus,), |row| row.get(0))?
-                    .collect::<rusqlite::Result<Vec<u32>>>()?;
-                Ok(worker_ids)
-            })
-            .await?;
-
-        // Discard workers which don't belong to the active worker set
-        worker_ids.retain(|id| self.worker_onchain_ids.contains(id));
-        Ok(worker_ids)
-    }
-
-    pub async fn update_allocations(&self) -> anyhow::Result<()> {
-        log::info!("Updating allocations");
-        // Save allocations from blockchain into database
-        let from_block = self.get_last_block().await?.map(|x| x + 1);
-        let (allocations, last_block) = self.client.get_allocations(from_block).await?;
-        log::info!("{} allocations retrieved from chain", allocations.len());
-        log::debug!("Allocations retrieved: {allocations:?}");
-        self.save_allocations(allocations, last_block).await?;
-
-        // Get workers which need allocation and check available CUs
-        let worker_ids_to_allocate = self.get_worker_ids_to_allocate().await?;
-        let cus_per_worker = Config::get().compute_units.allocate.into();
-        let available_cus = self.client.available_cus().await?;
-        log::info!(
-            "{} workers need allocation. Available compute units: {available_cus}",
-            worker_ids_to_allocate.len()
-        );
-        anyhow::ensure!(
-            available_cus >= cus_per_worker * worker_ids_to_allocate.len(),
-            "Not enough compute units available"
-        );
-
-        // Make new allocations if necessary
-        let allocations = worker_ids_to_allocate
-            .into_iter()
-            .map(|id| Allocation {
-                worker_onchain_id: id.into(),
-                computation_units: cus_per_worker,
-            })
-            .collect();
-        self.client.allocate_cus(allocations).await?;
         Ok(())
     }
 
     /// Return total (available, allocated, spent) compute units
-    pub async fn compute_units_summary(&self) -> anyhow::Result<(u32, u32, u32)> {
-        let available = self.client.available_cus().await?.as_u32();
+    pub async fn compute_units_summary(&self) -> anyhow::Result<(u32, u32)> {
         let (allocated, spent) = self
-            .db_exec(|tx| tx.query_row(sql::CUS_SUMMARY, (), |row| row.try_into()))
+            .db_exec(|tx| tx.query_row(sql::GET_SUMMARY, (), |row| row.try_into()))
             .await?;
-        Ok((available, allocated, spent))
+        Ok((allocated, spent))
     }
 }
 
@@ -178,18 +95,10 @@ mod sql {
     pub const ALLOCATIONS_TABLE: &str = "
     CREATE TABLE IF NOT EXISTS worker_allocations(
         peer_id STRING PRIMARY KEY,
-        onchain_id INTEGER NOT NULL UNIQUE,
         allocated_cus INTEGER NOT NULL DEFAULT 0,
-        spent_cus INTEGER NOT NULL DEFAULT 0
+        spent_cus INTEGER NOT NULL DEFAULT 0,
+        epoch INTEGER NOT NULL
     )";
-
-    pub const LAST_BLOCK_TABLE: &str = "
-    CREATE TABLE IF NOT EXISTS last_scanned_block AS SELECT NULL AS block_no
-    ";
-
-    pub const GET_LAST_BLOCK: &str = "SELECT block_no FROM last_scanned_block";
-
-    pub const UPDATE_LAST_BLOCK: &str = "UPDATE last_scanned_block SET block_no = ?1";
 
     pub const SPEND_CUS: &str = "
     UPDATE worker_allocations
@@ -197,21 +106,15 @@ mod sql {
     WHERE peer_id = ?1 AND allocated_cus - spent_cus >= ?2
     ";
 
-    pub const UPDATE_WORKERS: &str = "
-    INSERT OR IGNORE INTO worker_allocations (peer_id, onchain_id) VALUES (?1, ?2)
+    pub const RESET_ALLOCATIONS: &str = "DELETE FROM worker_allocations";
+
+    pub const UPDATE_ALLOCATION: &str = "
+    INSERT INTO worker_allocations (peer_id, allocated_cus, spent_cus, epoch)
+    VALUES (?1, ?2, 0, ?3)
     ";
 
-    pub const ALLOCATE_CUS: &str = "
-    UPDATE worker_allocations
-    SET allocated_cus = allocated_cus + ?2
-    WHERE onchain_id = ?1
-    ";
+    pub const GET_EPOCH: &str = "SELECT COALESCE(MAX(epoch), 0) FROM worker_allocations";
 
-    pub const GET_WORKERS_TO_ALLOCATE: &str = "
-    SELECT onchain_id FROM worker_allocations
-    WHERE (allocated_cus - spent_cus) < ?1
-    ";
-
-    pub const CUS_SUMMARY: &str =
+    pub const GET_SUMMARY: &str =
         "SELECT sum(allocated_cus), sum(spent_cus) FROM worker_allocations";
 }

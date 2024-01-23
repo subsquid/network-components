@@ -45,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
     let storage = S3Storage::new().await;
     let incoming_units = storage.get_incoming_units().await;
     let scheduler = storage.load_scheduler().await?;
-    let contract_client = contract_client::get_workers_client(&args.rpc).await?;
+    let contract_client = contract_client::get_client(&args.rpc).await?;
 
     Server::new(
         incoming_messages,

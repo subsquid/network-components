@@ -5,7 +5,8 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::allocations::AllocationsManager;
-use contract_client::{AllocationsClient, WorkersClient};
+use crate::chain_updates::ChainUpdatesHandler;
+use contract_client::Client as ContractClient;
 use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{Keypair, PeerId};
 
@@ -65,15 +66,22 @@ pub async fn get_client(
     keypair: Keypair,
     msg_receiver: mpsc::Receiver<Message>,
     transport_handle: P2PTransportHandle<MsgContent>,
-    workers_client: Box<dyn WorkersClient>,
-    allocations_client: Box<dyn AllocationsClient>,
+    contract_client: Box<dyn ContractClient>,
     allocations_db_path: PathBuf,
 ) -> anyhow::Result<QueryClient> {
     let (query_sender, query_receiver) = mpsc::channel(100);
     let network_state = Arc::new(RwLock::new(NetworkState::default()));
     let allocations_manager = Arc::new(RwLock::new(
-        AllocationsManager::new(allocations_client, allocations_db_path).await?,
+        AllocationsManager::new(allocations_db_path).await?,
     ));
+
+    let chain_updates_handler = ChainUpdatesHandler::new(
+        network_state.clone(),
+        allocations_manager.clone(),
+        contract_client,
+        keypair.public().to_peer_id(),
+    );
+    chain_updates_handler.spawn().await?;
 
     let server = Server::new(
         msg_receiver,
@@ -83,7 +91,7 @@ pub async fn get_client(
         allocations_manager,
         keypair,
     );
-    tokio::spawn(server.run(workers_client));
+    tokio::spawn(server.run());
 
     let client = QueryClient {
         network_state,

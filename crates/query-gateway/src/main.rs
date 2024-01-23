@@ -11,6 +11,7 @@ use subsquid_network_transport::transport::P2PTransportBuilder;
 use crate::config::Config;
 
 mod allocations;
+mod chain_updates;
 mod client;
 mod config;
 mod http_server;
@@ -66,17 +67,15 @@ async fn main() -> anyhow::Result<()> {
     transport_handle.subscribe(PING_TOPIC).await?;
 
     // Subscribe to worker set updates (from blockchain)
-    let workers_client = contract_client::get_workers_client(&args.rpc).await?;
-    let _ = workers_client.active_workers().await?; // Check if RPC is available & properly configured
-    let allocations_client = contract_client::get_allocations_client(&args.rpc).await?;
+    let contract_client = contract_client::get_client(&args.rpc).await?;
+    let _ = contract_client.active_workers().await?; // Check if RPC is available & properly configured
 
     // Start query client
     let query_client = client::get_client(
         keypair,
         msg_receiver,
         transport_handle,
-        workers_client,
-        allocations_client,
+        contract_client,
         args.allocations_db_path,
     )
     .await?;

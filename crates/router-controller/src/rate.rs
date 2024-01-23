@@ -57,3 +57,34 @@ impl RateMeter {
         time_value
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::thread;
+    use std::time::Duration;
+
+    use crate::rate::RateMeter;
+
+    #[test]
+    fn check_multiple_inc() {
+        let mut rate = RateMeter::new(1, 1);
+        rate.inc(1, None);
+        rate.inc(2, None);
+
+        let value = rate.get_rate(None);
+        assert!(value == 3)
+    }
+
+    #[test]
+    fn check_rate_after_window_round() {
+        let mut rate = RateMeter::new(1, 1);
+        rate.inc(1, None);
+
+        let value = rate.get_rate(None);
+        assert!(value == 1);
+
+        thread::sleep(Duration::from_secs(1));
+        let value = rate.get_rate(None);
+        assert!(value == 0);
+    }
+}

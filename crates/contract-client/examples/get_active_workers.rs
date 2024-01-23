@@ -14,11 +14,7 @@ async fn main() -> anyhow::Result<()> {
         .nth(1)
         .unwrap_or("http://127.0.0.1:8545/".to_string());
 
-    let client = contract_client::get_workers_client(&RpcArgs {
-        rpc_url,
-        ..Default::default()
-    })
-    .await?;
+    let client = contract_client::get_client(&RpcArgs { rpc_url }).await?;
     let workers = client.active_workers().await?;
     workers.iter().for_each(|w| println!("{w:?}"));
     Ok(())

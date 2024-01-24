@@ -4157,7 +4157,7 @@ checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
 name = "logs-collector"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4446,7 +4446,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5260,7 +5260,7 @@ checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "query-gateway"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -6489,6 +6489,7 @@ dependencies = [
  "futures",
  "futures-core",
  "libp2p",
+ "libp2p-connection-limits",
  "libp2p-swarm-derive",
  "log",
  "prost",

@@ -17,9 +17,8 @@ impl WorkersRate {
         }
     }
 
-    pub fn get_rate(&self, url: &Url) -> u32 {
-        let now = SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+    pub fn get_rate(&self, url: &Url, now: SystemTime) -> u32 {
+        let now = now.duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
         let inner = self.inner.read();
@@ -29,9 +28,8 @@ impl WorkersRate {
         rate
     }
 
-    pub fn inc(&self, url: &Url) {
-        let now = SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+    pub fn inc(&self, url: &Url, now: SystemTime) {
+        let now = now.duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
         let mut inner = self.inner.write();

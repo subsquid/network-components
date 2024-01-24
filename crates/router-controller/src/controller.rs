@@ -131,7 +131,7 @@ impl Controller {
             0 => None,
             1 => {
                 let worker = &candidates[0];
-                self.workers_rate.inc(&worker.url);
+                self.workers_rate.inc(&worker.url, now);
                 Some(&worker.url)
             },
             len => {
@@ -154,12 +154,13 @@ impl Controller {
                 } else {
                     let least_used_worker = candidates
                         .iter()
-                        .min_by_key(|info| self.workers_rate.get_rate(&info.url));
+                        .min_by_key(|info| self.workers_rate.get_rate(&info.url, now));
                     least_used_worker.unwrap()
+
                 };
 
                 self.request_cache.insert(key, worker.url.clone());
-                self.workers_rate.inc(&worker.url);
+                self.workers_rate.inc(&worker.url, now);
 
                 Some(&worker.url)
             }

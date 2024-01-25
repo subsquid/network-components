@@ -31,6 +31,9 @@ pub struct WorkerState {
     pub last_assignment: SystemTime,
     #[serde_as(as = "TimestampMilliSeconds")]
     #[serde(default = "SystemTime::now")]
+    pub last_successful_dial: SystemTime,
+    #[serde_as(as = "TimestampMilliSeconds")]
+    #[serde(default = "SystemTime::now")]
     pub last_dial_time: SystemTime,
     #[serde(default = "def_true")]
     pub last_dial_ok: bool,
@@ -54,8 +57,9 @@ impl WorkerState {
             assigned_bytes: 0,
             num_missing_chunks: 0,
             last_assignment: SystemTime::now(),
+            last_successful_dial: SystemTime::now(),
             last_dial_time: SystemTime::now(),
-            last_dial_ok: true,
+            last_dial_ok: false,
         }
     }
 
@@ -77,6 +81,17 @@ impl WorkerState {
 
     pub fn is_active(&self) -> bool {
         self.time_since_last_ping() < Config::get().worker_inactive_timeout
+    }
+
+    pub fn is_unreachable(&self) -> bool {
+        // Worker is considered unreachable if it hasn't been successfully dialed
+        // for at least `worker_unreachable_timeout`
+        !self.last_dial_ok
+            && self
+                .last_successful_dial
+                .elapsed()
+                .expect("time doesn't go backwards")
+                > Config::get().worker_unreachable_timeout
     }
 
     pub fn remaining_capacity(&self) -> u64 {

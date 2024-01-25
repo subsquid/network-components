@@ -1,5 +1,5 @@
 use std::collections::{BinaryHeap, HashMap, HashSet};
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use iter_num_tools::lin_space;
 use itertools::Itertools;
@@ -96,13 +96,12 @@ impl Scheduler {
                     .last_dial_time
                     .elapsed()
                     .expect("time doesn't go backwards");
-                match state.last_dial_ok {
-                    true if time_since_last_dial > Config::get().worker_unreachable_timeout => {
-                        Some(*worker_id)
-                    }
-                    false if time_since_last_dial > Duration::from_secs(60) => Some(*worker_id),
-                    _ => None,
-                }
+                let retry_interval = if state.last_dial_ok {
+                    Config::get().successful_dial_retry
+                } else {
+                    Config::get().failed_dial_retry
+                };
+                (time_since_last_dial > retry_interval).then_some(*worker_id)
             })
             .collect()
     }
@@ -244,7 +243,7 @@ impl Scheduler {
 
     pub fn jail_unreachable_workers(&mut self) -> bool {
         log::info!("Jailing unreachable workers");
-        self.jail_workers(|w| !w.last_dial_ok)
+        self.jail_workers(|w| w.is_unreachable())
     }
 
     fn jail_workers(&mut self, mut criterion: impl FnMut(&mut WorkerState) -> bool) -> bool {

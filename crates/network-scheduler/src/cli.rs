@@ -25,6 +25,12 @@ pub struct Config {
     #[serde_as(as = "DurationSeconds")]
     #[serde(rename = "worker_unreachable_timeout_sec")]
     pub worker_unreachable_timeout: Duration,
+    #[serde_as(as = "DurationSeconds")]
+    #[serde(rename = "failed_dial_retry_sec")]
+    pub failed_dial_retry: Duration,
+    #[serde_as(as = "DurationSeconds")]
+    #[serde(rename = "successful_dial_retry_sec")]
+    pub successful_dial_retry: Duration,
     pub replication_factor: usize,
     pub scheduling_unit_size: usize,
     pub worker_storage_bytes: u64,

@@ -2,6 +2,8 @@ schedule_interval_epochs: 1
 worker_inactive_timeout_sec: 120     # 2 min
 worker_stale_timeout_sec: 900        # 15 min
 worker_unreachable_timeout_sec: 300  # 5 min
+failed_dial_retry_sec: 60            # 1 min
+successful_dial_retry_sec: 3600      # 1 hour
 replication_factor: 2
 scheduling_unit_size: 10
 mixed_units_ratio: 0.1

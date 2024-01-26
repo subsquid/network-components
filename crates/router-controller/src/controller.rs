@@ -78,11 +78,11 @@ unsafe impl Sync for Controller {}
 
 
 impl Controller {
-    pub fn get_worker(&self, dataset_name: &str, first_block: u32) -> Option<Url> {
+    pub fn get_worker(&self, dataset_name: &str, first_block: u32) -> Result<Option<Url>, String> {
         let dataset = match self.managed_datasets.get(dataset_name) {
             Some(ds) => ds,
             None => {
-                return None
+                return Err("unknown dataset".to_string())
             }
         };
 
@@ -123,27 +123,29 @@ impl Controller {
             }
         };
 
-        match candidates.len() {
+        let worker = match candidates.len() {
             0 => None,
             1 => Some(&candidates[0].url),
             len => {
                 let i: usize = rand::random();
                 Some(&candidates[i % len].url)
             }
-        }.map(|url| Self::format_worker_url(url, dataset))
+        }.map(|url| Self::format_worker_url(url, dataset));
+
+        Ok(worker)
     }
 
-    pub fn get_height(&self, dataset_name: &str) -> Option<i32> {
+    pub fn get_height(&self, dataset_name: &str) -> Result<Option<i32>, String> {
         let dataset = match self.managed_datasets.get(dataset_name) {
             Some(ds) => ds,
-            None => return None
+            None => return Err("unknown dataset".to_string())
         };
 
         match self.datasets_height
             .get(dataset)
             .map(|height| height.load(Ordering::Relaxed)) {
-                Some(INITIAL_VALUE) | None => None,
-                Some(value) => value.try_into().ok(),
+                Some(INITIAL_VALUE) | None => Ok(None),
+                Some(value) => Ok(value.try_into().ok()),
             }
     }
 
@@ -544,7 +546,7 @@ mod tests {
             })
         }).collect();
 
-        assert_eq!(controller.get_worker("0", 5), None);
+        assert_eq!(controller.get_worker("0", 5).unwrap(), None);
 
         for (w, state) in desired_state.iter().enumerate() {
             controller.ping(PingMessage {
@@ -564,8 +566,8 @@ mod tests {
         }).collect();
 
         assert_eq!(holders.len(), 2);
-        assert!(holders.contains(&controller.get_worker("0", 0).unwrap()));
-        assert!(holders.contains(&controller.get_worker("0", 5).unwrap()));
-        assert!(holders.contains(&controller.get_worker("0", 10).unwrap()));
+        assert!(holders.contains(&controller.get_worker("0", 0).unwrap().unwrap()));
+        assert!(holders.contains(&controller.get_worker("0", 5).unwrap().unwrap()));
+        assert!(holders.contains(&controller.get_worker("0", 10).unwrap().unwrap()));
     }
 }

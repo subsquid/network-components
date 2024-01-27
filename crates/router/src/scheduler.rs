@@ -17,6 +17,7 @@ async fn update_datasets(controller: &Arc<Controller>, datasets: &Vec<Dataset>) 
         let controller = controller.clone();
         tasks.push(tokio::spawn(async move {
             let next_block = controller.get_height(&name)
+                .expect("dataset must be supported")
                 .map(|height| height + 1)
                 .unwrap_or(0)
                 .try_into()

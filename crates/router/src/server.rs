@@ -41,8 +41,8 @@ async fn get_worker(
     Extension(controller): Extension<Arc<Controller>>,
 ) -> Response {
     match controller.get_worker(&dataset, start_block) {
-        Some(url) => url.into_response(),
-        None => (
+        Ok(Some(url)) => url.into_response(),
+        Ok(None) => (
             StatusCode::SERVICE_UNAVAILABLE,
             format!(
                 "not ready to serve block {} of dataset {}",
@@ -50,6 +50,7 @@ async fn get_worker(
             ),
         )
             .into_response(),
+        Err(err) => (StatusCode::NOT_FOUND, err).into_response()
     }
 }
 
@@ -59,12 +60,13 @@ async fn get_height(
     Extension(controller): Extension<Arc<Controller>>,
 ) -> Response {
     match controller.get_height(&dataset) {
-        Some(height) => height.to_string().into_response(),
-        None => (
+        Ok(Some(height)) => height.to_string().into_response(),
+        Ok(None) => (
             StatusCode::SERVICE_UNAVAILABLE,
             format!("height for dataset {} is unknown", dataset),
         )
             .into_response(),
+        Err(err) => (StatusCode::NOT_FOUND, err).into_response()
     }
 }
 

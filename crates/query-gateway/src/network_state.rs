@@ -13,7 +13,7 @@ use subsquid_network_transport::PeerId;
 #[derive(Default)]
 struct DatasetState {
     worker_ranges: HashMap<PeerId, RangeSet>,
-    height: u32,
+    highest_seen_block: u32,
 }
 
 impl DatasetState {
@@ -25,7 +25,7 @@ impl DatasetState {
 
     pub fn update(&mut self, peer_id: PeerId, state: RangeSet) {
         if let Some(range) = state.ranges.last() {
-            self.height = max(self.height, range.end)
+            self.highest_seen_block = max(self.highest_seen_block, range.end)
         }
         self.worker_ranges.insert(peer_id, state);
     }
@@ -65,7 +65,7 @@ impl<'a> DatasetSummary<'a> {
             Some(state) => Self {
                 name,
                 highest_indexable_block: state.highest_indexable_block(),
-                highest_seen_block: state.height,
+                highest_seen_block: state.highest_seen_block,
             },
         }
     }
@@ -162,7 +162,7 @@ impl NetworkState {
     pub fn get_height(&self, dataset_id: &DatasetId) -> Option<u32> {
         self.dataset_states
             .get(dataset_id)
-            .map(|state| state.height)
+            .map(|state| state.highest_indexable_block())
     }
 
     pub fn summary(&self) -> impl Iterator<Item = DatasetSummary> {

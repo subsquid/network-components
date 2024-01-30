@@ -87,21 +87,29 @@ async fn execute_query(
         Ok(QueryResult::ServerError(err)) => server_error(err),
         Ok(QueryResult::BadRequest(err)) => bad_request(err),
         Ok(QueryResult::Timeout) => query_timeout(),
+        Ok(QueryResult::NotEnoughCUs) => not_enough_cus(),
         Ok(QueryResult::Ok(result)) => ok_response(result, headers),
     }
 }
 
+#[inline(always)]
 fn server_error(err: String) -> Response {
-    (StatusCode::INTERNAL_SERVER_ERROR, err.into_bytes()).into_response()
+    (StatusCode::INTERNAL_SERVER_ERROR, err).into_response()
 }
 
+#[inline(always)]
 fn bad_request(err: String) -> Response {
-    (StatusCode::BAD_REQUEST, err.into_bytes()).into_response()
+    (StatusCode::BAD_REQUEST, err).into_response()
 }
 
+#[inline(always)]
 fn query_timeout() -> Response {
-    let msg = "Query execution timed out".to_string().into_bytes();
-    (StatusCode::GATEWAY_TIMEOUT, msg).into_response()
+    (StatusCode::GATEWAY_TIMEOUT, "Query execution timed out").into_response()
+}
+
+#[inline(always)]
+fn not_enough_cus() -> Response {
+    (StatusCode::FORBIDDEN, "Not enough compute units").into_response()
 }
 
 fn ok_response(result: OkResult, request_headers: HeaderMap) -> Response {

@@ -43,14 +43,13 @@ impl AllocationsManager {
             .map_err(Into::into)
     }
 
-    pub async fn spend_cus(&self, worker_id: PeerId, cus: u32) -> anyhow::Result<()> {
-        log::info!("Spending {cus} compute units allocated to worker {worker_id}");
+    pub async fn try_spend_cus(&self, worker_id: PeerId, cus: u32) -> anyhow::Result<bool> {
+        log::debug!("Spending {cus} compute units allocated to worker {worker_id}");
         let worker_id = worker_id.to_string();
         let updated = self
             .db_exec(move |tx| tx.execute(sql::SPEND_CUS, (worker_id, cus)))
             .await?;
-        anyhow::ensure!(updated > 0, "Not enough remaining computation units");
-        Ok(())
+        Ok(updated > 0)
     }
 
     pub async fn get_last_epoch(&self) -> anyhow::Result<u32> {

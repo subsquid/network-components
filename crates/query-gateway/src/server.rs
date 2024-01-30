@@ -27,7 +27,7 @@ pub type Message = subsquid_network_transport::Message<MsgContent>;
 
 const COMP_UNITS_PER_QUERY: u32 = 1;
 
-pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.2.0"];
+pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.2.1"];
 
 #[derive(Debug)]
 struct Task {
@@ -175,11 +175,17 @@ impl Server {
         } = query;
         let dataset = dataset_id.0;
 
-        self.allocations_manager
+        let enough_cus = self
+            .allocations_manager
             .read()
             .await
-            .spend_cus(worker_id, COMP_UNITS_PER_QUERY)
+            .try_spend_cus(worker_id, COMP_UNITS_PER_QUERY)
             .await?;
+        if !enough_cus {
+            log::warn!("Not enough compute units for worker {worker_id}");
+            let _ = result_sender.send(QueryResult::NotEnoughCUs);
+            return Ok(());
+        }
 
         let timeout_handle = self.spawn_timeout_task(&query_id, timeout);
         let task = Task::new(worker_id, result_sender, timeout_handle);
@@ -271,7 +277,7 @@ impl Server {
 
         let version = ping.version.clone().unwrap_or_default();
         if !SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == version) {
-            log::debug!("Worker {peer_id} version not supported: {}", version);
+            return log::debug!("Worker {peer_id} version not supported: {}", version);
         }
 
         let worker_state = ping

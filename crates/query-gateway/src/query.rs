@@ -24,6 +24,7 @@ pub enum QueryResult {
     Ok(OkResult),
     BadRequest(String),
     ServerError(String),
+    NotEnoughCUs,
     Timeout,
 }
 

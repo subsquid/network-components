@@ -52,6 +52,9 @@ pub trait Client: Send + Sync {
     /// Get current active worker set
     async fn active_workers(&self) -> Result<Vec<Worker>, ClientError>;
 
+    /// Check if client is registered on chain
+    async fn is_client_registered(&self, client_id: PeerId) -> Result<bool, ClientError>;
+
     /// Get client's allocations for the current epoch.
     async fn current_allocations(
         &self,
@@ -133,6 +136,13 @@ impl<M: JsonRpcClient + Clone + 'static> Client for RpcProvider<M> {
             )
             .collect();
         Ok(workers)
+    }
+
+    async fn is_client_registered(&self, client_id: PeerId) -> Result<bool, ClientError> {
+        let client_id = client_id.to_bytes().into();
+        let gateway_info: contracts::Gateway =
+            self.gateway_registry.get_gateway(client_id).call().await?;
+        Ok(gateway_info.operator != Address::zero())
     }
 
     async fn current_allocations(

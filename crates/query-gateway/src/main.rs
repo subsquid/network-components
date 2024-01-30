@@ -66,9 +66,14 @@ async fn main() -> anyhow::Result<()> {
     // Subscribe to dataset state updates (from p2p pub-sub)
     transport_handle.subscribe(PING_TOPIC).await?;
 
-    // Subscribe to worker set updates (from blockchain)
+    // Instantiate contract client and check RPC connection
     let contract_client = contract_client::get_client(&args.rpc).await?;
-    let _ = contract_client.active_workers().await?; // Check if RPC is available & properly configured
+    anyhow::ensure!(
+        contract_client
+            .is_client_registered(keypair.public().to_peer_id())
+            .await?,
+        "Client not registered on chain"
+    );
 
     // Start query client
     let query_client = client::get_client(

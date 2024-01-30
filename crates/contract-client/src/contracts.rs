@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::Address;
 
+pub use gateway_registry::Gateway;
 pub use worker_registration::Worker;
 
 abigen!(GatewayRegistry, "abi/GatewayRegistry.json");

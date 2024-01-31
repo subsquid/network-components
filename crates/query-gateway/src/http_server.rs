@@ -16,6 +16,7 @@ use subsquid_network_transport::PeerId;
 
 use crate::client::QueryClient;
 use crate::config::{Config, DatasetId};
+use crate::metrics;
 use crate::query::QueryResult;
 
 async fn get_height(
@@ -162,12 +163,20 @@ fn decode_gzip(data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
     Ok(decoder.finish()?)
 }
 
+async fn get_metrics() -> Response {
+    match metrics::gather_metrics() {
+        Ok(metrics) => (StatusCode::OK, metrics).into_response(),
+        Err(err) => server_error(err.to_string()),
+    }
+}
+
 pub async fn run_server(query_client: QueryClient, addr: &SocketAddr) -> anyhow::Result<()> {
     log::info!("Starting HTTP server listening on {addr}");
     let app = Router::new()
         .route("/network/:dataset/height", get(get_height))
         .route("/network/:dataset/:start_block/worker", get(get_worker))
         .route("/query/:dataset_id/:worker_id", post(execute_query))
+        .route("/metrics", get(get_metrics))
         .layer(Extension(Arc::new(query_client)));
     Server::bind(addr).serve(app.into_make_service()).await?;
     Ok(())

@@ -1,6 +1,6 @@
 [package]
 name = "query-gateway"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 
 [dependencies]
@@ -11,15 +11,17 @@ chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
 derivative = "2"
 duration-string = { version = "0.3", features = ["serde"] }
-env_logger = "0.10"
+env_logger = "0.11"
 flate2 = "1"
+lazy_static = "1"
 log = "0.4"
+prometheus = "0.13"
 rand = "0.8"
 rusqlite = { version = "0.30", features = ["trace", "bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_with = "3"
 serde_yaml = "0.9"
-tabled = "0.14"
+tabled = "0.15"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tokio-rusqlite = "0.5"
 uuid = { version = "1", features = ["v4", "fast-rng"] }

@@ -15,6 +15,7 @@ mod chain_updates;
 mod client;
 mod config;
 mod http_server;
+mod metrics;
 mod network_state;
 mod query;
 mod server;

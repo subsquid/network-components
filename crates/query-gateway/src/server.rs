@@ -126,6 +126,10 @@ impl Server {
 
     fn spawn_summary_task(&self) -> JoinHandle<()> {
         let summary_print_interval = Config::get().summary_print_interval;
+        if summary_print_interval.is_zero() {
+            return tokio::task::spawn(async {});
+        }
+
         let network_state = self.network_state.clone();
         tokio::task::spawn(async move {
             log::info!("Starting datasets summary task");

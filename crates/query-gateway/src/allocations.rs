@@ -3,6 +3,7 @@ use std::path::Path;
 use rusqlite::Transaction;
 use tokio_rusqlite::Connection;
 
+use crate::metrics;
 use contract_client::Allocation;
 use subsquid_network_transport::PeerId;
 
@@ -46,10 +47,14 @@ impl AllocationsManager {
     pub async fn try_spend_cus(&self, worker_id: PeerId, cus: u32) -> anyhow::Result<bool> {
         log::debug!("Spending {cus} compute units allocated to worker {worker_id}");
         let worker_id = worker_id.to_string();
-        let updated = self
-            .db_exec(move |tx| tx.execute(sql::SPEND_CUS, (worker_id, cus)))
-            .await?;
-        Ok(updated > 0)
+        self.db_exec(move |tx| {
+            let updated = tx.execute(sql::SPEND_CUS, (&worker_id, cus))? > 0;
+            if updated {
+                metrics::spend_comp_units(&worker_id, cus);
+            }
+            Ok(updated)
+        })
+        .await
     }
 
     pub async fn get_last_epoch(&self) -> anyhow::Result<u32> {
@@ -63,20 +68,24 @@ impl AllocationsManager {
         epoch: u32,
     ) -> anyhow::Result<()> {
         log::info!("Updating allocations");
-        self.db_exec(move |tx| {
-            tx.execute(sql::RESET_ALLOCATIONS, ())?;
-            let mut update_stmt = tx.prepare(sql::UPDATE_ALLOCATION)?;
-            for allocation in allocations {
-                update_stmt.execute((
-                    allocation.worker_peer_id.to_string(),
-                    allocation.computation_units.as_u32(),
-                    epoch,
-                ))?;
-            }
-            Ok(())
-        })
-        .await?;
+        let allocations: Vec<(String, u32)> = allocations
+            .into_iter()
+            .map(|a| (a.worker_peer_id.to_string(), a.computation_units.as_u32()))
+            .collect();
 
+        let allocations = self
+            .db_exec(move |tx| {
+                tx.execute(sql::RESET_ALLOCATIONS, ())?;
+                let mut update_stmt = tx.prepare(sql::UPDATE_ALLOCATION)?;
+                for (worker_id, comp_units) in &allocations {
+                    update_stmt.execute((worker_id, comp_units, epoch))?;
+                }
+                Ok(allocations)
+            })
+            .await?;
+
+        metrics::new_epoch(epoch);
+        metrics::update_allocations(allocations);
         Ok(())
     }
 

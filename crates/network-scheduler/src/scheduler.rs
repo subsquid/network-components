@@ -17,7 +17,7 @@ use crate::data_chunk::chunks_to_worker_state;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::worker_state::WorkerState;
 
-pub const SUPPORTED_WORKER_VERSIONS: [&str; 2] = ["0.2.0", "0.2.1"];
+pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.2.1"];
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct Scheduler {

@@ -76,6 +76,7 @@ pub struct NetworkState {
     dataset_states: HashMap<DatasetId, DatasetState>,
     last_pings: HashMap<PeerId, Instant>,
     worker_greylist: HashMap<PeerId, Instant>,
+    workers_without_allocation: HashSet<PeerId>,
     registered_workers: HashSet<PeerId>,
 }
 
@@ -90,46 +91,51 @@ impl NetworkState {
         // Choose a random active worker having the requested start_block
         let mut worker = dataset_state
             .get_workers_with_block(start_block)
-            .filter(|peer_id| self.worker_is_active(peer_id, false))
+            .filter(|peer_id| self.worker_available(peer_id, false))
             .choose(&mut rand::thread_rng());
 
         // If no worker is found, try grey-listed workers
         if worker.is_none() {
             worker = dataset_state
                 .get_workers_with_block(start_block)
-                .filter(|peer_id| self.worker_is_active(peer_id, true))
+                .filter(|peer_id| self.worker_available(peer_id, true))
                 .choose(&mut rand::thread_rng());
         }
 
         worker
     }
 
-    fn worker_is_active(&self, worker_id: &PeerId, allow_greylisted: bool) -> bool {
-        // Check if worker is registered on chain
-        if !self.registered_workers.contains(worker_id) {
-            return false;
-        }
+    fn worker_available(&self, worker_id: &PeerId, allow_greylisted: bool) -> bool {
+        self.registered_workers.contains(worker_id)
+            && self.worker_has_allocation(worker_id)
+            && self.worker_active(worker_id)
+            && (allow_greylisted || !self.worker_greylisted(worker_id))
+    }
 
-        let now = Instant::now();
-
-        // Check if the last ping wasn't too long ago
+    fn worker_active(&self, worker_id: &PeerId) -> bool {
         let inactive_threshold = Config::get().worker_inactive_threshold;
-        match self.last_pings.get(worker_id) {
-            None => return false,
-            Some(ping) if (*ping + inactive_threshold) < now => return false,
-            _ => (),
-        };
+        self.last_pings
+            .get(worker_id)
+            .is_some_and(|t| *t + inactive_threshold > Instant::now())
+    }
 
-        if allow_greylisted {
-            return true;
-        }
-
-        // Check if the worker is (still) grey-listed
+    fn worker_greylisted(&self, worker_id: &PeerId) -> bool {
         let greylist_time = Config::get().worker_greylist_time;
-        !matches!(
-            self.worker_greylist.get(worker_id),
-            Some(instant) if (*instant + greylist_time) > now
-        )
+        self.worker_greylist
+            .get(worker_id)
+            .is_some_and(|t| *t + greylist_time > Instant::now())
+    }
+
+    pub fn reset_allocations_cache(&mut self) {
+        self.workers_without_allocation.clear();
+    }
+
+    pub fn no_allocation_for_worker(&mut self, worker_id: PeerId) {
+        self.workers_without_allocation.insert(worker_id);
+    }
+
+    pub fn worker_has_allocation(&self, worker_id: &PeerId) -> bool {
+        !self.workers_without_allocation.contains(worker_id)
     }
 
     pub fn update_dataset_states(

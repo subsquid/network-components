@@ -179,6 +179,18 @@ impl Server {
         } = query;
         let dataset = dataset_id.0;
 
+        // Check network_state's cache for allocations first, before DB
+        if !self
+            .network_state
+            .read()
+            .await
+            .worker_has_allocation(&worker_id)
+        {
+            log::warn!("Not enough compute units for worker {worker_id}");
+            let _ = result_sender.send(QueryResult::NotEnoughCUs);
+            return Ok(());
+        }
+
         let enough_cus = self
             .allocations_manager
             .read()
@@ -188,6 +200,10 @@ impl Server {
         if !enough_cus {
             log::warn!("Not enough compute units for worker {worker_id}");
             let _ = result_sender.send(QueryResult::NotEnoughCUs);
+            self.network_state
+                .write()
+                .await
+                .no_allocation_for_worker(worker_id); // Save to cache
             return Ok(());
         }
 
@@ -310,13 +326,24 @@ impl Server {
         );
         let (query_id, task) = task_entry.remove_entry();
 
-        // Greylist worker if server error occurred during query execution
-        if let query_result::Result::ServerError(ref e) = result {
-            log::warn!("Server error returned for query {query_id}: {e}");
-            self.network_state
-                .write()
-                .await
-                .greylist_worker(task.worker_id);
+        match &result {
+            // Greylist worker if server error occurred during query execution
+            query_result::Result::ServerError(e) => {
+                log::warn!("Server error returned for query {query_id}: {e}");
+                self.network_state
+                    .write()
+                    .await
+                    .greylist_worker(task.worker_id);
+            }
+            // Add worker to the missing allocations cache
+            query_result::Result::BadRequest(e) if e == "Not enough compute units allocated" => {
+                log::warn!("Query {query_id} failed: {e}");
+                self.network_state
+                    .write()
+                    .await
+                    .no_allocation_for_worker(task.worker_id);
+            }
+            _ => {}
         }
 
         if Config::get().send_metrics {

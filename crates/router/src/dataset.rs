@@ -33,15 +33,11 @@ impl Storage for S3Storage {
         let tops = self.ls(prefix).await?;
 
         let mut top: Option<String> = None;
-        if tops.len() == 1 {
-            top = Some(tops[0].clone())
-        } else {
-            for item in tops.iter().rev() {
-                let block_num = item.parse::<u32>().map_err(|err| err.to_string())?;
-                if block_num <= next_block {
-                    top = Some(item.clone());
-                    break;
-                }
+        for item in tops.into_iter().rev() {
+            let block_num = item.parse::<u32>().map_err(|err| err.to_string())?;
+            top = Some(item);
+            if block_num <= next_block {
+                break;
             }
         }
 

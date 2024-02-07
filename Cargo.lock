@@ -4180,7 +4180,7 @@ checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
 name = "logs-collector"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4469,7 +4469,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4484,10 +4484,12 @@ dependencies = [
  "hex",
  "iter_num_tools",
  "itertools 0.12.0",
+ "lazy_static",
  "log",
  "nonempty",
  "rand 0.8.5",
  "random_choice",
+ "semver",
  "serde",
  "serde_json",
  "serde_with",
@@ -5283,7 +5285,7 @@ checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "query-gateway"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "axum",
@@ -5300,6 +5302,7 @@ dependencies = [
  "prometheus",
  "rand 0.8.5",
  "rusqlite",
+ "semver",
  "serde",
  "serde_with",
  "serde_yaml",
@@ -6497,6 +6500,7 @@ dependencies = [
  "hex",
  "prost",
  "prost-build",
+ "semver",
  "serde",
  "sha3",
  "subsquid-network-transport",

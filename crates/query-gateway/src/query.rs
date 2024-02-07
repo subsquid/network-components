@@ -24,7 +24,7 @@ pub enum QueryResult {
     Ok(OkResult),
     BadRequest(String),
     ServerError(String),
-    NotEnoughCUs,
+    NoAllocation,
     Timeout,
 }
 
@@ -34,6 +34,7 @@ impl From<query_result::Result> for QueryResult {
             query_result::Result::Ok(ok) => Self::Ok(ok),
             query_result::Result::BadRequest(err) => Self::BadRequest(err),
             query_result::Result::ServerError(err) => Self::ServerError(err),
+            query_result::Result::NoAllocation(()) => Self::NoAllocation,
         }
     }
 }

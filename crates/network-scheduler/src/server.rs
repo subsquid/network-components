@@ -8,7 +8,7 @@ use tokio::task::JoinHandle;
 
 use subsquid_messages::envelope::Msg;
 use subsquid_messages::signatures::{msg_hash, SignedMessage};
-use subsquid_messages::{Envelope, PingV2 as Ping, Pong, ProstMsg};
+use subsquid_messages::{Envelope, Ping, Pong, ProstMsg};
 use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{MsgContent as MsgContentT, PeerId};
 
@@ -93,7 +93,7 @@ impl Server {
             Err(e) => return log::warn!("Error decoding message: {e:?} peer_id={peer_id}"),
         };
         match envelope.msg {
-            Some(Msg::PingV2(msg)) => self.ping(peer_id, msg).await,
+            Some(Msg::Ping(msg)) => self.ping(peer_id, msg).await,
             Some(Msg::QuerySubmitted(msg)) => self.write_metrics(peer_id, msg).await,
             Some(Msg::QueryFinished(msg)) => self.write_metrics(peer_id, msg).await,
             _ => log::debug!("Unexpected msg received: {envelope:?}"),

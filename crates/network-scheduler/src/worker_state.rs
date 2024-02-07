@@ -1,14 +1,17 @@
-use crate::cli::Config;
-use crate::data_chunk::DataChunk;
-use crate::scheduling_unit::{SchedulingUnit, UnitId};
-use contract_client::Address;
-use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, TimestampMilliSeconds};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::time::{Duration, SystemTime};
-use subsquid_messages::{PingV2 as Ping, RangeSet};
+
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, TimestampMilliSeconds};
+
+use contract_client::Address;
+use subsquid_messages::{Ping, RangeSet};
 use subsquid_network_transport::PeerId;
+
+use crate::cli::Config;
+use crate::data_chunk::DataChunk;
+use crate::scheduling_unit::{SchedulingUnit, UnitId};
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,7 +19,6 @@ pub struct WorkerState {
     pub peer_id: PeerId,
     pub address: Address,
     #[serde_as(as = "TimestampMilliSeconds")]
-    #[serde(default = "SystemTime::now")]
     pub last_ping: SystemTime,
     pub version: Option<String>,
     pub jailed: bool,
@@ -24,23 +26,41 @@ pub struct WorkerState {
     pub assigned_bytes: u64, // Can be outdated, source of truth is assigned_units
     pub stored_ranges: HashMap<String, RangeSet>, // dataset -> ranges
     pub stored_bytes: u64,
-    #[serde(default)]
     pub num_missing_chunks: u32,
     #[serde_as(as = "TimestampMilliSeconds")]
-    #[serde(default = "SystemTime::now")]
     pub last_assignment: SystemTime,
     #[serde_as(as = "TimestampMilliSeconds")]
-    #[serde(default = "SystemTime::now")]
     pub last_successful_dial: SystemTime,
     #[serde_as(as = "TimestampMilliSeconds")]
-    #[serde(default = "SystemTime::now")]
     pub last_dial_time: SystemTime,
-    #[serde(default = "def_true")]
     pub last_dial_ok: bool,
+    #[serde(default)]
+    pub jail_reason: Option<JailReason>,
 }
 
-fn def_true() -> bool {
-    true
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum JailReason {
+    Inactive,
+    Unreachable,
+    Stale,
+}
+
+impl Display for JailReason {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            JailReason::Inactive => write!(
+                f,
+                "Worker didn't send pings for over {} seconds",
+                Config::get().worker_inactive_timeout.as_secs()
+            ),
+            JailReason::Unreachable => write!(f, "Worker could not be reached on a public address"),
+            JailReason::Stale => write!(
+                f,
+                "Worker didn't download any of the assigned chunks trough {} seconds",
+                Config::get().worker_stale_timeout.as_secs()
+            ),
+        }
+    }
 }
 
 impl WorkerState {
@@ -60,7 +80,15 @@ impl WorkerState {
             last_successful_dial: SystemTime::now(),
             last_dial_time: SystemTime::now(),
             last_dial_ok: false,
+            jail_reason: None,
         }
+    }
+
+    pub fn jail_reason_str(&self) -> String {
+        self.jail_reason
+            .as_ref()
+            .map(|r| r.to_string())
+            .unwrap_or_else(|| "??".to_string())
     }
 
     fn time_since_last_ping(&self) -> Duration {

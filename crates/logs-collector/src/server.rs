@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,6 +6,7 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
+use contract_client::Client as ContractClient;
 use subsquid_messages::envelope::Msg;
 use subsquid_messages::signatures::SignedMessage;
 use subsquid_messages::{Envelope, LogsCollected, ProstMsg, QueryLogs};
@@ -22,6 +24,7 @@ pub struct Server<T: LogsStorage + Send + Sync + 'static> {
     incoming_messages: Receiver<Message>,
     transport_handle: P2PTransportHandle<MsgContent>,
     logs_collector: Arc<RwLock<LogsCollector<T>>>,
+    registered_workers: Arc<RwLock<HashSet<PeerId>>>,
 }
 
 impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
@@ -35,21 +38,38 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
             incoming_messages,
             transport_handle,
             logs_collector,
+            registered_workers: Default::default(),
         }
     }
 
-    pub async fn run(mut self, store_logs_interval: Duration) -> anyhow::Result<()> {
+    pub async fn run(
+        mut self,
+        contract_client: Box<dyn ContractClient>,
+        store_logs_interval: Duration,
+        worker_update_interval: Duration,
+    ) -> anyhow::Result<()> {
         log::info!("Starting logs collector server");
 
         // Perform initial storage sync to get sequence numbers
         self.logs_collector.write().await.storage_sync().await?;
 
+        // Get registered workers from chain
+        *self.registered_workers.write().await = contract_client
+            .active_workers()
+            .await?
+            .into_iter()
+            .map(|w| w.peer_id)
+            .collect();
+
         let saving_task = self.spawn_saving_task(store_logs_interval);
+        let worker_update_task =
+            self.spawn_worker_update_task(contract_client, worker_update_interval);
         while let Some(msg) = self.incoming_messages.recv().await {
             self.handle_message(msg).await
         }
         log::info!("Server shutting down");
         saving_task.abort();
+        worker_update_task.abort();
         Ok(())
     }
 
@@ -75,6 +95,10 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
             mut queries_executed,
         }: QueryLogs,
     ) {
+        if !self.registered_workers.read().await.contains(&worker_id) {
+            log::warn!("Worker not registered: {worker_id:?}");
+            return;
+        }
         queries_executed = queries_executed
             .into_iter()
             .filter_map(|mut log| {
@@ -92,14 +116,14 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
             .collect_logs(worker_id, queries_executed);
     }
 
-    fn spawn_saving_task(&self, store_logs_interval: Duration) -> JoinHandle<()> {
+    fn spawn_saving_task(&self, interval: Duration) -> JoinHandle<()> {
         let collector = self.logs_collector.clone();
         let transport_handle = self.transport_handle.clone();
 
         tokio::spawn(async move {
             log::info!("Starting logs saving task");
             loop {
-                tokio::time::sleep(store_logs_interval).await;
+                tokio::time::sleep(interval).await;
                 let sequence_numbers = match collector.write().await.storage_sync().await {
                     Err(e) => {
                         log::error!("Error saving logs to storage: {e:?}");
@@ -117,6 +141,29 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
                 {
                     log::error!("Error sending message: {e:?}");
                 }
+            }
+        })
+    }
+
+    fn spawn_worker_update_task(
+        &self,
+        contract_client: Box<dyn ContractClient>,
+        interval: Duration,
+    ) -> JoinHandle<()> {
+        let registered_workers = self.registered_workers.clone();
+        tokio::spawn(async move {
+            log::info!("Starting worker update task");
+            loop {
+                tokio::time::sleep(interval).await;
+                match contract_client.active_workers().await {
+                    Ok(workers) => {
+                        *registered_workers.write().await = workers
+                            .into_iter()
+                            .map(|w| w.peer_id)
+                            .collect::<HashSet<PeerId>>();
+                    }
+                    Err(e) => log::error!("Error getting registered workers: {e:?}"),
+                };
             }
         })
     }

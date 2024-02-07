@@ -124,5 +124,5 @@ mod sql {
     pub const GET_EPOCH: &str = "SELECT COALESCE(MAX(epoch), 0) FROM worker_allocations";
 
     pub const GET_SUMMARY: &str =
-        "SELECT sum(allocated_cus), sum(spent_cus) FROM worker_allocations";
+        "SELECT COALESCE(sum(allocated_cus), 0), COALESCE(sum(spent_cus), 0) FROM worker_allocations";
 }

@@ -7,7 +7,7 @@ use serde_with::{serde_as, TimestampMilliSeconds};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use subsquid_messages::{PingV2 as Ping, QueryFinished, QuerySubmitted};
+use subsquid_messages::{Ping, QueryFinished, QuerySubmitted};
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Cli;

@@ -32,10 +32,17 @@ async fn main() -> anyhow::Result<()> {
     // Subscribe to receive worker logs
     transport_handle.subscribe(LOGS_TOPIC).await?;
 
+    let contract_client = contract_client::get_client(&args.rpc).await?;
+
     let storage = ClickhouseStorage::new(args.clickhouse).await?;
     let logs_collector = LogsCollector::new(storage);
     let storage_sync_interval = Duration::from_secs(args.storage_sync_interval_sec as u64);
+    let worker_update_interval = Duration::from_secs(args.worker_update_interval_sec as u64);
     Server::new(incoming_messages, transport_handle, logs_collector)
-        .run(storage_sync_interval)
+        .run(
+            contract_client,
+            storage_sync_interval,
+            worker_update_interval,
+        )
         .await
 }

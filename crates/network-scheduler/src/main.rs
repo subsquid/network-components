@@ -36,13 +36,14 @@ async fn main() -> anyhow::Result<()> {
 
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
+    let local_peer_id = transport_builder.local_peer_id();
     let (incoming_messages, transport_handle) = transport_builder.run().await?;
 
     // Subscribe to receive worker pings
     transport_handle.subscribe(PING_TOPIC).await?;
 
     // Get scheduling units
-    let storage = S3Storage::new().await;
+    let storage = S3Storage::new(local_peer_id).await;
     let incoming_units = storage.get_incoming_units().await;
     let scheduler = storage.load_scheduler().await?;
     let contract_client = contract_client::get_client(&args.rpc).await?;

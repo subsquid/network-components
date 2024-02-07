@@ -10,6 +10,7 @@ signatures = ["subsquid-network-transport"]
 anyhow = "1"
 hex = { version = "0.4", features = ["serde"] }
 prost = "0.12"
+semver = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"] }
 sha3 = "0.10"
 

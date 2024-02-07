@@ -3,13 +3,15 @@ use std::time::SystemTime;
 
 use iter_num_tools::lin_space;
 use itertools::Itertools;
+use lazy_static::lazy_static;
 use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
 use random_choice::random_choice;
+use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 
 use contract_client::Worker;
-use subsquid_messages::{pong::Status as WorkerStatus, PingV2 as Ping};
+use subsquid_messages::{pong::Status as WorkerStatus, Ping};
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;
@@ -17,8 +19,9 @@ use crate::data_chunk::chunks_to_worker_state;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::worker_state::WorkerState;
 
-pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.2.1"];
-
+lazy_static! {
+    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.2.1, <=0.2.2".parse().unwrap();
+}
 #[derive(Default, Serialize, Deserialize)]
 pub struct Scheduler {
     known_units: HashMap<UnitId, SchedulingUnit>,
@@ -65,8 +68,8 @@ impl Scheduler {
 
     /// Register ping msg from a worker. Returns worker status if ping was accepted, otherwise None
     pub fn ping(&mut self, worker_id: PeerId, msg: Ping) -> WorkerStatus {
-        let version = msg.version.clone().unwrap_or_default();
-        if !SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == version) {
+        let version = msg.sem_version();
+        if !SUPPORTED_WORKER_VERSIONS.matches(&version) {
             log::debug!("Worker {worker_id} version not supported: {}", version);
             return WorkerStatus::UnsupportedVersion(());
         }
@@ -79,7 +82,12 @@ impl Scheduler {
         };
         worker_state.ping(msg);
         if worker_state.jailed {
-            return WorkerStatus::Jailed(());
+            // Legacy worker version handling
+            return if version < Version::new(0, 2, 2) {
+                WorkerStatus::JailedV1(())
+            } else {
+                WorkerStatus::Jailed(worker_state.jail_reason_str())
+            };
         }
         let state = chunks_to_worker_state(worker_state.assigned_chunks(&self.known_units));
         WorkerStatus::Active(state)

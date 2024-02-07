@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::ops::Deref;
 use std::time::Duration;
 
@@ -12,8 +13,6 @@ use crate::cli::Config;
 use crate::data_chunk::DataChunk;
 use crate::scheduler::Scheduler;
 use crate::scheduling_unit::{bundle_chunks, SchedulingUnit};
-
-const SCHEDULER_STATE_KEY: &str = "scheduler_state.json";
 
 #[derive(Clone)]
 struct DatasetStorage {
@@ -56,9 +55,9 @@ impl TryFrom<Object> for S3Object {
 }
 
 impl DatasetStorage {
-    pub fn new(bucket: String, client: s3::Client) -> Self {
+    pub fn new(bucket: impl ToString, client: s3::Client) -> Self {
         Self {
-            bucket,
+            bucket: bucket.to_string(),
             client,
             last_key: None,
             last_block: None,
@@ -198,23 +197,29 @@ impl DatasetStorage {
 pub struct S3Storage {
     client: s3::Client,
     config: &'static Config,
+    scheduler_state_key: String,
 }
 
 impl S3Storage {
-    pub async fn new() -> Self {
+    pub async fn new(scheduler_id: impl Display) -> Self {
         let config = Config::get();
         let s3_config = aws_config::from_env()
-            .endpoint_url(config.s3_endpoint.clone())
+            .endpoint_url(&config.s3_endpoint)
             .load()
             .await;
         let client = s3::Client::new(&s3_config);
-        Self { client, config }
+        let scheduler_state_key = format!("scheduler_{scheduler_id}.json");
+        Self {
+            client,
+            config,
+            scheduler_state_key,
+        }
     }
 
     pub async fn get_incoming_units(&self) -> Receiver<SchedulingUnit> {
         let (unit_sender, unit_receiver) = mpsc::channel(100);
 
-        for bucket in self.config.dataset_buckets.clone() {
+        for bucket in self.config.dataset_buckets.iter() {
             let storage = DatasetStorage::new(bucket, self.client.clone());
             let incoming_chunks = storage.get_incoming_chunks();
             bundle_chunks(
@@ -231,7 +236,7 @@ impl S3Storage {
             .client
             .get_object()
             .bucket(&self.config.scheduler_state_bucket)
-            .key(SCHEDULER_STATE_KEY)
+            .key(&self.scheduler_state_key)
             .send()
             .await;
         let bytes = match api_result {
@@ -258,7 +263,7 @@ impl S3Storage {
             .client
             .put_object()
             .bucket(&self.config.scheduler_state_bucket)
-            .key(SCHEDULER_STATE_KEY)
+            .key(&self.scheduler_state_key)
             .body(state.into())
             .send()
             .await

@@ -1,3 +1,5 @@
+use lazy_static::lazy_static;
+use semver::VersionReq;
 use std::collections::hash_map::{Entry, OccupiedEntry};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,8 +12,8 @@ use tokio::task::JoinHandle;
 
 use subsquid_messages::signatures::SignedMessage;
 use subsquid_messages::{
-    envelope::Msg, query_finished, query_result, Envelope, PingV2 as Ping, ProstMsg,
-    Query as QueryMsg, QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, SizeAndHash,
+    envelope::Msg, query_finished, query_result, Envelope, Ping, ProstMsg, Query as QueryMsg,
+    QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, SizeAndHash,
 };
 use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{Keypair, MsgContent as MsgContentT, PeerId};
@@ -27,7 +29,9 @@ pub type Message = subsquid_network_transport::Message<MsgContent>;
 
 const COMP_UNITS_PER_QUERY: u32 = 1;
 
-pub const SUPPORTED_WORKER_VERSIONS: [&str; 1] = ["0.2.1"];
+lazy_static! {
+    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.2.2".parse().unwrap();
+}
 
 #[derive(Debug)]
 struct Task {
@@ -187,7 +191,7 @@ impl Server {
             .worker_has_allocation(&worker_id)
         {
             log::warn!("Not enough compute units for worker {worker_id}");
-            let _ = result_sender.send(QueryResult::NotEnoughCUs);
+            let _ = result_sender.send(QueryResult::NoAllocation);
             return Ok(());
         }
 
@@ -199,7 +203,7 @@ impl Server {
             .await?;
         if !enough_cus {
             log::warn!("Not enough compute units for worker {worker_id}");
-            let _ = result_sender.send(QueryResult::NotEnoughCUs);
+            let _ = result_sender.send(QueryResult::NoAllocation);
             self.network_state
                 .write()
                 .await
@@ -283,7 +287,7 @@ impl Server {
         let Envelope { msg } = Envelope::decode(content.as_slice())?;
         match msg {
             Some(Msg::QueryResult(result)) => self.query_result(peer_id, result).await?,
-            Some(Msg::PingV2(ping)) if topic.as_ref().is_some_and(|t| t == PING_TOPIC) => {
+            Some(Msg::Ping(ping)) if topic.as_ref().is_some_and(|t| t == PING_TOPIC) => {
                 self.ping(peer_id, ping).await
             }
             _ => log::debug!("Unexpected message received: {msg:?}"),
@@ -295,8 +299,8 @@ impl Server {
         log::debug!("Got ping from {peer_id}");
         log::trace!("Ping from {peer_id}: {ping:?}");
 
-        let version = ping.version.clone().unwrap_or_default();
-        if !SUPPORTED_WORKER_VERSIONS.iter().any(|v| *v == version) {
+        let version = ping.sem_version();
+        if !SUPPORTED_WORKER_VERSIONS.matches(&version) {
             return log::debug!("Worker {peer_id} version not supported: {}", version);
         }
 
@@ -336,8 +340,7 @@ impl Server {
                     .greylist_worker(task.worker_id);
             }
             // Add worker to the missing allocations cache
-            query_result::Result::BadRequest(e) if e == "Not enough compute units allocated" => {
-                log::warn!("Query {query_id} failed: {e}");
+            query_result::Result::NoAllocation(()) => {
                 self.network_state
                     .write()
                     .await

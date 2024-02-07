@@ -37,6 +37,7 @@ impl From<&query_result::Result> for query_finished::Result {
             query_result::Result::Ok(OkResult { data, .. }) => Self::Ok(SizeAndHash::compute(data)),
             query_result::Result::BadRequest(err) => Self::BadRequest(err.clone()),
             query_result::Result::ServerError(err) => Self::ServerError(err.clone()),
+            query_result::Result::NoAllocation(()) => Self::NoAllocation(()),
         }
     }
 }
@@ -51,5 +52,15 @@ impl SizeAndHash {
             size: Some(size),
             sha3_256: hash.to_vec(),
         }
+    }
+}
+
+#[cfg(feature = "semver")]
+impl Ping {
+    pub fn sem_version(&self) -> semver::Version {
+        self.version
+            .as_ref()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| semver::Version::new(0, 0, 1))
     }
 }

@@ -88,7 +88,7 @@ async fn execute_query(
         Ok(QueryResult::ServerError(err)) => server_error(err),
         Ok(QueryResult::BadRequest(err)) => bad_request(err),
         Ok(QueryResult::Timeout) => query_timeout(),
-        Ok(QueryResult::NotEnoughCUs) => not_enough_cus(),
+        Ok(QueryResult::NoAllocation) => no_allocation(),
         Ok(QueryResult::Ok(result)) => ok_response(result, headers),
     }
 }
@@ -109,8 +109,8 @@ fn query_timeout() -> Response {
 }
 
 #[inline(always)]
-fn not_enough_cus() -> Response {
-    (StatusCode::FORBIDDEN, "Not enough compute units").into_response()
+fn no_allocation() -> Response {
+    (StatusCode::FORBIDDEN, "Not enough compute units allocated").into_response()
 }
 
 fn ok_response(result: OkResult, request_headers: HeaderMap) -> Response {

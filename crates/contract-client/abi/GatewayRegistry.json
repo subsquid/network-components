@@ -89,6 +89,63 @@
       {
         "indexed":true,
         "internalType":"address",
+        "name":"gatewayOperator",
+        "type":"address"
+      },
+      {
+        "indexed":true,
+        "internalType":"uint256",
+        "name":"stakeIndex",
+        "type":"uint256"
+      },
+      {
+        "indexed":false,
+        "internalType":"uint128",
+        "name":"lockEnd",
+        "type":"uint128"
+      }
+    ],
+    "name":"AutoextensionDisabled",
+    "type":"event"
+  },
+  {
+    "anonymous":false,
+    "inputs":[
+      {
+        "indexed":true,
+        "internalType":"address",
+        "name":"gatewayOperator",
+        "type":"address"
+      },
+      {
+        "indexed":true,
+        "internalType":"uint256",
+        "name":"stakeIndex",
+        "type":"uint256"
+      }
+    ],
+    "name":"AutoextensionEnabled",
+    "type":"event"
+  },
+  {
+    "anonymous":false,
+    "inputs":[
+      {
+        "indexed":false,
+        "internalType":"uint256",
+        "name":"newBlockTime",
+        "type":"uint256"
+      }
+    ],
+    "name":"AverageBlockTimeChanged",
+    "type":"event"
+  },
+  {
+    "anonymous":false,
+    "inputs":[
+      {
+        "indexed":true,
+        "internalType":"address",
         "name":"strategy",
         "type":"address"
       }
@@ -283,9 +340,9 @@
       },
       {
         "indexed":false,
-        "internalType":"bytes",
-        "name":"peerId",
-        "type":"bytes"
+        "internalType":"uint256",
+        "name":"stakeIndex",
+        "type":"uint256"
       },
       {
         "indexed":false,
@@ -377,12 +434,6 @@
       },
       {
         "indexed":false,
-        "internalType":"bytes",
-        "name":"peerId",
-        "type":"bytes"
-      },
-      {
-        "indexed":false,
         "internalType":"uint256",
         "name":"amount",
         "type":"uint256"
@@ -399,12 +450,6 @@
         "internalType":"address",
         "name":"gatewayOperator",
         "type":"address"
-      },
-      {
-        "indexed":false,
-        "internalType":"bytes",
-        "name":"peerId",
-        "type":"bytes"
       },
       {
         "indexed":false,
@@ -449,13 +494,8 @@
   {
     "inputs":[
       {
-        "internalType":"bytes",
-        "name":"peerId",
-        "type":"bytes"
-      },
-      {
         "internalType":"uint256[]",
-        "name":"workerId",
+        "name":"workerIds",
         "type":"uint256[]"
       },
       {
@@ -546,23 +586,50 @@
   },
   {
     "inputs":[
-      {
-        "internalType":"bytes",
-        "name":"peerId",
-        "type":"bytes"
-      },
+
+    ],
+    "name":"disableAllAutoExtensions",
+    "outputs":[
+
+    ],
+    "stateMutability":"nonpayable",
+    "type":"function"
+  },
+  {
+    "inputs":[
       {
         "internalType":"uint256",
-        "name":"amount",
+        "name":"index",
         "type":"uint256"
-      },
-      {
-        "internalType":"uint128",
-        "name":"durationEpochs",
-        "type":"uint128"
       }
     ],
-    "name":"extend",
+    "name":"disableAutoExtension",
+    "outputs":[
+
+    ],
+    "stateMutability":"nonpayable",
+    "type":"function"
+  },
+  {
+    "inputs":[
+
+    ],
+    "name":"enableAllAutoExtensions",
+    "outputs":[
+
+    ],
+    "stateMutability":"nonpayable",
+    "type":"function"
+  },
+  {
+    "inputs":[
+      {
+        "internalType":"uint256",
+        "name":"index",
+        "type":"uint256"
+      }
+    ],
+    "name":"enableAutoExtension",
     "outputs":[
 
     ],
@@ -596,6 +663,25 @@
         "type":"bytes"
       }
     ],
+    "name":"getCluster",
+    "outputs":[
+      {
+        "internalType":"bytes[]",
+        "name":"clusterPeerIds",
+        "type":"bytes[]"
+      }
+    ],
+    "stateMutability":"view",
+    "type":"function"
+  },
+  {
+    "inputs":[
+      {
+        "internalType":"bytes",
+        "name":"peerId",
+        "type":"bytes"
+      }
+    ],
     "name":"getGateway",
     "outputs":[
       {
@@ -606,34 +692,19 @@
             "type":"address"
           },
           {
-            "internalType":"bytes",
-            "name":"peerId",
-            "type":"bytes"
-          },
-          {
-            "internalType":"address",
-            "name":"strategy",
-            "type":"address"
-          },
-          {
             "internalType":"address",
             "name":"ownAddress",
             "type":"address"
           },
           {
+            "internalType":"bytes",
+            "name":"peerId",
+            "type":"bytes"
+          },
+          {
             "internalType":"string",
             "name":"metadata",
             "type":"string"
-          },
-          {
-            "internalType":"uint256",
-            "name":"totalStaked",
-            "type":"uint256"
-          },
-          {
-            "internalType":"uint256",
-            "name":"totalUnstaked",
-            "type":"uint256"
           }
         ],
         "internalType":"struct GatewayRegistry.Gateway",
@@ -685,9 +756,9 @@
   {
     "inputs":[
       {
-        "internalType":"bytes",
-        "name":"peerId",
-        "type":"bytes"
+        "internalType":"address",
+        "name":"operator",
+        "type":"address"
       }
     ],
     "name":"getStakes",
@@ -712,6 +783,11 @@
           {
             "internalType":"uint128",
             "name":"lockEnd",
+            "type":"uint128"
+          },
+          {
+            "internalType":"uint128",
+            "name":"duration",
             "type":"uint128"
           }
         ],
@@ -909,6 +985,31 @@
   {
     "inputs":[
       {
+        "internalType":"bytes[]",
+        "name":"peerId",
+        "type":"bytes[]"
+      },
+      {
+        "internalType":"string[]",
+        "name":"metadata",
+        "type":"string[]"
+      },
+      {
+        "internalType":"address[]",
+        "name":"gatewayAddress",
+        "type":"address[]"
+      }
+    ],
+    "name":"register",
+    "outputs":[
+
+    ],
+    "stateMutability":"nonpayable",
+    "type":"function"
+  },
+  {
+    "inputs":[
+      {
         "internalType":"bytes32",
         "name":"role",
         "type":"bytes32"
@@ -1059,18 +1160,13 @@
   {
     "inputs":[
       {
-        "internalType":"bytes",
-        "name":"peerId",
-        "type":"bytes"
-      },
-      {
         "internalType":"uint256",
         "name":"amount",
         "type":"uint256"
       },
       {
         "internalType":"uint128",
-        "name":"durationEpochs",
+        "name":"durationBlocks",
         "type":"uint128"
       }
     ],
@@ -1084,9 +1180,34 @@
   {
     "inputs":[
       {
-        "internalType":"bytes",
-        "name":"peerId",
-        "type":"bytes"
+        "internalType":"uint256",
+        "name":"amount",
+        "type":"uint256"
+      },
+      {
+        "internalType":"uint128",
+        "name":"durationBlocks",
+        "type":"uint128"
+      },
+      {
+        "internalType":"bool",
+        "name":"withAutoExtension",
+        "type":"bool"
+      }
+    ],
+    "name":"stake",
+    "outputs":[
+
+    ],
+    "stateMutability":"nonpayable",
+    "type":"function"
+  },
+  {
+    "inputs":[
+      {
+        "internalType":"address",
+        "name":"operator",
+        "type":"address"
       }
     ],
     "name":"staked",
@@ -1163,10 +1284,20 @@
   {
     "inputs":[
       {
-        "internalType":"bytes",
+        "internalType":"bytes[]",
         "name":"peerId",
-        "type":"bytes"
-      },
+        "type":"bytes[]"
+      }
+    ],
+    "name":"unregister",
+    "outputs":[
+
+    ],
+    "stateMutability":"nonpayable",
+    "type":"function"
+  },
+  {
+    "inputs":[
       {
         "internalType":"uint256",
         "name":"amount",
@@ -1183,9 +1314,9 @@
   {
     "inputs":[
       {
-        "internalType":"bytes",
-        "name":"peerId",
-        "type":"bytes"
+        "internalType":"address",
+        "name":"operator",
+        "type":"address"
       }
     ],
     "name":"unstakeable",
@@ -1201,11 +1332,6 @@
   },
   {
     "inputs":[
-      {
-        "internalType":"bytes",
-        "name":"peerId",
-        "type":"bytes"
-      },
       {
         "internalType":"address",
         "name":"strategy",

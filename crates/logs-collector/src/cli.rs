@@ -33,4 +33,12 @@ pub struct Cli {
         default_value = "120"
     )]
     pub storage_sync_interval_sec: u32,
+
+    #[arg(
+        long,
+        env,
+        help = "Interval at which registered workers are updated (seconds)",
+        default_value = "300"
+    )]
+    pub worker_update_interval_sec: u32,
 }

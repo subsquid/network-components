@@ -93,12 +93,6 @@
         "type":"address"
       },
       {
-        "indexed":true,
-        "internalType":"uint256",
-        "name":"stakeIndex",
-        "type":"uint256"
-      },
-      {
         "indexed":false,
         "internalType":"uint128",
         "name":"lockEnd",
@@ -116,12 +110,6 @@
         "internalType":"address",
         "name":"gatewayOperator",
         "type":"address"
-      },
-      {
-        "indexed":true,
-        "internalType":"uint256",
-        "name":"stakeIndex",
-        "type":"uint256"
       }
     ],
     "name":"AutoextensionEnabled",
@@ -341,12 +329,6 @@
       {
         "indexed":false,
         "internalType":"uint256",
-        "name":"stakeIndex",
-        "type":"uint256"
-      },
-      {
-        "indexed":false,
-        "internalType":"uint256",
         "name":"amount",
         "type":"uint256"
       },
@@ -494,6 +476,21 @@
   {
     "inputs":[
       {
+        "internalType":"uint256",
+        "name":"amount",
+        "type":"uint256"
+      }
+    ],
+    "name":"addStake",
+    "outputs":[
+
+    ],
+    "stateMutability":"nonpayable",
+    "type":"function"
+  },
+  {
+    "inputs":[
+      {
         "internalType":"uint256[]",
         "name":"workerIds",
         "type":"uint256[]"
@@ -521,6 +518,25 @@
         "internalType":"uint256",
         "name":"",
         "type":"uint256"
+      }
+    ],
+    "stateMutability":"view",
+    "type":"function"
+  },
+  {
+    "inputs":[
+      {
+        "internalType":"address",
+        "name":"operator",
+        "type":"address"
+      }
+    ],
+    "name":"canUnstake",
+    "outputs":[
+      {
+        "internalType":"bool",
+        "name":"",
+        "type":"bool"
       }
     ],
     "stateMutability":"view",
@@ -588,21 +604,6 @@
     "inputs":[
 
     ],
-    "name":"disableAllAutoExtensions",
-    "outputs":[
-
-    ],
-    "stateMutability":"nonpayable",
-    "type":"function"
-  },
-  {
-    "inputs":[
-      {
-        "internalType":"uint256",
-        "name":"index",
-        "type":"uint256"
-      }
-    ],
     "name":"disableAutoExtension",
     "outputs":[
 
@@ -613,21 +614,6 @@
   {
     "inputs":[
 
-    ],
-    "name":"enableAllAutoExtensions",
-    "outputs":[
-
-    ],
-    "stateMutability":"nonpayable",
-    "type":"function"
-  },
-  {
-    "inputs":[
-      {
-        "internalType":"uint256",
-        "name":"index",
-        "type":"uint256"
-      }
     ],
     "name":"enableAutoExtension",
     "outputs":[
@@ -761,7 +747,7 @@
         "type":"address"
       }
     ],
-    "name":"getStakes",
+    "name":"getStake",
     "outputs":[
       {
         "components":[
@@ -789,11 +775,21 @@
             "internalType":"uint128",
             "name":"duration",
             "type":"uint128"
+          },
+          {
+            "internalType":"bool",
+            "name":"autoExtension",
+            "type":"bool"
+          },
+          {
+            "internalType":"uint256",
+            "name":"oldCUs",
+            "type":"uint256"
           }
         ],
-        "internalType":"struct GatewayRegistry.Stake[]",
+        "internalType":"struct GatewayRegistry.Stake",
         "name":"",
-        "type":"tuple[]"
+        "type":"tuple"
       }
     ],
     "stateMutability":"view",
@@ -1298,36 +1294,13 @@
   },
   {
     "inputs":[
-      {
-        "internalType":"uint256",
-        "name":"amount",
-        "type":"uint256"
-      }
+
     ],
     "name":"unstake",
     "outputs":[
 
     ],
     "stateMutability":"nonpayable",
-    "type":"function"
-  },
-  {
-    "inputs":[
-      {
-        "internalType":"address",
-        "name":"operator",
-        "type":"address"
-      }
-    ],
-    "name":"unstakeable",
-    "outputs":[
-      {
-        "internalType":"uint256",
-        "name":"",
-        "type":"uint256"
-      }
-    ],
-    "stateMutability":"view",
     "type":"function"
   },
   {

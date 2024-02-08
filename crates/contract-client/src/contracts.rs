@@ -18,7 +18,7 @@ lazy_static! {
     pub static ref GATEWAY_REGISTRY_CONTRACT_ADDR: Address =
         std::env::var("GATEWAY_REGISTRY_CONTRACT_ADDR")
             .as_deref()
-            .unwrap_or("0x4e79DB9e4bfb48d90FF39f6843ed09f53163bD97")
+            .unwrap_or("0x42B67155a68D3F4092030d2AE15e03Fe6221013d")
             .parse()
             .expect("Invalid GatewayRegistry contract address");
     pub static ref WORKER_REGISTRATION_CONTRACT_ADDR: Address =

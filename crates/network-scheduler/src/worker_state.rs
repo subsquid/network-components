@@ -30,10 +30,11 @@ pub struct WorkerState {
     #[serde_as(as = "TimestampMilliSeconds")]
     pub last_assignment: SystemTime,
     #[serde_as(as = "TimestampMilliSeconds")]
-    pub last_successful_dial: SystemTime,
-    #[serde_as(as = "TimestampMilliSeconds")]
     pub last_dial_time: SystemTime,
     pub last_dial_ok: bool,
+    #[serde_as(as = "Option<TimestampMilliSeconds>")]
+    #[serde(default)]
+    pub unreachable_since: Option<SystemTime>,
     #[serde(default)]
     pub jail_reason: Option<JailReason>,
 }
@@ -77,9 +78,9 @@ impl WorkerState {
             assigned_bytes: 0,
             num_missing_chunks: 0,
             last_assignment: SystemTime::now(),
-            last_successful_dial: SystemTime::now(),
             last_dial_time: SystemTime::now(),
             last_dial_ok: false,
+            unreachable_since: None,
             jail_reason: None,
         }
     }
@@ -112,7 +113,9 @@ impl WorkerState {
         self.last_dial_time = now;
         self.last_dial_ok = reachable;
         if reachable {
-            self.last_successful_dial = now;
+            self.unreachable_since = None
+        } else if self.unreachable_since.is_none() {
+            self.unreachable_since = Some(now)
         }
     }
 
@@ -123,12 +126,10 @@ impl WorkerState {
     pub fn is_unreachable(&self) -> bool {
         // Worker is considered unreachable if it hasn't been successfully dialed
         // for at least `worker_unreachable_timeout`
-        !self.last_dial_ok
-            && self
-                .last_successful_dial
-                .elapsed()
-                .expect("time doesn't go backwards")
+        self.unreachable_since.is_some_and(|t| {
+            t.elapsed().expect("time doesn't go backwards")
                 > Config::get().worker_unreachable_timeout
+        })
     }
 
     pub fn remaining_capacity(&self) -> u64 {

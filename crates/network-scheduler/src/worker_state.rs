@@ -38,7 +38,7 @@ pub struct WorkerState {
     pub jail_reason: Option<JailReason>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum JailReason {
     Inactive,
     Unreachable,
@@ -105,6 +105,15 @@ impl WorkerState {
             .map(|r| (r.url, r.ranges.into()))
             .collect();
         self.stored_bytes = msg.stored_bytes.unwrap_or_default();
+    }
+
+    pub fn dialed(&mut self, reachable: bool) {
+        let now = SystemTime::now();
+        self.last_dial_time = now;
+        self.last_dial_ok = reachable;
+        if reachable {
+            self.last_successful_dial = now;
+        }
     }
 
     pub fn is_active(&self) -> bool {
@@ -224,9 +233,10 @@ impl WorkerState {
     }
 
     /// Jail the worker, unassign all units and return their IDs.
-    pub fn jail(&mut self) -> Vec<UnitId> {
+    pub fn jail(&mut self, reason: JailReason) -> Vec<UnitId> {
         log::info!("Jailing worker {}", self.peer_id);
         self.jailed = true;
+        self.jail_reason = Some(reason);
         self.assigned_bytes = 0;
         self.num_missing_chunks = 0;
         self.assigned_units.drain().collect()
@@ -235,6 +245,7 @@ impl WorkerState {
     pub fn release(&mut self) {
         log::info!("Releasing worker {}", self.peer_id);
         self.jailed = false;
+        self.jail_reason = None;
     }
 }
 

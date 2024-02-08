@@ -1,5 +1,4 @@
 use std::collections::{BinaryHeap, HashMap, HashSet};
-use std::time::SystemTime;
 
 use iter_num_tools::lin_space;
 use itertools::Itertools;
@@ -17,7 +16,7 @@ use subsquid_network_transport::PeerId;
 use crate::cli::Config;
 use crate::data_chunk::chunks_to_worker_state;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
-use crate::worker_state::WorkerState;
+use crate::worker_state::{JailReason, WorkerState};
 
 lazy_static! {
     pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.2.1, <=0.2.2".parse().unwrap();
@@ -117,10 +116,7 @@ impl Scheduler {
     pub fn worker_dialed(&mut self, worker_id: PeerId, reachable: bool) {
         log::info!("Dialed worker {worker_id}. reachable={reachable}");
         match self.worker_states.get_mut(&worker_id) {
-            Some(worker_state) => {
-                worker_state.last_dial_ok = reachable;
-                worker_state.last_dial_time = SystemTime::now();
-            }
+            Some(worker_state) => worker_state.dialed(reachable),
             None => log::error!("Unknown worker dialed: {worker_id}"),
         }
     }
@@ -239,22 +235,29 @@ impl Scheduler {
     /// Jail workers which don't send pings.
     pub fn jail_inactive_workers(&mut self) -> bool {
         log::info!("Jailing inactive workers");
-        self.jail_workers(|w| !w.is_active())
+        self.jail_workers(|w| !w.is_active(), JailReason::Inactive)
     }
 
     /// Jail workers which don't make download progress.
     pub fn jail_stale_workers(&mut self) -> bool {
         log::info!("Jailing stale workers");
         let known_units = self.known_units.clone();
-        self.jail_workers(|w| !w.check_download_progress(&known_units))
+        self.jail_workers(
+            |w| !w.check_download_progress(&known_units),
+            JailReason::Stale,
+        )
     }
 
     pub fn jail_unreachable_workers(&mut self) -> bool {
         log::info!("Jailing unreachable workers");
-        self.jail_workers(|w| w.is_unreachable())
+        self.jail_workers(|w| w.is_unreachable(), JailReason::Unreachable)
     }
 
-    fn jail_workers(&mut self, mut criterion: impl FnMut(&mut WorkerState) -> bool) -> bool {
+    fn jail_workers(
+        &mut self,
+        mut criterion: impl FnMut(&mut WorkerState) -> bool,
+        reason: JailReason,
+    ) -> bool {
         let mut num_jailed_workers: usize = 0;
         let mut num_unassigned_units = 0;
 
@@ -266,7 +269,7 @@ impl Scheduler {
                     return;
                 }
 
-                let units = w.jail();
+                let units = w.jail(reason);
                 num_jailed_workers += 1;
                 num_unassigned_units += units.len();
                 for unit_id in units {

@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use axum::routing::get;
 use axum::{Extension, Json, Router, Server};
 use itertools::Itertools;
+use prometheus_client::registry::Registry;
 use serde::Serialize;
 use tokio::sync::RwLock;
 
@@ -98,13 +100,27 @@ async fn get_config() -> Json<Config> {
     Json(Config::get().clone())
 }
 
-pub async fn run_server(scheduler: Arc<RwLock<Scheduler>>, addr: SocketAddr) -> anyhow::Result<()> {
+async fn get_metrics(Extension(metrics_registry): Extension<Arc<RwLock<Registry>>>) -> String {
+    let mut result = String::new();
+    prometheus_client::encoding::text::encode(&mut result, metrics_registry.read().await.deref())
+        .unwrap();
+    result
+}
+
+pub async fn run_server(
+    scheduler: Arc<RwLock<Scheduler>>,
+    addr: SocketAddr,
+    metrics_registry: Registry,
+) -> anyhow::Result<()> {
     log::info!("Starting HTTP server listening on {addr}");
+    let metrics_registry = Arc::new(RwLock::new(metrics_registry));
     let app = Router::new()
         .route("/workers/pings", get(active_workers))
         .route("/chunks", get(chunks))
         .route("/config", get(get_config))
-        .layer(Extension(scheduler));
+        .route("/metrics", get(get_metrics))
+        .layer(Extension(scheduler))
+        .layer(Extension(metrics_registry));
     Server::bind(&addr).serve(app.into_make_service()).await?;
     Ok(())
 }

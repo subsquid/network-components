@@ -1,3 +1,4 @@
+use prometheus_client::registry::Registry;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -56,13 +57,15 @@ impl Server {
         contract_client: Box<dyn contract_client::Client>,
         storage_client: S3Storage,
         metrics_listen_addr: SocketAddr,
+        metrics_registry: Registry,
     ) -> anyhow::Result<()> {
         log::info!("Starting scheduler server");
         let scheduling_task = self
             .spawn_scheduling_task(contract_client, storage_client.clone())
             .await?;
         let monitoring_task = self.spawn_worker_monitoring_task();
-        let metrics_server_task = self.spawn_metrics_server_task(metrics_listen_addr);
+        let metrics_server_task =
+            self.spawn_metrics_server_task(metrics_listen_addr, metrics_registry);
         let jail_inactive_task = self.spawn_jail_inactive_workers_task(storage_client.clone());
         let jail_stale_task = self.spawn_jail_stale_workers_task(storage_client.clone());
         let jail_unreachable_task = self.spawn_jail_unreachable_workers_task(storage_client);
@@ -233,10 +236,16 @@ impl Server {
         })
     }
 
-    fn spawn_metrics_server_task(&self, metrics_listen_addr: SocketAddr) -> JoinHandle<()> {
+    fn spawn_metrics_server_task(
+        &self,
+        metrics_listen_addr: SocketAddr,
+        metrics_registry: Registry,
+    ) -> JoinHandle<()> {
         let scheduler = self.scheduler.clone();
         tokio::spawn(async move {
-            if let Err(e) = metrics_server::run_server(scheduler, metrics_listen_addr).await {
+            if let Err(e) =
+                metrics_server::run_server(scheduler, metrics_listen_addr, metrics_registry).await
+            {
                 log::error!("Metrics server crashed: {e:?}");
             }
         })

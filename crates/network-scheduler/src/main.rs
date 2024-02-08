@@ -1,5 +1,6 @@
 use clap::Parser;
 use env_logger::Env;
+use prometheus_client::registry::Registry;
 
 use subsquid_network_transport::transport::P2PTransportBuilder;
 
@@ -33,9 +34,11 @@ async fn main() -> anyhow::Result<()> {
 
     // Open file for writing metrics
     let metrics_writer = MetricsWriter::from_cli(&args).await?;
+    let mut metrics_registry = Registry::default();
 
     // Build P2P transport
-    let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
+    let mut transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
+    transport_builder.with_registry(&mut metrics_registry);
     let local_peer_id = transport_builder.local_peer_id();
     let (incoming_messages, transport_handle) = transport_builder.run().await?;
 
@@ -55,6 +58,11 @@ async fn main() -> anyhow::Result<()> {
         scheduler,
         metrics_writer,
     )
-    .run(contract_client, storage, args.http_listen_addr)
+    .run(
+        contract_client,
+        storage,
+        args.http_listen_addr,
+        metrics_registry,
+    )
     .await
 }

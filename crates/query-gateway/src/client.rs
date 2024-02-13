@@ -91,7 +91,7 @@ pub async fn get_client(
         allocations_manager,
         keypair,
     );
-    tokio::spawn(server.run());
+    tokio::spawn(server.run()); // TODO: Store JoinHandle and cancel the task
 
     let client = QueryClient {
         network_state,

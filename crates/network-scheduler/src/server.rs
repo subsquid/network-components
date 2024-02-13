@@ -1,8 +1,9 @@
-use prometheus_client::registry::Registry;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use prometheus_client::registry::Registry;
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
@@ -31,6 +32,7 @@ pub struct Server {
     transport_handle: P2PTransportHandle<MsgContent>,
     scheduler: Arc<RwLock<Scheduler>>,
     metrics_writer: Arc<RwLock<MetricsWriter>>,
+    child_tasks: Vec<JoinHandle<()>>,
 }
 
 impl Server {
@@ -49,6 +51,7 @@ impl Server {
             transport_handle,
             scheduler,
             metrics_writer,
+            child_tasks: vec![],
         }
     }
 
@@ -60,29 +63,68 @@ impl Server {
         metrics_registry: Registry,
     ) -> anyhow::Result<()> {
         log::info!("Starting scheduler server");
-        let scheduling_task = self
-            .spawn_scheduling_task(contract_client, storage_client.clone())
-            .await?;
-        let monitoring_task = self.spawn_worker_monitoring_task();
-        let metrics_server_task =
-            self.spawn_metrics_server_task(metrics_listen_addr, metrics_registry);
-        let jail_inactive_task = self.spawn_jail_inactive_workers_task(storage_client.clone());
-        let jail_stale_task = self.spawn_jail_stale_workers_task(storage_client.clone());
-        let jail_unreachable_task = self.spawn_jail_unreachable_workers_task(storage_client);
+        self.spawn_child_tasks(
+            contract_client,
+            storage_client,
+            metrics_listen_addr,
+            metrics_registry,
+        )
+        .await?;
+
+        let mut sigint = signal(SignalKind::interrupt())?;
+        let mut sigterm = signal(SignalKind::terminate())?;
         loop {
             tokio::select! {
                 Some(msg) = self.incoming_messages.recv() => self.handle_message(msg).await,
                 Some(unit) = self.incoming_units.recv() => self.new_unit(unit).await,
+                _ = sigint.recv() => break,
+                _ = sigterm.recv() => break,
                 else => break
             }
         }
+
         log::info!("Server shutting down");
-        scheduling_task.abort();
-        monitoring_task.abort();
-        metrics_server_task.abort();
-        jail_inactive_task.abort();
-        jail_stale_task.abort();
-        jail_unreachable_task.abort();
+        self.stop_child_tasks().await?;
+        self.transport_handle.stop().await?;
+
+        Ok(())
+    }
+
+    async fn spawn_child_tasks(
+        &mut self,
+        contract_client: Box<dyn contract_client::Client>,
+        storage_client: S3Storage,
+        metrics_listen_addr: SocketAddr,
+        metrics_registry: Registry,
+    ) -> anyhow::Result<()> {
+        self.child_tasks = vec![
+            self.spawn_scheduling_task(contract_client, storage_client.clone())
+                .await?,
+            self.spawn_worker_monitoring_task(),
+            self.spawn_metrics_server_task(metrics_listen_addr, metrics_registry),
+            self.spawn_jail_inactive_workers_task(storage_client.clone()),
+            self.spawn_jail_stale_workers_task(storage_client.clone()),
+            self.spawn_jail_unreachable_workers_task(storage_client),
+        ];
+        Ok(())
+    }
+
+    async fn stop_child_tasks(&mut self) -> anyhow::Result<()> {
+        for task in self.child_tasks.iter() {
+            task.abort();
+        }
+        let join_results = tokio::time::timeout(
+            Duration::from_secs(1),
+            futures::future::join_all(std::mem::take(&mut self.child_tasks)),
+        )
+        .await?;
+        for res in join_results {
+            if let Err(e) = res {
+                if !e.is_cancelled() {
+                    log::error!("Error joining task: {e:?}");
+                }
+            }
+        }
         Ok(())
     }
 

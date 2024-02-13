@@ -10,6 +10,7 @@ use axum::{Router, Server};
 use duration_string::DurationString;
 use flate2::write::GzDecoder;
 use serde::Deserialize;
+use tokio::signal::unix::{signal, SignalKind};
 
 use subsquid_messages::OkResult;
 use subsquid_network_transport::PeerId;
@@ -178,6 +179,21 @@ pub async fn run_server(query_client: QueryClient, addr: &SocketAddr) -> anyhow:
         .route("/query/:dataset_id/:worker_id", post(execute_query))
         .route("/metrics", get(get_metrics))
         .layer(Extension(Arc::new(query_client)));
-    Server::bind(addr).serve(app.into_make_service()).await?;
+
+    let mut sigint = signal(SignalKind::interrupt())?;
+    let mut sigterm = signal(SignalKind::terminate())?;
+    let shutdown = async move {
+        tokio::select! {
+            _ = sigint.recv() => (),
+            _ = sigterm.recv() =>(),
+        }
+    };
+
+    Server::bind(addr)
+        .serve(app.into_make_service())
+        .with_graceful_shutdown(shutdown)
+        .await?;
+
+    log::info!("HTTP server stopped");
     Ok(())
 }

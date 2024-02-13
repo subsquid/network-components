@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::signal::unix::{signal, SignalKind};
 
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
@@ -25,6 +26,7 @@ pub struct Server<T: LogsStorage + Send + Sync + 'static> {
     transport_handle: P2PTransportHandle<MsgContent>,
     logs_collector: Arc<RwLock<LogsCollector<T>>>,
     registered_workers: Arc<RwLock<HashSet<PeerId>>>,
+    child_tasks: Vec<JoinHandle<()>>,
 }
 
 impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
@@ -39,6 +41,7 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
             transport_handle,
             logs_collector,
             registered_workers: Default::default(),
+            child_tasks: vec![],
         }
     }
 
@@ -61,15 +64,50 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
             .map(|w| w.peer_id)
             .collect();
 
-        let saving_task = self.spawn_saving_task(store_logs_interval);
-        let worker_update_task =
-            self.spawn_worker_update_task(contract_client, worker_update_interval);
-        while let Some(msg) = self.incoming_messages.recv().await {
-            self.handle_message(msg).await
+        self.spawn_child_tasks(contract_client, store_logs_interval, worker_update_interval);
+        let mut sigint = signal(SignalKind::interrupt())?;
+        let mut sigterm = signal(SignalKind::terminate())?;
+        loop {
+            tokio::select! {
+                Some(msg) = self.incoming_messages.recv() => self.handle_message(msg).await,
+                _ = sigint.recv() => break,
+                _ = sigterm.recv() => break,
+                else => break
+            }
         }
         log::info!("Server shutting down");
-        saving_task.abort();
-        worker_update_task.abort();
+        self.stop_child_tasks().await?;
+        self.transport_handle.stop().await?;
+        Ok(())
+    }
+
+    fn spawn_child_tasks(
+        &mut self,
+        contract_client: Box<dyn ContractClient>,
+        store_logs_interval: Duration,
+        worker_update_interval: Duration,
+    ) {
+        self.child_tasks = vec![
+            self.spawn_saving_task(store_logs_interval),
+            self.spawn_worker_update_task(contract_client, worker_update_interval),
+        ]
+    }
+    async fn stop_child_tasks(&mut self) -> anyhow::Result<()> {
+        for task in self.child_tasks.iter() {
+            task.abort();
+        }
+        let join_results = tokio::time::timeout(
+            Duration::from_secs(1),
+            futures::future::join_all(std::mem::take(&mut self.child_tasks)),
+        )
+        .await?;
+        for res in join_results {
+            if let Err(e) = res {
+                if !e.is_cancelled() {
+                    log::error!("Error joining task: {e:?}");
+                }
+            }
+        }
         Ok(())
     }
 

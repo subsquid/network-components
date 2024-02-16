@@ -1,18 +1,17 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
 
 use contract_client::Client as ContractClient;
 use subsquid_network_transport::PeerId;
 
 use crate::allocations::AllocationsManager;
-use crate::config::Config;
 use crate::network_state::NetworkState;
 
+#[derive(Clone)]
 pub struct ChainUpdatesHandler {
     network_state: Arc<RwLock<NetworkState>>,
     allocations_manager: Arc<RwLock<AllocationsManager>>,
-    contract_client: Box<dyn ContractClient>,
+    contract_client: Arc<dyn ContractClient>,
     local_peer_id: PeerId,
 }
 
@@ -23,6 +22,7 @@ impl ChainUpdatesHandler {
         contract_client: Box<dyn ContractClient>,
         local_peer_id: PeerId,
     ) -> Self {
+        let contract_client = contract_client.into();
         Self {
             network_state,
             allocations_manager,
@@ -31,23 +31,7 @@ impl ChainUpdatesHandler {
         }
     }
 
-    pub async fn spawn(self) -> anyhow::Result<JoinHandle<()>> {
-        self.handle_updates().await?;
-        Ok(tokio::spawn(self.run()))
-    }
-
-    async fn run(self) {
-        let workers_update_interval = Config::get().workers_update_interval;
-        loop {
-            tokio::time::sleep(workers_update_interval).await;
-            let _ = self
-                .handle_updates()
-                .await
-                .map_err(|e| log::error!("Error handling updates from chain: {e:?}"));
-        }
-    }
-
-    async fn handle_updates(&self) -> anyhow::Result<()> {
+    pub async fn pull_chain_updates(&self) -> anyhow::Result<()> {
         // Check if a new epoch has begun
         log::debug!("Checking for updates from chain");
         let alloc_manager = self.allocations_manager.read().await;

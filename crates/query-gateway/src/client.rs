@@ -4,12 +4,13 @@ use std::time::Duration;
 
 use tokio::sync::{mpsc, oneshot, RwLock};
 
-use crate::allocations::AllocationsManager;
-use crate::chain_updates::ChainUpdatesHandler;
 use contract_client::Client as ContractClient;
+use subsquid_network_transport::task_manager::TaskManager;
 use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{Keypair, PeerId};
 
+use crate::allocations::AllocationsManager;
+use crate::chain_updates::ChainUpdatesHandler;
 use crate::config::{Config, DatasetId};
 use crate::network_state::NetworkState;
 use crate::query::{Query, QueryResult};
@@ -18,9 +19,38 @@ use crate::server::{Message, MsgContent, Server};
 pub struct QueryClient {
     network_state: Arc<RwLock<NetworkState>>,
     query_sender: mpsc::Sender<Query>,
+    _task_manager: TaskManager,
 }
 
 impl QueryClient {
+    pub fn new(
+        network_state: Arc<RwLock<NetworkState>>,
+        query_sender: mpsc::Sender<Query>,
+        chain_updates_handler: ChainUpdatesHandler,
+        server: Server,
+    ) -> Self {
+        let mut task_manager = TaskManager::default();
+        task_manager.spawn(|c| server.run(c));
+
+        let chain_updates_task = move |_| {
+            let chain_updates_handler = chain_updates_handler.clone();
+            async move {
+                chain_updates_handler
+                    .pull_chain_updates()
+                    .await
+                    .unwrap_or_else(|e| log::error!("Error pulling updates from chain: {e:?}"))
+            }
+        };
+        let interval = Config::get().workers_update_interval;
+        task_manager.spawn_periodic(chain_updates_task, interval);
+
+        Self {
+            network_state,
+            query_sender,
+            _task_manager: task_manager,
+        }
+    }
+
     pub async fn get_height(&self, dataset_id: &DatasetId) -> Option<u32> {
         self.network_state.read().await.get_height(dataset_id)
     }
@@ -81,7 +111,7 @@ pub async fn get_client(
         contract_client,
         keypair.public().to_peer_id(),
     );
-    chain_updates_handler.spawn().await?;
+    chain_updates_handler.pull_chain_updates().await?;
 
     let server = Server::new(
         msg_receiver,
@@ -91,11 +121,7 @@ pub async fn get_client(
         allocations_manager,
         keypair,
     );
-    tokio::spawn(server.run()); // TODO: Store JoinHandle and cancel the task
 
-    let client = QueryClient {
-        network_state,
-        query_sender,
-    };
+    let client = QueryClient::new(network_state, query_sender, chain_updates_handler, server);
     Ok(client)
 }

@@ -11,6 +11,7 @@ use serde::Serialize;
 use tokio::sync::RwLock;
 
 use subsquid_messages::RangeSet;
+use subsquid_network_transport::task_manager::CancellationToken;
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;
@@ -111,6 +112,7 @@ pub async fn run_server(
     scheduler: Arc<RwLock<Scheduler>>,
     addr: SocketAddr,
     metrics_registry: Registry,
+    cancel_token: CancellationToken,
 ) -> anyhow::Result<()> {
     log::info!("Starting HTTP server listening on {addr}");
     let metrics_registry = Arc::new(RwLock::new(metrics_registry));
@@ -121,6 +123,9 @@ pub async fn run_server(
         .route("/metrics", get(get_metrics))
         .layer(Extension(scheduler))
         .layer(Extension(metrics_registry));
-    Server::bind(&addr).serve(app.into_make_service()).await?;
+    Server::bind(&addr)
+        .serve(app.into_make_service())
+        .with_graceful_shutdown(cancel_token.cancelled_owned())
+        .await?;
     Ok(())
 }

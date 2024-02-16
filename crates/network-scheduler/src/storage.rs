@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use std::ops::Deref;
+use std::sync::Arc;
 use std::time::Duration;
 
 use aws_sdk_s3 as s3;
@@ -7,7 +8,9 @@ use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::types::Object;
 use itertools::Itertools;
 use nonempty::NonEmpty;
-use tokio::sync::mpsc::{self, Receiver};
+use subsquid_network_transport::task_manager::{CancellationToken, TaskManager};
+use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::Mutex;
 
 use crate::cli::Config;
 use crate::data_chunk::DataChunk;
@@ -156,40 +159,49 @@ impl DatasetStorage {
         Ok(chunk)
     }
 
-    pub fn get_incoming_chunks(mut self) -> Receiver<NonEmpty<DataChunk>> {
-        let (sender, receiver) = mpsc::channel(100);
-        tokio::spawn(async move {
-            log::info!("Reading chunks from bucket {}", self.bucket);
-            loop {
-                let chunks = match self.list_all_new_chunks().await {
-                    Ok(chunks) => chunks,
-                    Err(e) => {
-                        log::error!("Error getting data chunks: {e:?}");
-                        tokio::time::sleep(Duration::from_secs(60)).await;
-                        continue;
+    pub async fn get_incoming_chunks(
+        mut self,
+        sender: Sender<NonEmpty<DataChunk>>,
+        cancel_token: CancellationToken,
+    ) {
+        log::info!("Reading chunks from bucket {}", self.bucket);
+        loop {
+            let chunks_res = tokio::select! {
+                res = self.list_all_new_chunks() => res,
+                _ = cancel_token.cancelled() => break,
+            };
+            let chunks = match chunks_res {
+                Ok(chunks) => chunks,
+                Err(e) => {
+                    log::error!("Error getting data chunks: {e:?}");
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_secs(60)) => continue,
+                        _ = cancel_token.cancelled() => break,
                     }
-                };
-                let chunks = match NonEmpty::from_vec(chunks) {
-                    Some(chunks) => chunks,
-                    None => {
-                        log::info!("Now more chunks for now. Waiting...");
-                        tokio::time::sleep(Duration::from_secs(300)).await;
-                        continue;
-                    }
-                };
-                log::info!(
-                    "Downloaded {} new chunks from bucket {}",
-                    chunks.len(),
-                    self.bucket
-                );
-
-                match sender.send(chunks).await {
-                    Err(_) => return,
-                    Ok(_) => continue,
                 }
+            };
+            let chunks = match NonEmpty::from_vec(chunks) {
+                Some(chunks) => chunks,
+                None => {
+                    log::info!("Now more chunks for now. Waiting...");
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_secs(300)) => continue,
+                        _ = cancel_token.cancelled() => break,
+                    }
+                }
+            };
+            log::info!(
+                "Downloaded {} new chunks from bucket {}",
+                chunks.len(),
+                self.bucket
+            );
+
+            match sender.send(chunks).await {
+                Err(_) => break,
+                Ok(_) => continue,
             }
-        });
-        receiver
+        }
+        log::info!("Chunks stream ended");
     }
 }
 
@@ -198,6 +210,7 @@ pub struct S3Storage {
     client: s3::Client,
     config: &'static Config,
     scheduler_state_key: String,
+    task_manager: Arc<Mutex<TaskManager>>,
 }
 
 impl S3Storage {
@@ -213,20 +226,27 @@ impl S3Storage {
             client,
             config,
             scheduler_state_key,
+            task_manager: Default::default(),
         }
     }
 
     pub async fn get_incoming_units(&self) -> Receiver<SchedulingUnit> {
         let (unit_sender, unit_receiver) = mpsc::channel(100);
-
+        let mut task_manager = self.task_manager.lock().await;
+        let scheduling_unit_size = self.config.scheduling_unit_size;
         for bucket in self.config.dataset_buckets.iter() {
+            let (chunk_sender, chunk_receiver) = mpsc::channel(100);
             let storage = DatasetStorage::new(bucket, self.client.clone());
-            let incoming_chunks = storage.get_incoming_chunks();
-            bundle_chunks(
-                incoming_chunks,
-                unit_sender.clone(),
-                self.config.scheduling_unit_size,
-            );
+            task_manager
+                .spawn(|cancel_token| storage.get_incoming_chunks(chunk_sender, cancel_token));
+            task_manager.spawn(|cancel_token| {
+                bundle_chunks(
+                    chunk_receiver,
+                    unit_sender.clone(),
+                    scheduling_unit_size,
+                    cancel_token,
+                )
+            });
         }
         unit_receiver
     }

@@ -5,12 +5,12 @@ use tokio::signal::unix::{signal, SignalKind};
 
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::RwLock;
-use tokio::task::JoinHandle;
 
 use contract_client::Client as ContractClient;
 use subsquid_messages::envelope::Msg;
 use subsquid_messages::signatures::SignedMessage;
 use subsquid_messages::{Envelope, LogsCollected, ProstMsg, QueryLogs};
+use subsquid_network_transport::task_manager::TaskManager;
 use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{MsgContent as MsgContentT, PeerId};
 
@@ -26,7 +26,7 @@ pub struct Server<T: LogsStorage + Send + Sync + 'static> {
     transport_handle: P2PTransportHandle<MsgContent>,
     logs_collector: Arc<RwLock<LogsCollector<T>>>,
     registered_workers: Arc<RwLock<HashSet<PeerId>>>,
-    child_tasks: Vec<JoinHandle<()>>,
+    task_manager: TaskManager,
 }
 
 impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
@@ -41,7 +41,7 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
             transport_handle,
             logs_collector,
             registered_workers: Default::default(),
-            child_tasks: vec![],
+            task_manager: Default::default(),
         }
     }
 
@@ -64,7 +64,9 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
             .map(|w| w.peer_id)
             .collect();
 
-        self.spawn_child_tasks(contract_client, store_logs_interval, worker_update_interval);
+        self.spawn_saving_task(store_logs_interval);
+        self.spawn_worker_update_task(contract_client, worker_update_interval);
+
         let mut sigint = signal(SignalKind::interrupt())?;
         let mut sigterm = signal(SignalKind::terminate())?;
         loop {
@@ -76,38 +78,7 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
             }
         }
         log::info!("Server shutting down");
-        self.stop_child_tasks().await?;
-        self.transport_handle.stop().await?;
-        Ok(())
-    }
-
-    fn spawn_child_tasks(
-        &mut self,
-        contract_client: Box<dyn ContractClient>,
-        store_logs_interval: Duration,
-        worker_update_interval: Duration,
-    ) {
-        self.child_tasks = vec![
-            self.spawn_saving_task(store_logs_interval),
-            self.spawn_worker_update_task(contract_client, worker_update_interval),
-        ]
-    }
-    async fn stop_child_tasks(&mut self) -> anyhow::Result<()> {
-        for task in self.child_tasks.iter() {
-            task.abort();
-        }
-        let join_results = tokio::time::timeout(
-            Duration::from_secs(1),
-            futures::future::join_all(std::mem::take(&mut self.child_tasks)),
-        )
-        .await?;
-        for res in join_results {
-            if let Err(e) = res {
-                if !e.is_cancelled() {
-                    log::error!("Error joining task: {e:?}");
-                }
-            }
-        }
+        self.task_manager.await_stop().await;
         Ok(())
     }
 
@@ -154,55 +125,53 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
             .collect_logs(worker_id, queries_executed);
     }
 
-    fn spawn_saving_task(&self, interval: Duration) -> JoinHandle<()> {
+    fn spawn_saving_task(&mut self, interval: Duration) {
+        log::info!("Starting logs saving task");
         let collector = self.logs_collector.clone();
         let transport_handle = self.transport_handle.clone();
-
-        tokio::spawn(async move {
-            log::info!("Starting logs saving task");
-            loop {
-                tokio::time::sleep(interval).await;
+        let task = move |_| {
+            let collector = collector.clone();
+            let transport_handle = transport_handle.clone();
+            async move {
                 let sequence_numbers = match collector.write().await.storage_sync().await {
-                    Err(e) => {
-                        log::error!("Error saving logs to storage: {e:?}");
-                        continue;
-                    }
                     Ok(seq_nums) => seq_nums,
+                    Err(e) => return log::error!("Error saving logs to storage: {e:?}"),
                 };
 
                 let msg = Msg::LogsCollected(LogsCollected { sequence_numbers });
                 let envelope = Envelope { msg: Some(msg) };
                 let msg_content = envelope.encode_to_vec().into();
-                if let Err(e) = transport_handle
+                let _ = transport_handle
                     .broadcast_msg(msg_content, LOGS_TOPIC)
                     .await
-                {
-                    log::error!("Error sending message: {e:?}");
-                }
+                    .map_err(|e| log::error!("Error sending message: {e:?}"));
             }
-        })
+        };
+        self.task_manager.spawn_periodic(task, interval);
     }
 
     fn spawn_worker_update_task(
-        &self,
+        &mut self,
         contract_client: Box<dyn ContractClient>,
         interval: Duration,
-    ) -> JoinHandle<()> {
+    ) {
+        log::info!("Starting worker update task");
         let registered_workers = self.registered_workers.clone();
-        tokio::spawn(async move {
-            log::info!("Starting worker update task");
-            loop {
-                tokio::time::sleep(interval).await;
-                match contract_client.active_workers().await {
-                    Ok(workers) => {
-                        *registered_workers.write().await = workers
-                            .into_iter()
-                            .map(|w| w.peer_id)
-                            .collect::<HashSet<PeerId>>();
-                    }
-                    Err(e) => log::error!("Error getting registered workers: {e:?}"),
+        let contract_client: Arc<dyn ContractClient> = contract_client.into();
+        let task = move |_| {
+            let registered_workers = registered_workers.clone();
+            let contract_client = contract_client.clone();
+            async move {
+                let workers = match contract_client.active_workers().await {
+                    Ok(workers) => workers,
+                    Err(e) => return log::error!("Error getting registered workers: {e:?}"),
                 };
+                *registered_workers.write().await = workers
+                    .into_iter()
+                    .map(|w| w.peer_id)
+                    .collect::<HashSet<PeerId>>();
             }
-        })
+        };
+        self.task_manager.spawn_periodic(task, interval);
     }
 }

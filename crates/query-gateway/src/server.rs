@@ -1,10 +1,10 @@
-use lazy_static::lazy_static;
-use semver::VersionReq;
 use std::collections::hash_map::{Entry, OccupiedEntry};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use lazy_static::lazy_static;
+use semver::VersionReq;
 use tabled::settings::Style;
 use tabled::Table;
 use tokio::sync::{mpsc, oneshot, RwLock};
@@ -15,6 +15,7 @@ use subsquid_messages::{
     envelope::Msg, query_finished, query_result, Envelope, Ping, ProstMsg, Query as QueryMsg,
     QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, SizeAndHash,
 };
+use subsquid_network_transport::task_manager::{CancellationToken, TaskManager};
 use subsquid_network_transport::transport::P2PTransportHandle;
 use subsquid_network_transport::{Keypair, MsgContent as MsgContentT, PeerId};
 
@@ -36,7 +37,7 @@ lazy_static! {
 #[derive(Debug)]
 struct Task {
     worker_id: PeerId,
-    result_sender: oneshot::Sender<QueryResult>,
+    result_sender: Option<oneshot::Sender<QueryResult>>,
     timeout_handle: JoinHandle<()>,
     start_time: Instant,
 }
@@ -49,7 +50,7 @@ impl Task {
     ) -> Self {
         Self {
             worker_id,
-            result_sender,
+            result_sender: Some(result_sender),
             timeout_handle,
             start_time: Instant::now(),
         }
@@ -63,13 +64,23 @@ impl Task {
             .expect("Tasks do not take that long")
     }
 
-    pub fn timeout(self) {
-        let _ = self.result_sender.send(QueryResult::Timeout);
+    pub fn timeout(&mut self) {
+        self.result_sender
+            .take()
+            .map(|sender| sender.send(QueryResult::Timeout).ok());
     }
 
-    pub fn result_received(self, result: query_result::Result) {
+    pub fn result_received(&mut self, result: query_result::Result) {
         self.timeout_handle.abort();
-        let _ = self.result_sender.send(result.into());
+        self.result_sender
+            .take()
+            .map(|sender| sender.send(result.into()).ok());
+    }
+}
+
+impl Drop for Task {
+    fn drop(&mut self) {
+        self.timeout_handle.abort();
     }
 }
 
@@ -83,6 +94,7 @@ pub struct Server {
     network_state: Arc<RwLock<NetworkState>>,
     allocations_manager: Arc<RwLock<AllocationsManager>>,
     keypair: Keypair,
+    task_manager: TaskManager,
 }
 
 impl Server {
@@ -105,45 +117,47 @@ impl Server {
             network_state,
             allocations_manager,
             keypair,
+            task_manager: Default::default(),
         }
     }
 
-    pub async fn run(mut self) -> anyhow::Result<()> {
-        let summary_task = self.spawn_summary_task();
+    pub async fn run(mut self, cancel_token: CancellationToken) {
+        log::info!("Starting query server");
+        let summary_print_interval = Config::get().summary_print_interval;
+        if !summary_print_interval.is_zero() {
+            self.spawn_summary_task(summary_print_interval);
+        }
         loop {
-            let _ = tokio::select! {
+            tokio::select! {
                 Some(query) = self.query_receiver.recv() => self.handle_query(query)
                     .await
-                    .map_err(|e| log::error!("Error handling query: {e:?}")),
+                    .unwrap_or_else(|e| log::error!("Error handling query: {e:?}")),
                 Some(query_id) = self.timeout_receiver.recv() => self.handle_timeout(query_id)
                     .await
-                    .map_err(|e| log::error!("Error handling query timeout: {e:?}")),
+                    .unwrap_or_else(|e| log::error!("Error handling query timeout: {e:?}")),
                 Some(msg) = self.msg_receiver.recv() => self.handle_message(msg)
                     .await
-                    .map_err(|e| log::error!("Error handling incoming message: {e:?}")),
-                else => break
-            };
+                    .unwrap_or_else(|e| log::error!("Error handling incoming message: {e:?}")),
+                _ = cancel_token.cancelled() => break,
+                else => break,
+            }
         }
-        summary_task.abort();
-        Ok(())
+        log::info!("Shutting down query server");
+        self.task_manager.await_stop().await;
     }
 
-    fn spawn_summary_task(&self) -> JoinHandle<()> {
-        let summary_print_interval = Config::get().summary_print_interval;
-        if summary_print_interval.is_zero() {
-            return tokio::task::spawn(async {});
-        }
-
+    fn spawn_summary_task(&mut self, interval: Duration) {
+        log::info!("Starting datasets summary task");
         let network_state = self.network_state.clone();
-        tokio::task::spawn(async move {
-            log::info!("Starting datasets summary task");
-            loop {
-                tokio::time::sleep(summary_print_interval).await;
+        let task = move |_| {
+            let network_state = network_state.clone();
+            async move {
                 let mut summary = Table::new(network_state.read().await.summary());
                 summary.with(Style::sharp());
                 log::info!("Datasets summary:\n{summary}");
             }
-        })
+        };
+        self.task_manager.spawn_periodic(task, interval);
     }
 
     fn generate_query_id() -> String {
@@ -242,7 +256,7 @@ impl Server {
         Ok(())
     }
 
-    fn spawn_timeout_task(&self, query_id: &str, timeout: Duration) -> JoinHandle<()> {
+    fn spawn_timeout_task(&mut self, query_id: &str, timeout: Duration) -> JoinHandle<()> {
         let query_id = query_id.to_string();
         let timeout_sender = self.timeout_sender.clone();
         tokio::spawn(async move {
@@ -255,7 +269,7 @@ impl Server {
 
     async fn handle_timeout(&mut self, query_id: String) -> anyhow::Result<()> {
         log::debug!("Query {query_id} execution timed out");
-        let (query_id, task) = self.get_task(query_id)?.remove_entry();
+        let (query_id, mut task) = self.get_task(query_id)?.remove_entry();
 
         self.network_state
             .write()
@@ -328,7 +342,7 @@ impl Server {
             peer_id == task_entry.get().worker_id,
             "Invalid message sender"
         );
-        let (query_id, task) = task_entry.remove_entry();
+        let (query_id, mut task) = task_entry.remove_entry();
 
         match &result {
             // Greylist worker if server error occurred during query execution

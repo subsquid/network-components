@@ -19,7 +19,7 @@ use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::worker_state::{JailReason, WorkerState};
 
 lazy_static! {
-    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.2.1, <=0.2.2".parse().unwrap();
+    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.2.2, <=0.2.3".parse().unwrap();
 }
 #[derive(Default, Serialize, Deserialize)]
 pub struct Scheduler {
@@ -228,7 +228,7 @@ impl Scheduler {
         log::info!("Releasing jailed workers");
         self.worker_states
             .values_mut()
-            .filter(|w| w.jailed)
+            .filter(|w| w.jailed && w.is_active() && !w.is_unreachable())
             .for_each(|w| w.release());
     }
 

@@ -2,6 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use nonempty::NonEmpty;
 use serde::{Deserialize, Serialize};
+use subsquid_network_transport::task_manager::CancellationToken;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::data_chunk::{ChunkId, DataChunk};
@@ -64,34 +65,39 @@ impl Display for SchedulingUnit {
     }
 }
 
-pub fn bundle_chunks(
-    mut incoming_chunks: Receiver<NonEmpty<DataChunk>>,
+pub async fn bundle_chunks(
+    mut chunk_receiver: Receiver<NonEmpty<DataChunk>>,
     unit_sender: Sender<SchedulingUnit>,
     unit_size: usize,
+    cancel_token: CancellationToken,
 ) {
-    tokio::spawn(async move {
-        log::info!("Starting chunks bundler");
-        let mut incomplete_unit: Option<SchedulingUnit> = None;
-        while let Some(mut chunks) = incoming_chunks.recv().await {
-            // Put all the remaining chunks from last round before the new ones.
-            // If there was an incomplete unit, it will be filled and sent again.
-            if let Some(unit) = incomplete_unit.take() {
-                let new_chunks = std::mem::replace(&mut chunks, unit.chunks);
-                chunks.append(&mut new_chunks.into())
-            }
+    log::info!("Starting chunks bundler");
+    let mut incomplete_unit: Option<SchedulingUnit> = None;
+    loop {
+        let mut chunks = tokio::select! {
+            Some(chunks) = chunk_receiver.recv() => chunks,
+            _ = cancel_token.cancelled() => break,
+            else => break,
+        };
 
-            let chunks: Vec<DataChunk> = chunks.into();
-            for chunks in chunks.chunks(unit_size) {
-                let unit = SchedulingUnit::from_slice(chunks);
-                if unit.num_chunks() < unit_size {
-                    incomplete_unit = Some(unit.clone())
-                }
-                if unit_sender.send(unit).await.is_err() {
-                    log::info!("Scheduling unit receiver dropped");
-                    return;
-                }
+        // Put all the remaining chunks from last round before the new ones.
+        // If there was an incomplete unit, it will be filled and sent again.
+        if let Some(unit) = incomplete_unit.take() {
+            let new_chunks = std::mem::replace(&mut chunks, unit.chunks);
+            chunks.append(&mut new_chunks.into())
+        }
+
+        let chunks: Vec<DataChunk> = chunks.into();
+        for chunks in chunks.chunks(unit_size) {
+            let unit = SchedulingUnit::from_slice(chunks);
+            if unit.num_chunks() < unit_size {
+                incomplete_unit = Some(unit.clone())
+            }
+            if unit_sender.send(unit).await.is_err() {
+                log::info!("Scheduling unit receiver dropped");
+                return;
             }
         }
-        log::info!("Chunks stream ended");
-    });
+    }
+    log::info!("Stopping chunks bundler");
 }

@@ -37,6 +37,6 @@ pub struct Cli {
     pub scheduling_unit: usize,
 
     /// Scheduling interval (in seconds)
-    #[clap(short = 'i', long, default_value = "300", value_name = "N")]
+    #[clap(short = 'i', long, default_value_t = 300, value_name = "N")]
     pub scheduling_interval: u64,
 }

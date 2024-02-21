@@ -18,6 +18,7 @@ mod http_server;
 mod metrics;
 mod network_state;
 mod query;
+mod scheme_extractor;
 mod server;
 
 #[derive(Parser)]

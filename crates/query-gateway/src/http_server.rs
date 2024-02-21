@@ -2,7 +2,7 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::{Extension, OriginalUri, Path, Query};
+use axum::extract::{Extension, Host, Path, Query};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -19,6 +19,7 @@ use crate::client::QueryClient;
 use crate::config::{Config, DatasetId};
 use crate::metrics;
 use crate::query::QueryResult;
+use crate::scheme_extractor::Scheme;
 
 async fn get_height(
     Path(dataset): Path<String>,
@@ -40,7 +41,8 @@ async fn get_height(
 }
 
 async fn get_worker(
-    OriginalUri(uri): OriginalUri,
+    Scheme(scheme): Scheme,
+    Host(host): Host,
     Path((dataset, start_block)): Path<(String, u32)>,
     Extension(client): Extension<Arc<QueryClient>>,
 ) -> impl IntoResponse {
@@ -60,12 +62,9 @@ async fn get_worker(
         }
     };
 
-    let scheme = uri.scheme_str().unwrap_or("");
-    let authority = uri.authority().map(|a| a.as_str()).unwrap_or("");
-
     (
         StatusCode::OK,
-        format!("{scheme}{authority}/query/{dataset_id}/{worker_id}"),
+        format!("{scheme}{host}/query/{dataset_id}/{worker_id}"),
     )
 }
 

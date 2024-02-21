@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
-axum = { version = "0.6", features = ["original-uri"] }
+axum = "0.6"
 base64 = "0.21"
 chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }

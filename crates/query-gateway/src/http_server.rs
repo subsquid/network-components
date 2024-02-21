@@ -2,7 +2,7 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::{Extension, Host, Path, Query};
+use axum::extract::{Extension, OriginalUri, Path, Query};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -40,7 +40,7 @@ async fn get_height(
 }
 
 async fn get_worker(
-    Host(host): Host,
+    OriginalUri(uri): OriginalUri,
     Path((dataset, start_block)): Path<(String, u32)>,
     Extension(client): Extension<Arc<QueryClient>>,
 ) -> impl IntoResponse {
@@ -60,9 +60,12 @@ async fn get_worker(
         }
     };
 
+    let scheme = uri.scheme_str().unwrap_or("");
+    let authority = uri.authority().map(|a| a.as_str()).unwrap_or("");
+
     (
         StatusCode::OK,
-        format!("http://{host}/query/{dataset_id}/{worker_id}"),
+        format!("{scheme}{authority}/query/{dataset_id}/{worker_id}"),
     )
 }
 

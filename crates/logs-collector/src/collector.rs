@@ -20,7 +20,8 @@ impl<T: LogsStorage> LogsCollector<T> {
     }
 
     pub fn collect_logs(&mut self, worker_id: PeerId, logs: Vec<QueryExecuted>) {
-        log::debug!("Collecting logs from {worker_id}: {logs:?}");
+        log::debug!("Collecting logs from {worker_id}");
+        log::trace!("Logs collected: {logs:?}");
         let mut rows: Vec<QueryExecutedRow> = logs
             .into_iter()
             .filter_map(|log| match log.try_into() {

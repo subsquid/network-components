@@ -18,6 +18,13 @@ lazy_static! {
         register_int_gauge!("current_epoch", "current epoch number").unwrap();
 }
 
+pub fn init_workers(workers: Vec<String>) {
+    for worker_id in workers {
+        ALLOCATED_COMP_UNITS.with_label_values(&[&worker_id]).set(0);
+        SPENT_COMP_UNITS.with_label_values(&[&worker_id]).set(0);
+    }
+}
+
 pub fn new_epoch(epoch: u32) {
     CURRENT_EPOCH.set(epoch as i64);
     ALLOCATED_COMP_UNITS.reset();

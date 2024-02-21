@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use lazy_static::lazy_static;
 use prometheus::{register_int_gauge, register_int_gauge_vec, IntGauge, IntGaugeVec, TextEncoder};
 
@@ -18,8 +20,12 @@ lazy_static! {
         register_int_gauge!("current_epoch", "current epoch number").unwrap();
 }
 
-pub fn init_workers(workers: Vec<String>) {
-    for worker_id in workers {
+pub fn init_workers<T, S>(workers: T)
+where
+    T: IntoIterator<Item = S>,
+    S: Deref<Target = str>,
+{
+    for worker_id in workers.into_iter() {
         ALLOCATED_COMP_UNITS.with_label_values(&[&worker_id]).set(0);
         SPENT_COMP_UNITS.with_label_values(&[&worker_id]).set(0);
     }

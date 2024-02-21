@@ -64,7 +64,7 @@ async fn get_worker(
 
     (
         StatusCode::OK,
-        format!("{scheme}{host}/query/{dataset_id}/{worker_id}"),
+        format!("{scheme}://{host}/query/{dataset_id}/{worker_id}"),
     )
 }
 

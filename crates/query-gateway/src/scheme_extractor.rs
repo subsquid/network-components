@@ -4,9 +4,9 @@ use axum::{
     http::{
         header::{HeaderMap, FORWARDED},
         request::Parts,
-        StatusCode,
     },
 };
+use std::convert::Infallible;
 
 const X_FORWARDED_PROTO_HEADER_KEY: &str = "X-Forwarded-Proto";
 const X_FORWARDED_SCHEME_HEADER_KEY: &str = "X-Forwarded-Scheme";
@@ -21,7 +21,7 @@ impl<S> FromRequestParts<S> for Scheme
 where
     S: Send + Sync,
 {
-    type Rejection = (StatusCode, &'static str);
+    type Rejection = Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         // Within Forwarded header
@@ -52,7 +52,8 @@ where
             return Ok(Scheme(scheme.to_owned()));
         }
 
-        Err((StatusCode::BAD_REQUEST, "Failed to extract scheme from URL"))
+        // Fall back to HTTP as default
+        Ok(Scheme("http".to_owned()))
     }
 }
 

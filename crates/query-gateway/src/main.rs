@@ -77,15 +77,6 @@ async fn main() -> anyhow::Result<()> {
         "Client not registered on chain"
     );
 
-    // Initialize allocated/spent CU metrics with zeros
-    let workers = contract_client
-        .active_workers()
-        .await?
-        .iter()
-        .map(|w| w.peer_id.to_string())
-        .collect();
-    metrics::init_workers(workers);
-
     // Start query client
     let query_client = client::get_client(
         keypair,

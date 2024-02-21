@@ -12,6 +12,7 @@ use subsquid_network_transport::{Keypair, PeerId};
 use crate::allocations::AllocationsManager;
 use crate::chain_updates::ChainUpdatesHandler;
 use crate::config::{Config, DatasetId};
+use crate::metrics;
 use crate::network_state::NetworkState;
 use crate::query::{Query, QueryResult};
 use crate::server::{Message, MsgContent, Server};
@@ -100,7 +101,12 @@ pub async fn get_client(
     allocations_db_path: PathBuf,
 ) -> anyhow::Result<QueryClient> {
     let (query_sender, query_receiver) = mpsc::channel(100);
-    let network_state = Arc::new(RwLock::new(NetworkState::default()));
+
+    // Initialize allocated/spent CU metrics with zeros
+    let workers = contract_client.active_workers().await?;
+    metrics::init_workers(workers.iter().map(|w| w.peer_id.to_string()));
+
+    let network_state = Arc::new(RwLock::new(NetworkState::new(workers)));
     let allocations_manager = Arc::new(RwLock::new(
         AllocationsManager::new(allocations_db_path).await?,
     ));

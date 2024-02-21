@@ -81,6 +81,12 @@ pub struct NetworkState {
 }
 
 impl NetworkState {
+    pub fn new(workers: Vec<Worker>) -> Self {
+        let mut network_state = Self::default();
+        network_state.update_registered_workers(workers);
+        network_state
+    }
+
     pub fn find_worker(&self, dataset_id: &DatasetId, start_block: u32) -> Option<PeerId> {
         log::debug!("Looking for worker dataset_id={dataset_id}, start_block={start_block}");
         let dataset_state = match self.dataset_states.get(dataset_id) {

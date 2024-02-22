@@ -1,13 +1,13 @@
 use std::collections::hash_map::{Entry, OccupiedEntry};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use lazy_static::lazy_static;
 use semver::VersionReq;
 use tabled::settings::Style;
 use tabled::Table;
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 
 use subsquid_messages::signatures::SignedMessage;
@@ -23,6 +23,7 @@ use crate::allocations::AllocationsManager;
 use crate::config::{Config, DatasetId};
 use crate::network_state::NetworkState;
 use crate::query::{Query, QueryResult};
+use crate::task::Task;
 use crate::PING_TOPIC;
 
 pub type MsgContent = Box<[u8]>;
@@ -32,56 +33,6 @@ const COMP_UNITS_PER_QUERY: u32 = 1;
 
 lazy_static! {
     pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.2.2".parse().unwrap();
-}
-
-#[derive(Debug)]
-struct Task {
-    worker_id: PeerId,
-    result_sender: Option<oneshot::Sender<QueryResult>>,
-    timeout_handle: JoinHandle<()>,
-    start_time: Instant,
-}
-
-impl Task {
-    pub fn new(
-        worker_id: PeerId,
-        result_sender: oneshot::Sender<QueryResult>,
-        timeout_handle: JoinHandle<()>,
-    ) -> Self {
-        Self {
-            worker_id,
-            result_sender: Some(result_sender),
-            timeout_handle,
-            start_time: Instant::now(),
-        }
-    }
-
-    pub fn exec_time_ms(&self) -> u32 {
-        self.start_time
-            .elapsed()
-            .as_millis()
-            .try_into()
-            .expect("Tasks do not take that long")
-    }
-
-    pub fn timeout(&mut self) {
-        self.result_sender
-            .take()
-            .map(|sender| sender.send(QueryResult::Timeout).ok());
-    }
-
-    pub fn result_received(&mut self, result: query_result::Result) {
-        self.timeout_handle.abort();
-        self.result_sender
-            .take()
-            .map(|sender| sender.send(result.into()).ok());
-    }
-}
-
-impl Drop for Task {
-    fn drop(&mut self) {
-        self.timeout_handle.abort();
-    }
 }
 
 pub struct Server {
@@ -274,8 +225,9 @@ impl Server {
         self.network_state
             .write()
             .await
-            .greylist_worker(task.worker_id);
+            .greylist_worker(task.worker_id());
 
+        let task = task.timeout();
         if Config::get().send_metrics {
             let metrics_msg = Msg::QueryFinished(QueryFinished {
                 client_id: self.client_id(),
@@ -286,8 +238,6 @@ impl Server {
             });
             self.send_metrics(metrics_msg).await;
         }
-
-        task.timeout();
         Ok(())
     }
 
@@ -338,43 +288,39 @@ impl Server {
         log::debug!("Got result for query {query_id}");
 
         let task_entry = self.get_task(query_id)?;
-        anyhow::ensure!(
-            peer_id == task_entry.get().worker_id,
-            "Invalid message sender"
-        );
+        let worker_id = task_entry.get().worker_id();
+        anyhow::ensure!(peer_id == worker_id, "Invalid message sender");
         let (query_id, mut task) = task_entry.remove_entry();
 
         match &result {
             // Greylist worker if server error occurred during query execution
             query_result::Result::ServerError(e) => {
                 log::warn!("Server error returned for query {query_id}: {e}");
-                self.network_state
-                    .write()
-                    .await
-                    .greylist_worker(task.worker_id);
+                self.network_state.write().await.greylist_worker(worker_id);
             }
             // Add worker to the missing allocations cache
             query_result::Result::NoAllocation(()) => {
                 self.network_state
                     .write()
                     .await
-                    .no_allocation_for_worker(task.worker_id);
+                    .no_allocation_for_worker(worker_id);
             }
             _ => {}
         }
 
+        let metrics_result = Some((&result).into());
+        let task = task.result_received(result);
         if Config::get().send_metrics {
             let metrics_msg = Msg::QueryFinished(QueryFinished {
                 client_id: self.client_id(),
                 worker_id: peer_id.to_string(),
                 query_id,
                 exec_time_ms: task.exec_time_ms(),
-                result: Some((&result).into()),
+                result: metrics_result,
             });
             self.send_metrics(metrics_msg).await;
         }
 
-        task.result_received(result);
         Ok(())
     }
 

@@ -20,6 +20,7 @@ mod network_state;
 mod query;
 mod scheme_extractor;
 mod server;
+mod task;
 
 #[derive(Parser)]
 #[command(version)]

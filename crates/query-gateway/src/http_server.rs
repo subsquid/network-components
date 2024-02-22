@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -87,33 +88,15 @@ async fn execute_query(
         .execute_query(dataset_id, query, worker_id, timeout, profiling)
         .await
     {
-        Err(err) => server_error(err.to_string()),
-        Ok(QueryResult::ServerError(err)) => server_error(err),
-        Ok(QueryResult::BadRequest(err)) => bad_request(err),
-        Ok(QueryResult::Timeout) => query_timeout(),
-        Ok(QueryResult::NoAllocation) => no_allocation(),
+        Err(err) => server_error(err),
         Ok(QueryResult::Ok(result)) => ok_response(result, headers),
+        Ok(res) => (res.status_code(), res.to_string()).into_response(),
     }
 }
 
 #[inline(always)]
-fn server_error(err: String) -> Response {
-    (StatusCode::INTERNAL_SERVER_ERROR, err).into_response()
-}
-
-#[inline(always)]
-fn bad_request(err: String) -> Response {
-    (StatusCode::BAD_REQUEST, err).into_response()
-}
-
-#[inline(always)]
-fn query_timeout() -> Response {
-    (StatusCode::GATEWAY_TIMEOUT, "Query execution timed out").into_response()
-}
-
-#[inline(always)]
-fn no_allocation() -> Response {
-    (StatusCode::FORBIDDEN, "Not enough compute units allocated").into_response()
+fn server_error(err: impl Display) -> Response {
+    (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
 }
 
 fn ok_response(result: OkResult, request_headers: HeaderMap) -> Response {
@@ -139,7 +122,7 @@ fn ok_response(result: OkResult, request_headers: HeaderMap) -> Response {
     } else {
         data = match decode_gzip(data) {
             Ok(data) => data,
-            Err(err) => return server_error(err.to_string()),
+            Err(err) => return server_error(err),
         }
     }
 

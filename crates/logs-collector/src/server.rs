@@ -47,7 +47,7 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
 
     pub async fn run(
         mut self,
-        contract_client: Box<dyn ContractClient>,
+        contract_client: Arc<dyn ContractClient>,
         store_logs_interval: Duration,
         worker_update_interval: Duration,
     ) -> anyhow::Result<()> {
@@ -152,12 +152,12 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
 
     fn spawn_worker_update_task(
         &mut self,
-        contract_client: Box<dyn ContractClient>,
+        contract_client: Arc<dyn ContractClient>,
         interval: Duration,
     ) {
         log::info!("Starting worker update task");
         let registered_workers = self.registered_workers.clone();
-        let contract_client: Arc<dyn ContractClient> = contract_client.into();
+        let contract_client: Arc<dyn ContractClient> = contract_client;
         let task = move |_| {
             let registered_workers = registered_workers.clone();
             let contract_client = contract_client.clone();

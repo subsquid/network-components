@@ -106,6 +106,8 @@ impl Task {
 
 impl Drop for Task {
     fn drop(&mut self) {
-        self.0.as_ref().map(|t| t.cancel_timeout());
+        if let Some(t) = self.0.as_ref() {
+            t.cancel_timeout()
+        }
     }
 }

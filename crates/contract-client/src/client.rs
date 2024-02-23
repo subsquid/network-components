@@ -1,9 +1,10 @@
-use async_trait::async_trait;
-use ethers::prelude::{JsonRpcClient, Provider};
-use ethers::types::Bytes;
-use libp2p::PeerId;
 use std::iter::zip;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use async_trait::async_trait;
+use ethers::prelude::{BlockId, Bytes, JsonRpcClient, Middleware, Provider};
+use libp2p::PeerId;
 
 use crate::contracts::{GatewayRegistry, NetworkController, Strategy, WorkerRegistration};
 use crate::transport::Transport;
@@ -49,6 +50,9 @@ pub trait Client: Send + Sync {
     /// Get the current epoch number
     async fn current_epoch(&self) -> Result<u32, ClientError>;
 
+    /// Get the time when the current epoch started
+    async fn current_epoch_start(&self) -> Result<SystemTime, ClientError>;
+
     /// Get current active worker set
     async fn active_workers(&self) -> Result<Vec<Worker>, ClientError>;
 
@@ -63,31 +67,70 @@ pub trait Client: Send + Sync {
     ) -> Result<Vec<Allocation>, ClientError>;
 }
 
-pub async fn get_client(RpcArgs { rpc_url }: &RpcArgs) -> Result<Box<dyn Client>, ClientError> {
-    match Transport::connect(rpc_url).await? {
-        Transport::Http(provider) => Ok(RpcProvider::new(provider).await?),
-        Transport::Ws(provider) => Ok(RpcProvider::new(provider).await?),
+pub async fn get_client(
+    RpcArgs {
+        rpc_url,
+        l1_rpc_url,
+    }: &RpcArgs,
+) -> Result<Box<dyn Client>, ClientError> {
+    let l1_transport = match l1_rpc_url {
+        None => None,
+        Some(rpc_url) => Some(Transport::connect(rpc_url).await?),
+    };
+    let l2_transport = Transport::connect(rpc_url).await?;
+
+    match (l1_transport, l2_transport) {
+        (None, Transport::Http(provider)) => {
+            log::warn!("Layer 1 RPC URL not provided. Assuming the main RPC URL is L1");
+            let client = Arc::new(provider);
+            Ok(RpcProvider::new(client.clone(), client).await?)
+        }
+        (None, Transport::Ws(provider)) => {
+            log::warn!("Layer 1 RPC URL not provided. Assuming the main RPC URL is L1");
+            let client = Arc::new(provider);
+            Ok(RpcProvider::new(client.clone(), client).await?)
+        }
+        (Some(Transport::Http(l1_provider)), Transport::Http(l2_provider)) => {
+            Ok(RpcProvider::new(Arc::new(l1_provider), Arc::new(l2_provider)).await?)
+        }
+        (Some(Transport::Http(l1_provider)), Transport::Ws(l2_provider)) => {
+            Ok(RpcProvider::new(Arc::new(l1_provider), Arc::new(l2_provider)).await?)
+        }
+        (Some(Transport::Ws(l1_provider)), Transport::Http(l2_provider)) => {
+            Ok(RpcProvider::new(Arc::new(l1_provider), Arc::new(l2_provider)).await?)
+        }
+        (Some(Transport::Ws(l1_provider)), Transport::Ws(l2_provider)) => {
+            Ok(RpcProvider::new(Arc::new(l1_provider), Arc::new(l2_provider)).await?)
+        }
     }
 }
 
 #[derive(Clone)]
-struct RpcProvider<T: JsonRpcClient + Clone + 'static> {
-    client: Arc<Provider<T>>,
-    gateway_registry: GatewayRegistry<Provider<T>>,
-    network_controller: NetworkController<Provider<T>>,
-    worker_registration: WorkerRegistration<Provider<T>>,
+struct RpcProvider<L1, L2> {
+    l1_client: Arc<Provider<L1>>,
+    l2_client: Arc<Provider<L2>>,
+    gateway_registry: GatewayRegistry<Provider<L2>>,
+    network_controller: NetworkController<Provider<L2>>,
+    worker_registration: WorkerRegistration<Provider<L2>>,
     default_strategy_addr: Address,
 }
 
-impl<T: JsonRpcClient + Clone + 'static> RpcProvider<T> {
-    pub async fn new(provider: Provider<T>) -> Result<Box<Self>, ClientError> {
-        let client = Arc::new(provider);
-        let gateway_registry = GatewayRegistry::get(client.clone());
+impl<L1, L2> RpcProvider<L1, L2>
+where
+    L1: JsonRpcClient + Clone + 'static,
+    L2: JsonRpcClient + Clone + 'static,
+{
+    pub async fn new(
+        l1_client: Arc<Provider<L1>>,
+        l2_client: Arc<Provider<L2>>,
+    ) -> Result<Box<Self>, ClientError> {
+        let gateway_registry = GatewayRegistry::get(l2_client.clone());
         let default_strategy_addr = gateway_registry.default_strategy().call().await?;
-        let network_controller = NetworkController::get(client.clone());
-        let worker_registration = WorkerRegistration::get(client.clone());
+        let network_controller = NetworkController::get(l2_client.clone());
+        let worker_registration = WorkerRegistration::get(l2_client.clone());
         Ok(Box::new(Self {
-            client,
+            l1_client,
+            l2_client,
             gateway_registry,
             worker_registration,
             network_controller,
@@ -97,7 +140,11 @@ impl<T: JsonRpcClient + Clone + 'static> RpcProvider<T> {
 }
 
 #[async_trait]
-impl<M: JsonRpcClient + Clone + 'static> Client for RpcProvider<M> {
+impl<L1, L2> Client for RpcProvider<L1, L2>
+where
+    L1: JsonRpcClient + Clone + 'static,
+    L2: JsonRpcClient + Clone + 'static,
+{
     fn clone_client(&self) -> Box<dyn Client> {
         Box::new(self.clone())
     }
@@ -113,10 +160,26 @@ impl<M: JsonRpcClient + Clone + 'static> Client for RpcProvider<M> {
         Ok(epoch)
     }
 
+    async fn current_epoch_start(&self) -> Result<SystemTime, ClientError> {
+        let next_epoch_start_block = self.network_controller.next_epoch().call().await?;
+        let epoch_length_blocks = self.network_controller.epoch_length().call().await?;
+        let block_num: u64 = (next_epoch_start_block - epoch_length_blocks)
+            .try_into()
+            .expect("Epoch number should not exceed u64 range");
+        log::debug!("Current epoch: {block_num} Epoch length: {epoch_length_blocks} Next epoch: {next_epoch_start_block}");
+        // Blocks returned by `next_epoch()` and `epoch_length()` are **L1 blocks**
+        let block = self
+            .l1_client
+            .get_block(BlockId::Number(block_num.into()))
+            .await?
+            .ok_or(ClientError::BlockNotFound)?;
+        Ok(UNIX_EPOCH + Duration::from_secs(block.timestamp.as_u64()))
+    }
+
     async fn active_workers(&self) -> Result<Vec<Worker>, ClientError> {
         let workers_call = self.worker_registration.method("getActiveWorkers", ())?;
         let onchain_ids_call = self.worker_registration.method("getActiveWorkerIds", ())?;
-        let mut multicall = contracts::multicall(self.client.clone()).await?;
+        let mut multicall = contracts::multicall(self.l2_client.clone()).await?;
         multicall
             .add_call::<Vec<contracts::Worker>>(workers_call, false)
             .add_call::<Vec<U256>>(onchain_ids_call, false);
@@ -164,7 +227,7 @@ impl<M: JsonRpcClient + Clone + 'static> Client for RpcProvider<M> {
             .get_used_strategy(gateway_id.clone())
             .call()
             .await?;
-        let strategy = Strategy::get(strategy_addr, self.client.clone());
+        let strategy = Strategy::get(strategy_addr, self.l2_client.clone());
         log::info!("{strategy_addr}");
 
         // A little hack to make less requests: default strategy distributes CUs evenly,
@@ -185,7 +248,7 @@ impl<M: JsonRpcClient + Clone + 'static> Client for RpcProvider<M> {
                 .collect());
         }
 
-        let mut multicall = contracts::multicall(self.client.clone()).await?;
+        let mut multicall = contracts::multicall(self.l2_client.clone()).await?;
         for worker in workers.iter() {
             multicall.add_call::<U256>(
                 strategy.method(

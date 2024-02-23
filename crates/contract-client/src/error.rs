@@ -15,6 +15,8 @@ pub enum ClientError {
     InvalidProtocol,
     #[error("Transaction receipt missing")]
     TxReceiptMissing,
+    #[error("Block not found")]
+    BlockNotFound,
 }
 
 impl<M: Middleware> From<ContractError<M>> for ClientError {

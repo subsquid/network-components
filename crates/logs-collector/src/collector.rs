@@ -1,19 +1,31 @@
 use crate::storage::{LogsStorage, QueryExecutedRow};
 use crate::utils::timestamp_now_ms;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use subsquid_messages::QueryExecuted;
 use subsquid_network_transport::PeerId;
 
-pub struct LogsCollector<T: LogsStorage> {
+type SeqNo = u64;
+
+pub struct LogsCollector<T: LogsStorage + Sync> {
     storage: T,
-    last_stored: HashMap<String, (u64, u64)>, // Last sequence number & timestamp saved in storage for each worker
-    buffered_logs: HashMap<PeerId, Vec<QueryExecutedRow>>, // Local buffer, persisted periodically
+    contract_client: Arc<dyn contract_client::Client>,
+    epoch_seal_timeout: Duration,
+    last_stored: HashMap<String, (SeqNo, u64)>, // Last sequence number & timestamp saved in storage for each worker
+    buffered_logs: HashMap<String, BTreeMap<SeqNo, QueryExecutedRow>>, // Local buffer, persisted periodically
 }
 
-impl<T: LogsStorage> LogsCollector<T> {
-    pub fn new(storage: T) -> Self {
+impl<T: LogsStorage + Sync> LogsCollector<T> {
+    pub fn new(
+        storage: T,
+        contract_client: Arc<dyn contract_client::Client>,
+        epoch_seal_timeout: Duration,
+    ) -> Self {
         Self {
             storage,
+            contract_client,
+            epoch_seal_timeout,
             last_stored: HashMap::new(),
             buffered_logs: HashMap::new(),
         }
@@ -33,57 +45,88 @@ impl<T: LogsStorage> LogsCollector<T> {
             })
             .collect();
 
+        let worker_id = worker_id.to_string();
+
+        // Logs with sequence numbers below `from_seq_no` and timestamps earlier than since_timestamp
+        // have already been stored in DB, so we don't have to collect them.
+        let (from_seq_no, since_timestamp) = self
+            .last_stored
+            .get(&worker_id)
+            .map(|(seq_no, ts)| (seq_no + 1, *ts))
+            .unwrap_or_default(); // default to zeros
+        let now = timestamp_now_ms();
+        rows.retain(|r| {
+            r.seq_no >= from_seq_no
+                && r.worker_timestamp >= since_timestamp
+                && r.worker_timestamp <= now // Logs cannot come from the future
+        });
+
         let buffered = self.buffered_logs.entry(worker_id).or_default();
-
-        // * Sequence number of the last buffered log, or last stored log if there is none buffered,
-        //   increased by one (because that's the expected sequence number of the **next** log),
-        //   defaults to 0 if there are no logs buffered or stored.
-        // * Timestamp of the last buffered or stored log, defaults to 0.
-        let (mut next_seq_no, mut last_timestamp) = buffered
-            .last()
-            .map(|r| (r.seq_no, r.worker_timestamp))
-            .or_else(|| self.last_stored.get(&worker_id.to_string()).cloned())
-            .map(|(seq_no, ts)| (seq_no + 1, ts))
-            .unwrap_or_default();
-
-        // Remove already buffered/stored logs, sort to determine if there are gaps in the sequence
-        rows.retain(|r| r.seq_no >= next_seq_no);
-        rows.sort_by_cached_key(|r| r.seq_no);
-
         for row in rows {
-            let seq_no = row.seq_no;
-            if seq_no > next_seq_no {
-                log::error!("Gap in worker {worker_id} logs from {next_seq_no} to {seq_no}",)
-            }
-            let timestamp = row.worker_timestamp;
-            let now = timestamp_now_ms();
-            if timestamp >= now || timestamp <= last_timestamp {
-                log::error!("Invalid log timestamp: {last_timestamp} <?< {timestamp} <?< {now}");
-                continue;
-            }
-            buffered.push(row);
-            next_seq_no = seq_no + 1;
-            last_timestamp = timestamp;
+            buffered.insert(row.seq_no, row);
         }
     }
 
-    pub async fn storage_sync(&mut self) -> anyhow::Result<HashMap<String, u64>> {
+    pub async fn storage_sync(&mut self) -> anyhow::Result<HashMap<String, SeqNo>> {
         log::info!("Syncing state with storage");
-        self.storage
-            .store_logs(
-                self.buffered_logs
-                    .iter()
-                    .flat_map(|(_, logs)| logs)
-                    .cloned(),
-            )
-            .await?;
+        let logs_to_store = self.get_logs_to_store().await?;
+        self.storage.store_logs(logs_to_store).await?;
         self.last_stored = self.storage.get_last_stored().await?;
-        self.buffered_logs.clear();
+        self.clear_buffer();
         let sequence_numbers = self
             .last_stored
             .iter()
             .map(|(peer_id, (seq_no, _))| (peer_id.clone(), *seq_no))
             .collect();
         Ok(sequence_numbers)
+    }
+
+    async fn get_logs_to_store(
+        &self,
+    ) -> anyhow::Result<impl Iterator<Item = QueryExecutedRow> + '_> {
+        let epoch_start = self.contract_client.current_epoch_start().await?;
+        let epoch_sealed = SystemTime::now() > epoch_start + self.epoch_seal_timeout;
+        log::info!("Retrieving logs to store. epoch_sealed={epoch_sealed}");
+
+        Ok(self
+            .buffered_logs
+            .iter()
+            .flat_map(move |(worker_id, logs)| {
+                let mut worker_logs = vec![];
+                let mut next_seq_no = self
+                    .last_stored
+                    .get(worker_id)
+                    .map(|(seq_no, _)| *seq_no + 1)
+                    .unwrap_or_default();
+                for (seq_no, log) in logs {
+                    // If epoch is sealed, we need to store all logs available from previous epoch,
+                    // don't care about gap. Otherwise, we store logs until the first gap.
+                    let timestamp = UNIX_EPOCH + Duration::from_millis(log.worker_timestamp);
+                    if !(epoch_sealed && timestamp < epoch_start) && *seq_no > next_seq_no {
+                        log::debug!(
+                            "Gap in logs from {next_seq_no} to {seq_no} worker_id={worker_id}"
+                        );
+                        break;
+                    }
+
+                    next_seq_no = seq_no + 1;
+                    worker_logs.push(log.clone());
+                    continue;
+                }
+                log::debug!("Storing logs below seq_no {next_seq_no} for worker {worker_id}");
+                worker_logs
+            }))
+    }
+
+    fn clear_buffer(&mut self) {
+        log::info!("Clearing buffered logs");
+        for (worker_id, (seq_no, _)) in self.last_stored.iter() {
+            let buffered = match self.buffered_logs.get_mut(worker_id) {
+                None => continue,
+                Some(buffered) => buffered,
+            };
+            log::debug!("Removing logs up to {seq_no} for worker {worker_id}");
+            *buffered = buffered.split_off(&(seq_no + 1)); // +1 because split_off is inclusive
+        }
     }
 }

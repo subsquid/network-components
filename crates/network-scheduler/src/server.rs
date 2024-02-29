@@ -212,7 +212,7 @@ impl Server {
         let scheduler = self.scheduler.clone();
         let metrics_writer = self.metrics_writer.clone();
         let transport_handle = self.transport_handle.clone();
-        let interval = Config::get().worker_monitoring_interval();
+        let interval = Config::get().worker_monitoring_interval;
 
         let task = move |cancel_token: CancellationToken| {
             let scheduler = scheduler.clone();

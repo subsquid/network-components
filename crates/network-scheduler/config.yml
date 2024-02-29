@@ -16,6 +16,7 @@
 
 schedule_interval_epochs: 6
 worker_inactive_timeout_sec: 600
+worker_monitoring_interval_sec: 60
 worker_stale_timeout_sec: 900
 worker_unreachable_timeout_sec: 300
 failed_dial_retry_sec: 60

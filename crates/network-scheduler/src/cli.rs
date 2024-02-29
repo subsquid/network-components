@@ -20,6 +20,9 @@ pub struct Config {
     #[serde(rename = "worker_inactive_timeout_sec")]
     pub worker_inactive_timeout: Duration,
     #[serde_as(as = "DurationSeconds")]
+    #[serde(rename = "worker_monitoring_interval_sec")]
+    pub worker_monitoring_interval: Duration,
+    #[serde_as(as = "DurationSeconds")]
     #[serde(rename = "worker_stale_timeout_sec")]
     pub worker_stale_timeout: Duration,
     #[serde_as(as = "DurationSeconds")]
@@ -45,10 +48,6 @@ impl Config {
     #[inline(always)]
     pub fn get() -> &'static Self {
         CONFIG.get().expect("Config not initialized")
-    }
-
-    pub fn worker_monitoring_interval(&self) -> Duration {
-        self.worker_inactive_timeout / 2
     }
 }
 

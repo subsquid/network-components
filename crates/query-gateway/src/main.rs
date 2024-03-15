@@ -64,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
     let keypair = transport_builder.keypair();
-    let (msg_receiver, transport_handle) = transport_builder.run().await?;
+    let (incoming_messages, transport_handle) = transport_builder.run().await?;
 
     // Subscribe to dataset state updates (from p2p pub-sub)
     transport_handle.subscribe(PING_TOPIC).await?;
@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
     // Start query client
     let query_client = client::get_client(
         keypair,
-        msg_receiver,
+        incoming_messages,
         transport_handle,
         contract_client,
         args.allocations_db_path,

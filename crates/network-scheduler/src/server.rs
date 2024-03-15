@@ -1,3 +1,4 @@
+use futures::{Stream, StreamExt};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,8 +27,8 @@ type Message = subsquid_network_transport::Message<Box<[u8]>>;
 
 const WORKER_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
-pub struct Server {
-    incoming_messages: Receiver<Message>,
+pub struct Server<S: Stream<Item = Message> + Send + Unpin + 'static> {
+    incoming_messages: S,
     incoming_units: Receiver<SchedulingUnit>,
     transport_handle: P2PTransportHandle<MsgContent>,
     scheduler: Arc<RwLock<Scheduler>>,
@@ -35,9 +36,9 @@ pub struct Server {
     task_manager: TaskManager,
 }
 
-impl Server {
+impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
     pub fn new(
-        incoming_messages: Receiver<Message>,
+        incoming_messages: S,
         incoming_units: Receiver<SchedulingUnit>,
         transport_handle: P2PTransportHandle<MsgContent>,
         scheduler: Scheduler,
@@ -80,7 +81,7 @@ impl Server {
         let mut sigterm = signal(SignalKind::terminate())?;
         loop {
             tokio::select! {
-                Some(msg) = self.incoming_messages.recv() => self.handle_message(msg).await,
+                Some(msg) = self.incoming_messages.next() => self.handle_message(msg).await,
                 Some(unit) = self.incoming_units.recv() => self.new_unit(unit).await,
                 _ = sigint.recv() => break,
                 _ = sigterm.recv() => break,
@@ -133,15 +134,12 @@ impl Server {
     }
 
     async fn write_metrics(&mut self, peer_id: PeerId, msg: impl Into<MetricsEvent>) {
-        if let Err(e) = self
-            .metrics_writer
+        self.metrics_writer
             .write()
             .await
             .write_metrics(Some(peer_id), msg)
             .await
-        {
-            log::error!("Error writing metrics: {e:?}");
-        }
+            .unwrap_or_else(|e| log::error!("Error writing metrics: {e:?}"));
     }
 
     async fn new_unit(&self, unit: SchedulingUnit) {
@@ -151,13 +149,9 @@ impl Server {
     async fn send_msg(&mut self, peer_id: PeerId, msg: Msg) {
         let envelope = Envelope { msg: Some(msg) };
         let msg_content = envelope.encode_to_vec().into();
-        if let Err(e) = self
-            .transport_handle
+        self.transport_handle
             .send_direct_msg(msg_content, peer_id)
-            .await
-        {
-            log::error!("Error sending message: {e:?}");
-        }
+            .unwrap_or_else(|e| log::error!("Error sending message: {e:?}"));
     }
 
     async fn spawn_scheduling_task(

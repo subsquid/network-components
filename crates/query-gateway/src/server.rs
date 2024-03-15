@@ -1,3 +1,4 @@
+use futures::{Stream, StreamExt};
 use std::collections::hash_map::{Entry, OccupiedEntry};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,8 +36,8 @@ lazy_static! {
     pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.2.2".parse().unwrap();
 }
 
-pub struct Server {
-    msg_receiver: mpsc::Receiver<Message>,
+pub struct Server<S: Stream<Item = Message> + Send + Unpin + 'static> {
+    incoming_messages: S,
     transport_handle: P2PTransportHandle<MsgContent>,
     query_receiver: mpsc::Receiver<Query>,
     timeout_sender: mpsc::Sender<String>,
@@ -48,9 +49,9 @@ pub struct Server {
     task_manager: TaskManager,
 }
 
-impl Server {
+impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
     pub fn new(
-        msg_receiver: mpsc::Receiver<Message>,
+        incoming_messages: S,
         transport_handle: P2PTransportHandle<MsgContent>,
         query_receiver: mpsc::Receiver<Query>,
         network_state: Arc<RwLock<NetworkState>>,
@@ -59,7 +60,7 @@ impl Server {
     ) -> Self {
         let (timeout_sender, timeout_receiver) = mpsc::channel(100);
         Self {
-            msg_receiver,
+            incoming_messages,
             transport_handle,
             query_receiver,
             timeout_sender,
@@ -86,7 +87,7 @@ impl Server {
                 Some(query_id) = self.timeout_receiver.recv() => self.handle_timeout(query_id)
                     .await
                     .unwrap_or_else(|e| log::error!("Error handling query timeout: {e:?}")),
-                Some(msg) = self.msg_receiver.recv() => self.handle_message(msg)
+                Some(msg) = self.incoming_messages.next() => self.handle_message(msg)
                     .await
                     .unwrap_or_else(|e| log::error!("Error handling incoming message: {e:?}")),
                 _ = cancel_token.cancelled() => break,
@@ -123,16 +124,14 @@ impl Server {
         let envelope = Envelope { msg: Some(msg) };
         let msg_content = envelope.encode_to_vec().into();
         self.transport_handle
-            .send_direct_msg(msg_content, peer_id)
-            .await?;
+            .send_direct_msg(msg_content, peer_id)?;
         Ok(())
     }
 
     async fn send_metrics(&mut self, msg: Msg) {
-        let _ = self
-            .send_msg(Config::get().scheduler_id, msg)
+        self.send_msg(Config::get().scheduler_id, msg)
             .await
-            .map_err(|e| log::error!("Failed to send metrics: {e:?}"));
+            .unwrap_or_else(|e| log::error!("Failed to send metrics: {e:?}"));
     }
 
     async fn handle_query(&mut self, query: Query) -> anyhow::Result<()> {

@@ -1,6 +1,6 @@
 [package]
 name = "query-gateway"
-version = "0.2.11"
+version = "0.2.12"
 edition = "2021"
 
 [dependencies]
@@ -13,6 +13,7 @@ derivative = "2"
 duration-string = { version = "0.3", features = ["serde"] }
 env_logger = "0.11"
 flate2 = "1"
+futures = "0.3"
 lazy_static = "1"
 log = "0.4"
 prometheus = "0.13"

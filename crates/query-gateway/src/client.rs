@@ -1,3 +1,4 @@
+use futures::Stream;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,11 +25,11 @@ pub struct QueryClient {
 }
 
 impl QueryClient {
-    pub fn new(
+    pub fn new<S: Stream<Item = Message> + Send + Unpin + 'static>(
         network_state: Arc<RwLock<NetworkState>>,
         query_sender: mpsc::Sender<Query>,
         chain_updates_handler: ChainUpdatesHandler,
-        server: Server,
+        server: Server<S>,
     ) -> Self {
         let mut task_manager = TaskManager::default();
         task_manager.spawn(|c| server.run(c));
@@ -93,9 +94,9 @@ impl QueryClient {
     }
 }
 
-pub async fn get_client(
+pub async fn get_client<S: Stream<Item = Message> + Send + Unpin + 'static>(
     keypair: Keypair,
-    msg_receiver: mpsc::Receiver<Message>,
+    incoming_messages: S,
     transport_handle: P2PTransportHandle<MsgContent>,
     contract_client: Box<dyn ContractClient>,
     allocations_db_path: PathBuf,
@@ -120,7 +121,7 @@ pub async fn get_client(
     chain_updates_handler.pull_chain_updates().await?;
 
     let server = Server::new(
-        msg_receiver,
+        incoming_messages,
         transport_handle,
         query_receiver,
         network_state.clone(),

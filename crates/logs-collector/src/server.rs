@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::signal::unix::{signal, SignalKind};
 
-use tokio::sync::mpsc::Receiver;
+use futures::{Stream, StreamExt};
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::RwLock;
 
 use contract_client::Client as ContractClient;
@@ -21,17 +21,25 @@ use crate::LOGS_TOPIC;
 type MsgContent = Box<[u8]>;
 type Message = subsquid_network_transport::Message<MsgContent>;
 
-pub struct Server<T: LogsStorage + Send + Sync + 'static> {
-    incoming_messages: Receiver<Message>,
+pub struct Server<T, S>
+where
+    T: LogsStorage + Send + Sync + 'static,
+    S: Stream<Item = Message> + Send + Unpin + 'static,
+{
+    incoming_messages: S,
     transport_handle: P2PTransportHandle<MsgContent>,
     logs_collector: Arc<RwLock<LogsCollector<T>>>,
     registered_workers: Arc<RwLock<HashSet<PeerId>>>,
     task_manager: TaskManager,
 }
 
-impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
+impl<T, S> Server<T, S>
+where
+    T: LogsStorage + Send + Sync + 'static,
+    S: Stream<Item = Message> + Send + Unpin + 'static,
+{
     pub fn new(
-        incoming_messages: Receiver<Message>,
+        incoming_messages: S,
         transport_handle: P2PTransportHandle<MsgContent>,
         logs_collector: LogsCollector<T>,
     ) -> Self {
@@ -71,7 +79,7 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
         let mut sigterm = signal(SignalKind::terminate())?;
         loop {
             tokio::select! {
-                Some(msg) = self.incoming_messages.recv() => self.handle_message(msg).await,
+                Some(msg) = self.incoming_messages.next() => self.handle_message(msg).await,
                 _ = sigint.recv() => break,
                 _ = sigterm.recv() => break,
                 else => break
@@ -141,10 +149,9 @@ impl<T: LogsStorage + Send + Sync + 'static> Server<T> {
                 let msg = Msg::LogsCollected(LogsCollected { sequence_numbers });
                 let envelope = Envelope { msg: Some(msg) };
                 let msg_content = envelope.encode_to_vec().into();
-                let _ = transport_handle
+                transport_handle
                     .broadcast_msg(msg_content, LOGS_TOPIC)
-                    .await
-                    .map_err(|e| log::error!("Error sending message: {e:?}"));
+                    .unwrap_or_else(|e| log::error!("Error sending message: {e:?}"));
             }
         };
         self.task_manager.spawn_periodic(task, interval);

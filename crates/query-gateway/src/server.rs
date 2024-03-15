@@ -79,6 +79,7 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
         if !summary_print_interval.is_zero() {
             self.spawn_summary_task(summary_print_interval);
         }
+        self.spawn_worker_monitoring_task(Config::get().worker_monitoring_interval);
         loop {
             tokio::select! {
                 Some(query) = self.query_receiver.recv() => self.handle_query(query)
@@ -109,6 +110,43 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
                 log::info!("Datasets summary:\n{summary}");
             }
         };
+        self.task_manager.spawn_periodic(task, interval);
+    }
+
+    fn spawn_worker_monitoring_task(&mut self, interval: Duration) {
+        log::info!("Starting worker monitoring task");
+        let network_state = self.network_state.clone();
+        let transport_handle = self.transport_handle.clone();
+
+        let task = move |cancel_token: CancellationToken| {
+            let network_state = network_state.clone();
+            let transport_handle = transport_handle.clone();
+            async move {
+                let workers = network_state.read().await.registered_workers();
+                log::info!("Dialing {} workers", workers.len());
+
+                // Dialing all workers concurrently
+                let futures = workers
+                    .iter()
+                    .map(|worker_id| transport_handle.dial_peer(*worker_id));
+                // Allow to cancel dialing via token because it can take long to complete
+                let results = tokio::select! {
+                    results = futures::future::join_all(futures) => results,
+                    _ = cancel_token.cancelled() => return
+                };
+                let mut network_state = network_state.write().await;
+                for (worker_id, dial_result) in workers.into_iter().zip(results) {
+                    match dial_result {
+                        Ok(reachable) => network_state.worker_dialed(worker_id, reachable),
+                        Err(e) => log::error!("Error dialing worker: {e:?}"),
+                    }
+                }
+                log::info!("Dialing workers complete");
+            }
+        };
+
+        // Check the workers right away so the server is ready
+        self.task_manager.spawn(task.clone());
         self.task_manager.spawn_periodic(task, interval);
     }
 
@@ -259,7 +297,6 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
     }
 
     async fn ping(&mut self, peer_id: PeerId, ping: Ping) {
-        log::debug!("Got ping from {peer_id}");
         log::trace!("Ping from {peer_id}: {ping:?}");
 
         let version = ping.sem_version();
@@ -291,6 +328,8 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
         anyhow::ensure!(peer_id == worker_id, "Invalid message sender");
         let (query_id, mut task) = task_entry.remove_entry();
 
+        let task = task.result_received(result.clone());
+
         match &result {
             // Greylist worker if server error occurred during query execution
             query_result::Result::ServerError(e) => {
@@ -307,15 +346,15 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
             _ => {}
         }
 
-        let metrics_result = Some((&result).into());
-        let task = task.result_received(result);
         if Config::get().send_metrics {
+            // This computes hash, which could take some time, hence spawn_blocking is used here
+            let result = tokio::task::spawn_blocking(move || Some((&result).into())).await?;
             let metrics_msg = Msg::QueryFinished(QueryFinished {
                 client_id: self.client_id(),
                 worker_id: peer_id.to_string(),
                 query_id,
                 exec_time_ms: task.exec_time_ms(),
-                result: metrics_result,
+                result,
             });
             self.send_metrics(metrics_msg).await;
         }

@@ -15,8 +15,11 @@ fn default_worker_inactive_threshold() -> Duration {
     Duration::from_secs(120)
 }
 
+fn default_worker_monitoring_interval() -> Duration {
+    Duration::from_secs(300)
+}
 fn default_worker_greylist_time() -> Duration {
-    Duration::from_secs(600)
+    Duration::from_secs(1800)
 }
 
 fn default_query_timeout() -> Duration {
@@ -67,6 +70,12 @@ pub struct Config {
         default = "default_worker_inactive_threshold"
     )]
     pub worker_inactive_threshold: Duration,
+    #[serde_as(as = "DurationSeconds")]
+    #[serde(
+        rename = "worker_monitoring_interval_sec",
+        default = "default_worker_monitoring_interval"
+    )]
+    pub worker_monitoring_interval: Duration,
     #[serde_as(as = "DurationSeconds")]
     #[serde(
         rename = "worker_greylist_time_sec",

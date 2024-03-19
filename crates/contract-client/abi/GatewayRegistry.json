@@ -1,16 +1,7 @@
 [
   {
     "inputs":[
-      {
-        "internalType":"contract IERC20WithMetadata",
-        "name":"_token",
-        "type":"address"
-      },
-      {
-        "internalType":"contract IRouter",
-        "name":"_router",
-        "type":"address"
-      }
+
     ],
     "stateMutability":"nonpayable",
     "type":"constructor"
@@ -50,6 +41,20 @@
 
     ],
     "name":"ExpectedPause",
+    "type":"error"
+  },
+  {
+    "inputs":[
+
+    ],
+    "name":"InvalidInitialization",
+    "type":"error"
+  },
+  {
+    "inputs":[
+
+    ],
+    "name":"NotInitializing",
     "type":"error"
   },
   {
@@ -171,12 +176,38 @@
     "inputs":[
       {
         "indexed":false,
+        "internalType":"uint64",
+        "name":"version",
+        "type":"uint64"
+      }
+    ],
+    "name":"Initialized",
+    "type":"event"
+  },
+  {
+    "anonymous":false,
+    "inputs":[
+      {
+        "indexed":false,
         "internalType":"uint256",
         "name":"newCuPerSQD",
         "type":"uint256"
       }
     ],
     "name":"ManaChanged",
+    "type":"event"
+  },
+  {
+    "anonymous":false,
+    "inputs":[
+      {
+        "indexed":false,
+        "internalType":"uint256",
+        "name":"newAmount",
+        "type":"uint256"
+      }
+    ],
+    "name":"MaxGatewaysPerClusterChanged",
     "type":"event"
   },
   {
@@ -644,6 +675,45 @@
   {
     "inputs":[
       {
+        "internalType":"uint256",
+        "name":"pageNumber",
+        "type":"uint256"
+      },
+      {
+        "internalType":"uint256",
+        "name":"perPage",
+        "type":"uint256"
+      }
+    ],
+    "name":"getActiveGateways",
+    "outputs":[
+      {
+        "internalType":"bytes[]",
+        "name":"",
+        "type":"bytes[]"
+      }
+    ],
+    "stateMutability":"view",
+    "type":"function"
+  },
+  {
+    "inputs":[
+
+    ],
+    "name":"getActiveGatewaysCount",
+    "outputs":[
+      {
+        "internalType":"uint256",
+        "name":"",
+        "type":"uint256"
+      }
+    ],
+    "stateMutability":"view",
+    "type":"function"
+  },
+  {
+    "inputs":[
+      {
         "internalType":"bytes",
         "name":"peerId",
         "type":"bytes"
@@ -693,7 +763,7 @@
             "type":"string"
           }
         ],
-        "internalType":"struct GatewayRegistry.Gateway",
+        "internalType":"struct IGatewayRegistry.Gateway",
         "name":"",
         "type":"tuple"
       }
@@ -715,6 +785,25 @@
         "internalType":"string",
         "name":"",
         "type":"string"
+      }
+    ],
+    "stateMutability":"view",
+    "type":"function"
+  },
+  {
+    "inputs":[
+      {
+        "internalType":"address",
+        "name":"operator",
+        "type":"address"
+      }
+    ],
+    "name":"getMyGateways",
+    "outputs":[
+      {
+        "internalType":"bytes[]",
+        "name":"",
+        "type":"bytes[]"
       }
     ],
     "stateMutability":"view",
@@ -757,11 +846,6 @@
             "type":"uint256"
           },
           {
-            "internalType":"uint256",
-            "name":"computationUnits",
-            "type":"uint256"
-          },
-          {
             "internalType":"uint128",
             "name":"lockStart",
             "type":"uint128"
@@ -787,7 +871,7 @@
             "type":"uint256"
           }
         ],
-        "internalType":"struct GatewayRegistry.Stake",
+        "internalType":"struct IGatewayRegistry.Stake",
         "name":"",
         "type":"tuple"
       }
@@ -861,6 +945,26 @@
   {
     "inputs":[
       {
+        "internalType":"contract IERC20WithMetadata",
+        "name":"_token",
+        "type":"address"
+      },
+      {
+        "internalType":"contract IRouter",
+        "name":"_router",
+        "type":"address"
+      }
+    ],
+    "name":"initialize",
+    "outputs":[
+
+    ],
+    "stateMutability":"nonpayable",
+    "type":"function"
+  },
+  {
+    "inputs":[
+      {
         "internalType":"address",
         "name":"strategy",
         "type":"address"
@@ -882,6 +986,21 @@
 
     ],
     "name":"mana",
+    "outputs":[
+      {
+        "internalType":"uint256",
+        "name":"",
+        "type":"uint256"
+      }
+    ],
+    "stateMutability":"view",
+    "type":"function"
+  },
+  {
+    "inputs":[
+
+    ],
+    "name":"maxGatewaysPerCluster",
     "outputs":[
       {
         "internalType":"uint256",
@@ -1127,6 +1246,21 @@
       }
     ],
     "name":"setMana",
+    "outputs":[
+
+    ],
+    "stateMutability":"nonpayable",
+    "type":"function"
+  },
+  {
+    "inputs":[
+      {
+        "internalType":"uint256",
+        "name":"_maxGatewaysPerCluster",
+        "type":"uint256"
+      }
+    ],
+    "name":"setMaxGatewaysPerCluster",
     "outputs":[
 
     ],

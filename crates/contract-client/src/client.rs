@@ -228,7 +228,6 @@ where
             .call()
             .await?;
         let strategy = Strategy::get(strategy_addr, self.l2_client.clone());
-        log::info!("{strategy_addr}");
 
         // A little hack to make less requests: default strategy distributes CUs evenly,
         // so we can just query for one worker and return the same number for all.

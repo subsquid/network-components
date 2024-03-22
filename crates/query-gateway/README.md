@@ -9,7 +9,7 @@ Usage: query-gateway [OPTIONS]
 
 Options:
   -k, --key <KEY>                  Path to libp2p key file
-      --p2p-listen <P2P_LISTEN>    P2P network listen addr [default: /ip4/0.0.0.0/tcp/0]
+      --p2p-listen <P2P_LISTEN>    P2P network listen addr [default: /ip4/0.0.0.0/udp/0/quic-v1]
       --http-listen <HTTP_LISTEN>  HTTP server listen addr [default: 0.0.0.0:8000]
   -b, --boot-nodes <BOOT_NODES>    Connect to boot node '<peer_id> <address>'.
   -c, --config <CONFIG>            Path to config file [default: config.yml]

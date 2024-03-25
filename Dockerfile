@@ -64,7 +64,7 @@ WORKDIR /run
 COPY --from=network-builder /app/target/release/network-scheduler /usr/local/bin/network-scheduler
 COPY --from=network-builder /app/crates/network-scheduler/config.yml .
 
-ENV P2P_LISTEN_ADDR="/ip4/0.0.0.0/tcp/12345"
+ENV P2P_LISTEN_ADDRS="/ip4/0.0.0.0/udp/12345/quic-v1"
 ENV HTTP_LISTEN_ADDR="0.0.0.0:8000"
 ENV BOOTSTRAP="true"
 
@@ -93,7 +93,7 @@ WORKDIR /run
 COPY --from=network-builder /app/target/release/query-gateway /usr/local/bin/query-gateway
 COPY --from=network-builder /app/crates/query-gateway/config.yml .
 
-ENV P2P_LISTEN_ADDR="/ip4/0.0.0.0/tcp/12345"
+ENV P2P_LISTEN_ADDRS="/ip4/0.0.0.0/udp/12345/quic-v1"
 ENV HTTP_LISTEN_ADDR="0.0.0.0:8000"
 ENV BOOTSTRAP="true"
 ENV PRIVATE_NODE="true"
@@ -111,7 +111,7 @@ FROM --platform=$BUILDPLATFORM network-base as logs-collector
 
 COPY --from=network-builder /app/target/release/logs-collector /usr/local/bin/logs-collector
 
-ENV P2P_LISTEN_ADDR="/ip4/0.0.0.0/tcp/12345"
+ENV P2P_LISTEN_ADDRS="/ip4/0.0.0.0/udp/12345/quic-v1"
 ENV BOOTSTRAP="true"
 ENV PRIVATE_NODE="true"
 

@@ -1,0 +1,16 @@
+{
+  "fromBlock": 17881390,
+  "toBlock": 17882786,
+  "traces": [{
+    "createResultAddress": [
+      "0x28d16daf8999504db54cb16eb0b30e9c62a152a2",
+      "0x2ab2c9bf0ef689a02dbcc51b5e7cf7c5db3edb60"
+    ]
+  }],
+  "fields": {
+    "trace": {
+      "type": true,
+      "createResultAddress": true
+    }
+  }
+}

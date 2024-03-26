@@ -1,0 +1,14 @@
+{
+  "type": "substrate",
+  "fromBlock": 4668500,
+  "toBlock": 4668520,
+  "fields": {
+    "event": {
+      "name": true,
+      "args": true
+    }
+  },
+  "evmLogs": [
+    {"topic0": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]}
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "type": "substrate",
+  "fromBlock": 4669460,
+  "toBlock": 4669500,
+  "fields": {
+    "event": {
+      "name": true,
+      "args": true
+    },
+    "call": {
+      "name": true,
+      "args": true,
+      "origin": true,
+      "error": true
+    },
+    "extrinsic": {
+      "signature": true,
+      "hash": true,
+      "fee": true,
+      "tip": true
+    }
+  },
+  "calls": [
+    {
+      "name": ["Balances.transfer"],
+      "extrinsic": true,
+      "stack": true,
+      "events": true
+    }
+  ]
+}

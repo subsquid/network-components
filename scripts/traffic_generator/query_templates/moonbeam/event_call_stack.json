@@ -1,0 +1,22 @@
+{
+  "type": "substrate",
+  "fromBlock": 4669000,
+  "toBlock":4669010,
+  "fields": {
+    "event": {
+      "name": true,
+      "args": true
+    },
+    "call": {
+      "name": true,
+      "args": true,
+      "origin": true
+    }
+  },
+  "events": [
+    {
+      "name": ["Balances.Transfer"],
+      "stack": true
+    }
+  ]
+}

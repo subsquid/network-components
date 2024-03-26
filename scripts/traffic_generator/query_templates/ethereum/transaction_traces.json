@@ -1,0 +1,32 @@
+{
+    "fromBlock": 17881390,
+    "toBlock": 17882786,
+    "logs": [{
+        "address": ["0xffdbe829d5a9afcd50482c23eb387b9050f1f825"],
+        "transactionTraces": true
+    }],
+    "fields": {
+        "block": {
+            "number": true,
+            "hash": true,
+            "difficulty": true,
+            "size": true,
+            "sha3Uncles": true,
+            "gasLimit": true,
+            "gasUsed": true,
+            "timestamp": true,
+            "nonce": true
+        },
+        "log": {
+            "topics": true,
+            "data": true,
+            "address": true,
+            "logIndex": true
+        },
+        "trace": {
+            "traceAddress": true,
+            "revertReason": true,
+            "type": true
+        }
+    }
+}

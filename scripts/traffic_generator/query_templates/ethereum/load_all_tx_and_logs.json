@@ -1,0 +1,49 @@
+{
+    "fromBlock": 17881390,
+    "toBlock": 17881395,
+    "logs": [
+        {}
+    ],
+    "transactions": [
+        {}
+    ],
+    "includeAllBlocks": true,
+    "fields": {
+        "block": {
+            "number": true,
+            "hash": true,
+            "difficulty": true,
+            "size": true,
+            "sha3Uncles": true,
+            "gasLimit": true,
+            "gasUsed": true,
+            "timestamp": true,
+            "nonce": true
+        },
+        "transaction": {
+            "from": true,
+            "to": true,
+            "hash": true,
+            "cumulativeGasUsed": true,
+            "gas": true,
+            "gasPrice": true,
+            "gasUsed": true,
+            "effectiveGasPrice": true,
+            "maxFeePerGas": true,
+            "maxPriorityFeePerGas": true,
+            "nonce": true,
+            "input": true,
+            "contractAddress": true,
+            "type": true,
+            "value": true,
+            "status": true,
+            "chainId": true
+        },
+        "log": {
+            "address": true,
+            "topics": true,
+            "data": true,
+            "transactionHash": true
+        }
+    }
+}

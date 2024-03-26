@@ -1,0 +1,18 @@
+{
+    "fromBlock": 17881390,
+    "toBlock": 17882786,
+    "includeAllBlocks": true,
+    "fields": {
+        "block": {
+            "number": true,
+            "hash": true,
+            "difficulty": true,
+            "size": true,
+            "sha3Uncles": true,
+            "gasLimit": true,
+            "gasUsed": true,
+            "timestamp": true,
+            "nonce": true
+        }
+    }
+}

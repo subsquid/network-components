@@ -1,0 +1,29 @@
+{
+  "fromBlock": 17881390,
+  "toBlock": 17881391,
+  "logs": [
+    {
+      "topic0": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]
+    }
+  ],
+  "transactions": [
+    {
+      "from": ["0xefcce23bfbef24cc4fb2dcb2bbc4f6f83c6bda98"],
+      "logs": true
+    }
+  ],
+  "fields": {
+    "log": {
+      "address": true,
+      "data": true,
+      "topics": true,
+      "transactionHash": true
+    },
+    "transaction": {
+      "from": true,
+      "hash": true,
+      "to": true,
+      "value": true
+    }
+  }
+}

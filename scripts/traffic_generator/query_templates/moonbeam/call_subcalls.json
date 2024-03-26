@@ -1,0 +1,18 @@
+{
+  "type": "substrate",
+  "fromBlock": 4669460,
+  "toBlock": 4669500,
+  "fields": {
+    "call": {
+      "name": true,
+      "args": true,
+      "origin": true
+    }
+  },
+  "calls": [
+    {
+      "name": ["Proxy.proxy"],
+      "subcalls": true
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "fromBlock": 17881390,
+  "toBlock": 17881870,
+  "fields": {
+    "trace": {
+      "callFrom": true,
+      "callTo": true,
+      "callSighash": true
+    }
+  },
+  "traces": [
+    {
+      "callSighash": ["0x590a41f5"],
+      "parents": true
+    }
+  ]
+}

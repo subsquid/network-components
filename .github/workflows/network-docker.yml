@@ -16,9 +16,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+
+      - name: Load ssh key to fetch private dependencies
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          submodules: 'true'
-          token: ${{ secrets.NETWORK_REPO_GITHUB_TOKEN }}
+            ssh-private-key: ${{ secrets.NETWORK_SSH_KEY }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -38,6 +40,7 @@ jobs:
           tags: subsquid/network-scheduler:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          ssh: default=${{ env.SSH_AUTH_SOCK }}
 
       - name: Get scheduler version
         run: echo "SCHEDULER_VERSION=$(docker run --rm subsquid/network-scheduler:test network-scheduler --version | cut -d ' ' -f2)" >> $GITHUB_ENV
@@ -54,6 +57,7 @@ jobs:
             subsquid/network-scheduler:${{ inputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          ssh: default=${{ env.SSH_AUTH_SOCK }}
 
       - name: Build query gateway
         uses: docker/build-push-action@v5
@@ -64,6 +68,7 @@ jobs:
           tags: subsquid/query-gateway:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          ssh: default=${{ env.SSH_AUTH_SOCK }}
 
       - name: Get query gateway version
         run: echo "GATEWAY_VERSION=$(docker run --rm subsquid/query-gateway:test query-gateway --version | cut -d ' ' -f2)" >> $GITHUB_ENV
@@ -80,6 +85,7 @@ jobs:
             subsquid/query-gateway:${{ inputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          ssh: default=${{ env.SSH_AUTH_SOCK }}
 
       - name: Build logs collector
         uses: docker/build-push-action@v5
@@ -90,6 +96,7 @@ jobs:
           tags: subsquid/logs-collector:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          ssh: default=${{ env.SSH_AUTH_SOCK }}
 
       - name: Get logs collector version
         run: echo "COLLECTOR_VERSION=$(docker run --rm subsquid/logs-collector:test logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
@@ -106,3 +113,4 @@ jobs:
             subsquid/logs-collector:${{ inputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          ssh: default=${{ env.SSH_AUTH_SOCK }}

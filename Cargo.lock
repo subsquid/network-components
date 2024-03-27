@@ -6506,6 +6506,7 @@ dependencies = [
 [[package]]
 name = "subsquid-network-transport"
 version = "0.2.0"
+source = "git+ssh://git@github.com/subsquid/subsquid-network.git?rev=0e941dd#0e941ddfe4d3b487a1c33fc43f39d01fb9da1208"
 dependencies = [
  "anyhow",
  "async-trait",

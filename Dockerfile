@@ -21,6 +21,7 @@ FROM --platform=$BUILDPLATFORM chef AS network-planner
 COPY Cargo.toml .
 COPY Cargo.lock .
 COPY crates ./crates
+RUN mkdir .cargo && echo "[net]\ngit-fetch-with-cli = true" > .cargo/config.toml
 
 COPY subsquid-network/Cargo.toml ./subsquid-network/
 COPY subsquid-network/Cargo.lock ./subsquid-network/

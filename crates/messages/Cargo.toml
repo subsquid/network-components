@@ -14,7 +14,7 @@ semver = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"] }
 sha3 = "0.10"
 
-subsquid-network-transport = { version = "0.2", path = "../../subsquid-network/transport", optional = true }
+subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "c083749", optional = true }
 
 [build-dependencies]
 prost-build = "0.12"

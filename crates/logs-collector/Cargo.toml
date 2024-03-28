@@ -1,6 +1,6 @@
 [package]
 name = "logs-collector"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 
 [dependencies]
@@ -18,4 +18,4 @@ tokio = { version = "1", features = ["full"] }
 
 contract-client = { version = "0.1", path = "../contract-client" }
 subsquid-messages = { version = "0.1", path = "../messages", features = ["signatures"] }
-subsquid-network-transport = { version = "0.2", path = "../../subsquid-network/transport" }
+subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "c083749" }

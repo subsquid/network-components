@@ -21,6 +21,7 @@ FROM --platform=$BUILDPLATFORM chef AS network-planner
 COPY Cargo.toml .
 COPY Cargo.lock .
 COPY crates ./crates
+RUN mkdir .cargo && echo "[net]\ngit-fetch-with-cli = true" > .cargo/config.toml
 
 RUN cargo chef prepare --recipe-path recipe.json
 

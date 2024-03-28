@@ -33,7 +33,7 @@ pub type Message = subsquid_network_transport::Message<MsgContent>;
 const COMP_UNITS_PER_QUERY: u32 = 1;
 
 lazy_static! {
-    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.2.2".parse().unwrap();
+    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.2.4".parse().unwrap();
 }
 
 pub struct Server<S: Stream<Item = Message> + Send + Unpin + 'static> {

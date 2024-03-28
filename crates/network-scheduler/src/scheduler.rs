@@ -19,7 +19,7 @@ use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::worker_state::{JailReason, WorkerState};
 
 lazy_static! {
-    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.2.3, <=0.2.4".parse().unwrap();
+    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.2.4".parse().unwrap();
 }
 #[derive(Default, Serialize, Deserialize)]
 pub struct Scheduler {

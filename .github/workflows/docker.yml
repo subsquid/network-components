@@ -14,11 +14,6 @@ jobs:
     name: docker-publish
     runs-on: ubuntu-latest
     steps:
-      - name: Load ssh key to fetch private dependencies
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-            ssh-private-key: ${{ secrets.NETWORK_SSH_KEY }}
-
       - name: Docker login
         uses: docker/login-action@v1
         with:

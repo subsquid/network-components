@@ -4,7 +4,7 @@ WORKDIR /archive-router
 COPY ./ .
 RUN rm -r crates/network-scheduler
 RUN rm -r crates/query-gateway
-RUN --mount=type=ssh cargo build --release
+RUN cargo build --release
 
 FROM --platform=$BUILDPLATFORM debian:bullseye-slim AS archive-router
 RUN apt-get update && apt-get install ca-certificates -y
@@ -21,7 +21,10 @@ FROM --platform=$BUILDPLATFORM chef AS network-planner
 COPY Cargo.toml .
 COPY Cargo.lock .
 COPY crates ./crates
-RUN mkdir .cargo && echo "[net]\ngit-fetch-with-cli = true" > .cargo/config.toml
+
+COPY subsquid-network/Cargo.toml ./subsquid-network/
+COPY subsquid-network/Cargo.lock ./subsquid-network/
+COPY subsquid-network/transport ./subsquid-network/transport
 
 RUN cargo chef prepare --recipe-path recipe.json
 
@@ -34,13 +37,17 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     && apt-get -y install protobuf-compiler
 
 COPY --from=network-planner /app/recipe.json recipe.json
-RUN --mount=type=ssh cargo chef cook --release --recipe-path recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
 
 COPY Cargo.toml .
 COPY Cargo.lock .
 COPY crates ./crates
 
-RUN --mount=type=ssh cargo build --release --workspace
+COPY subsquid-network/Cargo.toml ./subsquid-network/
+COPY subsquid-network/Cargo.lock ./subsquid-network/
+COPY subsquid-network/transport ./subsquid-network/transport
+
+RUN cargo build --release --workspace
 
 FROM --platform=$BUILDPLATFORM debian:bookworm-slim as network-base
 

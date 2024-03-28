@@ -138,10 +138,7 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
                 for (worker_id, dial_result) in workers.into_iter().zip(results) {
                     match dial_result {
                         Ok(reachable) => network_state.worker_dialed(worker_id, reachable),
-                        Err(e) => {
-                            log::error!("Error dialing worker: {e:?}");
-                            network_state.worker_dialed(worker_id, false);
-                        }
+                        Err(e) => log::error!("Error dialing worker: {e:?}"),
                     }
                 }
                 log::info!("Dialing workers complete");

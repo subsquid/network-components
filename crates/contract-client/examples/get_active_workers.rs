@@ -22,5 +22,6 @@ async fn main() -> anyhow::Result<()> {
     .await?;
     let workers = client.active_workers().await?;
     workers.iter().for_each(|w| println!("{w:?}"));
+    println!("{t:?}");
     Ok(())
 }

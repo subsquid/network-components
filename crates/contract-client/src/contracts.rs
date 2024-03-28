@@ -13,6 +13,7 @@ abigen!(GatewayRegistry, "abi/GatewayRegistry.json");
 abigen!(NetworkController, "abi/NetworkController.json");
 abigen!(Strategy, "abi/Strategy.json");
 abigen!(WorkerRegistration, "abi/WorkerRegistration.json");
+abigen!(AllocationsViewer, "abi/AllocationsViewer.json");
 
 lazy_static! {
     pub static ref GATEWAY_REGISTRY_CONTRACT_ADDR: Address =
@@ -33,6 +34,12 @@ lazy_static! {
             .unwrap_or("0xa4285F5503D903BB10978AD652D072e79cc92F0a")
             .parse()
             .expect("Invalid NetworkController contract address");
+    pub static ref ALLOCATIONS_VIEWER_CONTRACT_ADDR: Address =
+        std::env::var("ALLOCATIONS_VIEWER_CONTRACT_ADDR")
+            .as_deref()
+            .unwrap_or("0x28d17930794d32AC1081C1A5A8284B86a6E8227E")
+            .parse()
+            .expect("Invalid AllocationsViewer contract address");
     pub static ref MULTICALL_CONTRACT_ADDR: Option<Address> =
         std::env::var("MULTICALL_CONTRACT_ADDR")
             .ok()
@@ -54,6 +61,12 @@ impl<T: Middleware> WorkerRegistration<T> {
 impl<T: Middleware> NetworkController<T> {
     pub fn get(client: Arc<T>) -> Self {
         Self::new(*NETWORK_CONTROLLER_CONTRACT_ADDR, client)
+    }
+}
+
+impl<T: Middleware> AllocationsViewer<T> {
+    pub fn get(client: Arc<T>) -> Self {
+        Self::new(*ALLOCATIONS_VIEWER_CONTRACT_ADDR, client)
     }
 }
 

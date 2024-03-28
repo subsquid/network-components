@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::iter::zip;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -6,7 +7,9 @@ use async_trait::async_trait;
 use ethers::prelude::{BlockId, Bytes, JsonRpcClient, Middleware, Provider};
 use libp2p::PeerId;
 
-use crate::contracts::{GatewayRegistry, NetworkController, Strategy, WorkerRegistration};
+use crate::contracts::{
+    AllocationsViewer, GatewayRegistry, NetworkController, Strategy, WorkerRegistration,
+};
 use crate::transport::Transport;
 use crate::{contracts, Address, ClientError, RpcArgs, U256};
 
@@ -15,6 +18,13 @@ pub struct Allocation {
     pub worker_peer_id: PeerId,
     pub worker_onchain_id: U256,
     pub computation_units: U256,
+}
+
+#[derive(Debug, Clone)]
+pub struct GatewayCluster {
+    pub operator_addr: Address,
+    pub gateway_ids: Vec<PeerId>,
+    pub allocated_computation_units: U256,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -53,6 +63,9 @@ pub trait Client: Send + Sync {
     /// Get the time when the current epoch started
     async fn current_epoch_start(&self) -> Result<SystemTime, ClientError>;
 
+    /// Get the on-chain ID for the worker
+    async fn worker_id(&self, peer_id: PeerId) -> Result<U256, ClientError>;
+
     /// Get current active worker set
     async fn active_workers(&self) -> Result<Vec<Worker>, ClientError>;
 
@@ -65,6 +78,9 @@ pub trait Client: Send + Sync {
         client_id: PeerId,
         worker_ids: Option<Vec<Worker>>,
     ) -> Result<Vec<Allocation>, ClientError>;
+
+    /// Get the current list of all gateway clusters with their allocated CUs
+    async fn all_gateways(&self, worker_id: U256) -> Result<Vec<GatewayCluster>, ClientError>;
 }
 
 pub async fn get_client(
@@ -112,6 +128,7 @@ struct RpcProvider<L1, L2> {
     gateway_registry: GatewayRegistry<Provider<L2>>,
     network_controller: NetworkController<Provider<L2>>,
     worker_registration: WorkerRegistration<Provider<L2>>,
+    allocations_viewer: AllocationsViewer<Provider<L2>>,
     default_strategy_addr: Address,
 }
 
@@ -128,12 +145,14 @@ where
         let default_strategy_addr = gateway_registry.default_strategy().call().await?;
         let network_controller = NetworkController::get(l2_client.clone());
         let worker_registration = WorkerRegistration::get(l2_client.clone());
+        let allocations_viewer = AllocationsViewer::get(l2_client.clone());
         Ok(Box::new(Self {
             l1_client,
             l2_client,
             gateway_registry,
             worker_registration,
             network_controller,
+            allocations_viewer,
             default_strategy_addr,
         }))
     }
@@ -174,6 +193,12 @@ where
             .await?
             .ok_or(ClientError::BlockNotFound)?;
         Ok(UNIX_EPOCH + Duration::from_secs(block.timestamp.as_u64()))
+    }
+
+    async fn worker_id(&self, peer_id: PeerId) -> Result<U256, ClientError> {
+        let peer_id = peer_id.to_bytes().into();
+        let id: U256 = self.worker_registration.worker_ids(peer_id).call().await?;
+        Ok(id)
     }
 
     async fn active_workers(&self) -> Result<Vec<Worker>, ClientError> {
@@ -265,5 +290,43 @@ where
                 computation_units: cus,
             })
             .collect())
+    }
+
+    async fn all_gateways(&self, worker_id: U256) -> Result<Vec<GatewayCluster>, ClientError> {
+        const GATEWAYS_PAGE_SIZE: U256 = U256([10000, 0, 0, 0]);
+
+        let latest_block = self.l2_client.get_block_number().await?;
+
+        let mut clusters = HashMap::new();
+        for page in 0.. {
+            let allocations = self
+                .allocations_viewer
+                .get_allocations(worker_id, page.into(), GATEWAYS_PAGE_SIZE)
+                .block(latest_block)
+                .call()
+                .await?;
+            let page_size = U256::from(allocations.len());
+
+            for allocation in allocations {
+                let gateway_peer_id = match PeerId::from_bytes(&allocation.gateway_id) {
+                    Ok(peer_id) => peer_id,
+                    _ => continue,
+                };
+                clusters
+                    .entry(allocation.operator)
+                    .or_insert_with(|| GatewayCluster {
+                        operator_addr: allocation.operator,
+                        gateway_ids: Vec::new(),
+                        allocated_computation_units: allocation.allocated,
+                    })
+                    .gateway_ids
+                    .push(gateway_peer_id);
+            }
+
+            if page_size < GATEWAYS_PAGE_SIZE {
+                break;
+            }
+        }
+        Ok(clusters.into_values().collect())
     }
 }

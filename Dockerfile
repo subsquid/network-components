@@ -51,6 +51,12 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
 
 FROM --platform=$BUILDPLATFORM network-base as network-scheduler
 
+RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
+    --mount=target=/var/cache/apt,type=cache,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
+    && apt-get -y install curl
+
 WORKDIR /run
 
 COPY --from=network-builder /app/target/release/network-scheduler /usr/local/bin/network-scheduler
@@ -62,7 +68,7 @@ ENV BOOTSTRAP="true"
 
 CMD ["network-scheduler"]
 
-RUN echo "PORT=\${HTTP_LISTEN_ADDR##*:}; netstat -an | grep \$PORT > /dev/null; if [ 0 != \$? ]; then exit 1; fi;" > ./healthcheck.sh
+COPY crates/network-scheduler/healthcheck.sh .
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
 
@@ -93,9 +99,7 @@ ENV CONFIG_PATH="/run/config.yml"
 
 CMD ["query-gateway"]
 
-RUN echo "PORT=\${HTTP_LISTEN_ADDR##*:}; \
-    yq '.available_datasets.[] | key' \$CONFIG_PATH \
-    | xargs -I % curl -s http://localhost:\$PORT/network/%/height > /dev/null  " > ./healthcheck.sh
+COPY crates/query-gateway/healthcheck.sh .
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
 
@@ -108,3 +112,7 @@ ENV BOOTSTRAP="true"
 ENV PRIVATE_NODE="true"
 
 CMD ["logs-collector"]
+
+COPY crates/logs-collector/healthcheck.sh .
+RUN chmod +x ./healthcheck.sh
+HEALTHCHECK --interval=5s CMD ./healthcheck.sh

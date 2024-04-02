@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::Parser;
 use contract_client::RpcArgs;
@@ -7,8 +8,10 @@ use env_logger::Env;
 
 use subsquid_network_transport::cli::TransportArgs;
 use subsquid_network_transport::transport::P2PTransportBuilder;
+use tokio::sync::RwLock;
 
 use crate::config::Config;
+use crate::network_state::NetworkState;
 
 mod allocations;
 mod chain_updates;
@@ -78,16 +81,22 @@ async fn main() -> anyhow::Result<()> {
         "Client not registered on chain"
     );
 
+    // Initialize allocated/spent CU metrics with zeros
+    let workers = contract_client.active_workers().await?;
+    metrics::init_workers(workers.iter().map(|w| w.peer_id.to_string()));
+    let network_state = Arc::new(RwLock::new(NetworkState::new(workers)));
+
     // Start query client
     let query_client = client::get_client(
         keypair,
         incoming_messages,
         transport_handle,
         contract_client,
+        network_state.clone(),
         args.allocations_db_path,
     )
     .await?;
 
     // Start HTTP server
-    http_server::run_server(query_client, &args.http_listen).await
+    http_server::run_server(query_client, network_state, &args.http_listen).await
 }

@@ -142,6 +142,19 @@ impl NetworkState {
         self.registered_workers.iter().cloned().collect()
     }
 
+    pub fn greylisted_workers(&self) -> Vec<PeerId> {
+        let greylist_time = Config::get().worker_greylist_time;
+        let now = Instant::now();
+        self.worker_greylist
+            .iter()
+            .filter_map(|(worker_id, t)| (*t + greylist_time > now).then_some(*worker_id))
+            .collect()
+    }
+
+    pub fn unreachable_workers(&self) -> Vec<PeerId> {
+        self.unreachable_workers.iter().cloned().collect()
+    }
+
     pub fn worker_dialed(&mut self, worker_id: PeerId, reachable: bool) {
         log::debug!("Worker {worker_id} dialed. reachable={reachable}");
         if reachable {

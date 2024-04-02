@@ -7,7 +7,7 @@ use axum::extract::{Extension, Host, Path, Query};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Router, Server};
+use axum::{Json, Router, Server};
 use duration_string::DurationString;
 use flate2::write::GzDecoder;
 use serde::Deserialize;
@@ -15,10 +15,12 @@ use tokio::signal::unix::{signal, SignalKind};
 
 use subsquid_messages::OkResult;
 use subsquid_network_transport::PeerId;
+use tokio::sync::RwLock;
 
 use crate::client::QueryClient;
 use crate::config::{Config, DatasetId};
 use crate::metrics;
+use crate::network_state::NetworkState;
 use crate::query::QueryResult;
 use crate::scheme_extractor::Scheme;
 
@@ -156,14 +158,33 @@ async fn get_metrics() -> Response {
     }
 }
 
-pub async fn run_server(query_client: QueryClient, addr: &SocketAddr) -> anyhow::Result<()> {
+async fn greylisted_workers(
+    Extension(network_state): Extension<Arc<RwLock<NetworkState>>>,
+) -> Response {
+    Json(network_state.read().await.greylisted_workers()).into_response()
+}
+
+async fn unreachable_workers(
+    Extension(network_state): Extension<Arc<RwLock<NetworkState>>>,
+) -> Response {
+    Json(network_state.read().await.unreachable_workers()).into_response()
+}
+
+pub async fn run_server(
+    query_client: QueryClient,
+    network_state: Arc<RwLock<NetworkState>>,
+    addr: &SocketAddr,
+) -> anyhow::Result<()> {
     log::info!("Starting HTTP server listening on {addr}");
     let app = Router::new()
         .route("/network/:dataset/height", get(get_height))
         .route("/network/:dataset/:start_block/worker", get(get_worker))
         .route("/query/:dataset_id/:worker_id", post(execute_query))
         .route("/metrics", get(get_metrics))
-        .layer(Extension(Arc::new(query_client)));
+        .route("/workers/greylisted", get(greylisted_workers))
+        .route("/workers/unreachable", get(unreachable_workers))
+        .layer(Extension(Arc::new(query_client)))
+        .layer(Extension(network_state));
 
     let mut sigint = signal(SignalKind::interrupt())?;
     let mut sigterm = signal(SignalKind::terminate())?;

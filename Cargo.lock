@@ -5344,7 +5344,7 @@ checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "query-gateway"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "anyhow",
  "axum",
@@ -6564,7 +6564,7 @@ dependencies = [
 [[package]]
 name = "subsquid-network-transport"
 version = "0.2.0"
-source = "git+ssh://git@github.com/subsquid/subsquid-network.git?rev=c083749#c083749ee4e70d1b326d3dbb6a7b016f813de9a2"
+source = "git+ssh://git@github.com/subsquid/subsquid-network.git?rev=94ee134#94ee134a9e149ebc9513ef4d7c7248db19a83d38"
 dependencies = [
  "anyhow",
  "async-trait",

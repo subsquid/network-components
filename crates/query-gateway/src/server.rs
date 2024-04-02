@@ -58,7 +58,7 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
         allocations_manager: Arc<RwLock<AllocationsManager>>,
         keypair: Keypair,
     ) -> Self {
-        let (timeout_sender, timeout_receiver) = mpsc::channel(100);
+        let (timeout_sender, timeout_receiver) = mpsc::channel(1000);
         Self {
             incoming_messages,
             transport_handle,

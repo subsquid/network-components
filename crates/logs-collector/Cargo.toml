@@ -18,4 +18,4 @@ tokio = { version = "1", features = ["full"] }
 
 contract-client = { version = "0.1", path = "../contract-client" }
 subsquid-messages = { version = "0.1", path = "../messages", features = ["signatures"] }
-subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "c083749" }
+subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "94ee134" }

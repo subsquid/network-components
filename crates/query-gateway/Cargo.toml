@@ -1,6 +1,6 @@
 [package]
 name = "query-gateway"
-version = "0.2.14"
+version = "0.2.15"
 edition = "2021"
 
 [dependencies]
@@ -30,4 +30,4 @@ uuid = { version = "1", features = ["v4", "fast-rng"] }
 
 contract-client = { version = "0.1", path = "../contract-client" }
 subsquid-messages = { version = "0.1", path = "../messages", features = ["semver", "signatures"] }
-subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "c083749" }
+subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "94ee134" }

@@ -3,10 +3,6 @@
     "0.2.4"
   ],
   "datasets": {
-    "moonbeam": {
-      "id": "czM6Ly9tb29uYmVhbS1ldm0tMQ",
-      "url": "s3://moonbeam-evm-1"
-    },
     "ethereum": {
       "id": "czM6Ly9ldGhlcmV1bS1tYWlubmV0LTE",
       "url": "s3://ethereum-mainnet-1"

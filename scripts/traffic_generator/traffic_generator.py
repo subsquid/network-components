@@ -11,11 +11,16 @@ from pathlib import Path
 from pydantic import BaseModel, AnyUrl, TypeAdapter, ValidationError, ConfigDict, UrlConstraints
 from typing import List, Dict, Annotated, Tuple, Any, Optional
 
-QUERY_URL = os.environ.get('QUERY_URL', "http://localhost:8000/query")
-WORKERS_URL = os.environ.get('WORKERS_URL', "https://scheduler.testnet.subsquid.io/workers/pings")
 MAX_THREADS = int(os.environ.get('MAX_THREADS', 256))
+QUERY_TIMEOUT_SEC = int(os.environ.get('QUERY_TIMEOUT_SEC', 60))
 MIN_INTERVAL_SEC = float(os.environ.get('MIN_INTERVAL_SEC', 60))
 TIMEOUT_SEC = float(os.environ.get('TIMEOUT_SEC', 180))
+
+GATEWAY_URL = os.environ.get('GATEWAY_URL', f"http://localhost:8000")
+SCHEDULER_URL = os.environ.get('WORKERS_URL', "https://scheduler.testnet.subsquid.io")
+
+QUERY_GREYLISTED = bool(os.environ.get('QUERY_GREYLISTED'))
+
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
 
 TEMPLATES_DIR = Path(__file__).parent / 'query_templates'
@@ -99,13 +104,24 @@ class TrafficGenerator:
     def _get_workers(self) -> List[Worker]:
         try:
             logging.info("Getting active workers")
-            response = requests.get(WORKERS_URL)
+            response = requests.get(f'{SCHEDULER_URL}/workers/pings')
             response.raise_for_status()
             workers = worker_list.validate_json(response.content)
-            return [w for w in workers if w.version in self._config.worker_versions]
+            return self._filter_workers(workers)
         except (requests.HTTPError, ValidationError) as e:
             logging.error(f"Error getting workers: {e}")
             return []
+
+    def _filter_workers(self, workers: List[Worker]) -> List[Worker]:
+        if QUERY_GREYLISTED:
+            greylisted_ids = set()
+        else:
+            response = requests.get(f'{GATEWAY_URL}/workers/greylisted')
+            response.raise_for_status()
+            greylisted_ids = set(response.json())
+            logging.info(f"Omitting {len(greylisted_ids)} grey-listed workers")
+
+        return [w for w in workers if w.version in self._config.worker_versions and w.peer_id not in greylisted_ids]
 
     def _query_worker(self, worker: Worker) -> Optional[int]:
         worker_id = worker.peer_id
@@ -118,7 +134,7 @@ class TrafficGenerator:
             return None
 
         dataset, dataset_id, dataset_url = random.choice(stored_datasets)
-        query_url = f'{QUERY_URL}/{dataset_id}/{worker_id}'
+        query_url = f'{GATEWAY_URL}/query/{dataset_id}/{worker_id}?timeout={QUERY_TIMEOUT_SEC}s'
         query = random.choice(self._query_templates[dataset])
         query['fromBlock'], query['toBlock'] = random_range(worker.stored_ranges[dataset_url].ranges)
 

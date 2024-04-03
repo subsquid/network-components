@@ -79,7 +79,6 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
         if !summary_print_interval.is_zero() {
             self.spawn_summary_task(summary_print_interval);
         }
-        self.spawn_worker_monitoring_task(Config::get().worker_monitoring_interval);
         loop {
             tokio::select! {
                 Some(query) = self.query_receiver.recv() => self.handle_query(query)
@@ -110,46 +109,6 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
                 log::info!("Datasets summary:\n{summary}");
             }
         };
-        self.task_manager.spawn_periodic(task, interval);
-    }
-
-    fn spawn_worker_monitoring_task(&mut self, interval: Duration) {
-        log::info!("Starting worker monitoring task");
-        let network_state = self.network_state.clone();
-        let transport_handle = self.transport_handle.clone();
-
-        let task = move |cancel_token: CancellationToken| {
-            let network_state = network_state.clone();
-            let transport_handle = transport_handle.clone();
-            async move {
-                let workers = network_state.read().await.registered_workers();
-                log::info!("Dialing {} workers", workers.len());
-
-                // Dialing all workers concurrently
-                let futures = workers
-                    .iter()
-                    .map(|worker_id| transport_handle.dial_peer(*worker_id));
-                // Allow to cancel dialing via token because it can take long to complete
-                let results = tokio::select! {
-                    results = futures::future::join_all(futures) => results,
-                    _ = cancel_token.cancelled() => return
-                };
-                let mut network_state = network_state.write().await;
-                for (worker_id, dial_result) in workers.into_iter().zip(results) {
-                    match dial_result {
-                        Ok(reachable) => network_state.worker_dialed(worker_id, reachable),
-                        Err(e) => {
-                            log::error!("Error dialing worker: {e:?}");
-                            network_state.worker_dialed(worker_id, false);
-                        }
-                    }
-                }
-                log::info!("Dialing workers complete");
-            }
-        };
-
-        // Check the workers right away so the server is ready
-        self.task_manager.spawn(task.clone());
         self.task_manager.spawn_periodic(task, interval);
     }
 

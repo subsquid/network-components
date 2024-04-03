@@ -164,12 +164,6 @@ async fn greylisted_workers(
     Json(network_state.read().await.greylisted_workers()).into_response()
 }
 
-async fn unreachable_workers(
-    Extension(network_state): Extension<Arc<RwLock<NetworkState>>>,
-) -> Response {
-    Json(network_state.read().await.unreachable_workers()).into_response()
-}
-
 pub async fn run_server(
     query_client: QueryClient,
     network_state: Arc<RwLock<NetworkState>>,
@@ -182,7 +176,6 @@ pub async fn run_server(
         .route("/query/:dataset_id/:worker_id", post(execute_query))
         .route("/metrics", get(get_metrics))
         .route("/workers/greylisted", get(greylisted_workers))
-        .route("/workers/unreachable", get(unreachable_workers))
         .layer(Extension(Arc::new(query_client)))
         .layer(Extension(network_state));
 

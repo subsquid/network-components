@@ -78,7 +78,6 @@ pub struct NetworkState {
     worker_greylist: HashMap<PeerId, Instant>,
     workers_without_allocation: HashSet<PeerId>,
     registered_workers: HashSet<PeerId>,
-    unreachable_workers: HashSet<PeerId>,
 }
 
 impl NetworkState {
@@ -116,7 +115,6 @@ impl NetworkState {
         self.registered_workers.contains(worker_id)
             && self.worker_has_allocation(worker_id)
             && self.worker_active(worker_id)
-            && self.worker_reachable(worker_id)
             && (allow_greylisted || !self.worker_greylisted(worker_id))
     }
 
@@ -134,14 +132,6 @@ impl NetworkState {
             .is_some_and(|t| *t + greylist_time > Instant::now())
     }
 
-    fn worker_reachable(&self, worker_id: &PeerId) -> bool {
-        !self.unreachable_workers.contains(worker_id)
-    }
-
-    pub fn registered_workers(&self) -> Vec<PeerId> {
-        self.registered_workers.iter().cloned().collect()
-    }
-
     pub fn greylisted_workers(&self) -> Vec<PeerId> {
         let greylist_time = Config::get().worker_greylist_time;
         let now = Instant::now();
@@ -149,19 +139,6 @@ impl NetworkState {
             .iter()
             .filter_map(|(worker_id, t)| (*t + greylist_time > now).then_some(*worker_id))
             .collect()
-    }
-
-    pub fn unreachable_workers(&self) -> Vec<PeerId> {
-        self.unreachable_workers.iter().cloned().collect()
-    }
-
-    pub fn worker_dialed(&mut self, worker_id: PeerId, reachable: bool) {
-        log::debug!("Worker {worker_id} dialed. reachable={reachable}");
-        if reachable {
-            self.unreachable_workers.remove(&worker_id);
-        } else {
-            self.unreachable_workers.insert(worker_id);
-        }
     }
 
     pub fn reset_allocations_cache(&mut self) {
@@ -196,7 +173,6 @@ impl NetworkState {
     pub fn update_registered_workers(&mut self, workers: Vec<Worker>) {
         log::debug!("Updating registered workers: {workers:?}");
         self.registered_workers = workers.into_iter().map(|w| w.peer_id).collect();
-        self.unreachable_workers = &self.unreachable_workers & &self.registered_workers;
     }
 
     pub fn greylist_worker(&mut self, worker_id: PeerId) {

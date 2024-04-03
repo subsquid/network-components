@@ -71,6 +71,7 @@ class TrafficGenerator:
         self._query_templates: Dict[str, Any] = {
             dataset: read_templates(dataset) for dataset in config.datasets
         }
+        self._worker_timeouts = Counter()
 
     def run(self):
         logging.info("Starting traffic generation")
@@ -95,11 +96,18 @@ class TrafficGenerator:
         logging.info(f"Querying {len(workers)} workers")
         results = Counter()
         try:
-            for res in self._executor.map(self._query_worker, workers, timeout=TIMEOUT_SEC):
+            tasks = self._executor.map(self._query_worker, workers, timeout=TIMEOUT_SEC)
+            for worker, res in zip(workers, tasks):
+                if res == 504:
+                    self._worker_timeouts[worker.peer_id] += 1
                 results[res] += 1
         except futures.TimeoutError:
             logging.error("Querying workers timed out")
         logging.info(f"All queries finished. Results: {results}")
+
+        logging.info("Worker timeouts:")
+        for w, c in self._worker_timeouts.items():
+            logging.info(f"{w}: {c}")
 
     def _get_workers(self) -> List[Worker]:
         try:
@@ -122,7 +130,6 @@ class TrafficGenerator:
             logging.info(f"Omitting {len(greylisted_ids)} grey-listed workers")
 
         return [w for w in workers if w.version in self._config.worker_versions and w.peer_id not in greylisted_ids]
-
     def _query_worker(self, worker: Worker) -> Optional[int]:
         worker_id = worker.peer_id
         stored_datasets = [

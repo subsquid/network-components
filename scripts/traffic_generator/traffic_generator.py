@@ -11,15 +11,13 @@ from pathlib import Path
 from pydantic import BaseModel, AnyUrl, TypeAdapter, ValidationError, ConfigDict, UrlConstraints
 from typing import List, Dict, Annotated, Tuple, Any, Optional
 
-MAX_THREADS = int(os.environ.get('MAX_THREADS', 256))
+NUM_THREADS = int(os.environ.get('NUM_THREADS', 10))
 QUERY_TIMEOUT_SEC = int(os.environ.get('QUERY_TIMEOUT_SEC', 60))
 MIN_INTERVAL_SEC = float(os.environ.get('MIN_INTERVAL_SEC', 60))
-TIMEOUT_SEC = float(os.environ.get('TIMEOUT_SEC', 180))
+SKIP_GREYLISTED = os.environ.get('SKIP_GREYLISTED', '').lower() in ('1', 't', 'true', 'y', 'yes')
 
-GATEWAY_URL = os.environ.get('GATEWAY_URL', f"http://localhost:8000")
+GATEWAY_URL = os.environ.get('GATEWAY_URL', "http://localhost:8000")
 SCHEDULER_URL = os.environ.get('WORKERS_URL', "https://scheduler.testnet.subsquid.io")
-
-QUERY_GREYLISTED = bool(os.environ.get('QUERY_GREYLISTED'))
 
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
 
@@ -27,7 +25,7 @@ TEMPLATES_DIR = Path(__file__).parent / 'query_templates'
 
 logging.basicConfig(
     level=LOG_LEVEL,
-    format='%(asctime)s %(levelname)s : %(message)s',
+    format='%(asctime)s %(levelname)s: %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
 )
 
@@ -67,7 +65,7 @@ worker_list = TypeAdapter(List[Worker])
 class TrafficGenerator:
     def __init__(self, config: Config):
         self._config = config
-        self._executor = futures.ThreadPoolExecutor(max_workers=MAX_THREADS)
+        self._executor = futures.ThreadPoolExecutor(max_workers=NUM_THREADS)
         self._query_templates: Dict[str, Any] = {
             dataset: read_templates(dataset) for dataset in config.datasets
         }
@@ -84,7 +82,7 @@ class TrafficGenerator:
                     time.sleep(time_to_wait)
             except KeyboardInterrupt:
                 print("Shutting down")
-                self._executor.shutdown(cancel_futures=True)
+                self._executor.shutdown(wait=False, cancel_futures=True)
                 break
 
     def _query_workers(self):
@@ -96,7 +94,7 @@ class TrafficGenerator:
         logging.info(f"Querying {len(workers)} workers")
         results = Counter()
         try:
-            tasks = self._executor.map(self._query_worker, workers, timeout=TIMEOUT_SEC)
+            tasks = self._executor.map(self._query_worker, workers)
             for worker, res in zip(workers, tasks):
                 if res == 504:
                     self._worker_timeouts[worker.peer_id] += 1
@@ -105,9 +103,9 @@ class TrafficGenerator:
             logging.error("Querying workers timed out")
         logging.info(f"All queries finished. Results: {results}")
 
-        logging.info("Worker timeouts:")
+        logging.debug("Total timeouts per worker:")
         for w, c in self._worker_timeouts.items():
-            logging.info(f"{w}: {c}")
+            logging.debug(f"{w}: {c}")
 
     def _get_workers(self) -> List[Worker]:
         try:
@@ -121,15 +119,20 @@ class TrafficGenerator:
             return []
 
     def _filter_workers(self, workers: List[Worker]) -> List[Worker]:
-        if QUERY_GREYLISTED:
-            greylisted_ids = set()
-        else:
+        if SKIP_GREYLISTED:
             response = requests.get(f'{GATEWAY_URL}/workers/greylisted')
             response.raise_for_status()
             greylisted_ids = set(response.json())
             logging.info(f"Omitting {len(greylisted_ids)} grey-listed workers")
+        else:
+            greylisted_ids = set()
 
-        return [w for w in workers if w.version in self._config.worker_versions and w.peer_id not in greylisted_ids]
+        return [
+            w for w in workers
+            if w.version in self._config.worker_versions
+            and w.peer_id not in greylisted_ids
+        ]
+
     def _query_worker(self, worker: Worker) -> Optional[int]:
         worker_id = worker.peer_id
         stored_datasets = [
@@ -143,7 +146,7 @@ class TrafficGenerator:
         dataset, dataset_id, dataset_url = random.choice(stored_datasets)
         query_url = f'{GATEWAY_URL}/query/{dataset_id}/{worker_id}?timeout={QUERY_TIMEOUT_SEC}s'
         query = random.choice(self._query_templates[dataset])
-        query['fromBlock'], query['toBlock'] = random_range(worker.stored_ranges[dataset_url].ranges)
+        query['fromBlock'], query['toBlock'] = random_range(worker.stored_ranges[dataset_url])
 
         logging.debug(
             f"Sending query worker_id={worker_id} query_url={query_url} "
@@ -151,16 +154,16 @@ class TrafficGenerator:
         response = requests.post(query_url, json=query)
 
         if response.status_code != 200:
-            logging.warning(
-                f"Query failed: worker_id={worker_id} status={response.status_code} "
-                f"msg={response.text} elapsed={response.elapsed}")
+            logging.info(
+                f"Query failed. worker_id={worker_id} status={response.status_code} "
+                f"msg='{response.text}' elapsed={response.elapsed}")
         else:
-            logging.debug(f"Query succeeded: worker_id={worker_id} elapsed={response.elapsed}")
+            logging.info(f"Query succeeded. worker_id={worker_id} elapsed={response.elapsed}")
         return response.status_code
 
 
-def random_range(ranges: List[BlockRange]) -> Tuple[int, int]:
-    r = random.choice(ranges)
+def random_range(ranges: DatasetRanges) -> Tuple[int, int]:
+    r = random.choice(ranges.ranges)
     from_block = random.randint(r.begin, r.end)
     to_block = random.randint(from_block, r.end)
     return from_block, to_block
@@ -183,8 +186,9 @@ def main(config_path: str = 'config.json'):
         logging.info(f"Reading config from {config_path}")
         config_json = Path(config_path).read_text()
         config = Config.model_validate_json(config_json)
-        print(repr(config))
-        logging.info(f"Config loaded worker_versions={config.worker_versions} datasets={config.datasets.keys()}")
+        logging.info(
+            f"Config loaded worker_versions={config.worker_versions} "
+            f"datasets={list(config.datasets.keys())}")
     except (IOError, ValidationError) as e:
         logging.error(f"Error reading config: {e}")
         exit(1)

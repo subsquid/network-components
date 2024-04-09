@@ -1,6 +1,6 @@
 use clap::Parser;
-use libp2p::PeerId;
 use simple_logger::SimpleLogger;
+use subsquid_network_transport::PeerId;
 
 use contract_client;
 use contract_client::RpcArgs;

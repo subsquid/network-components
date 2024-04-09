@@ -1,12 +1,13 @@
 use ethers::contract::{ContractError, MulticallError};
 use ethers::prelude::{AbiError, Middleware};
+use subsquid_network_transport::IdParseError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
     #[error("Invalid RPC URL: {0:?}")]
     InvalidRpcUrl(#[from] url::ParseError),
     #[error("Invalid Peer ID: {0:?}")]
-    InvalidPeerId(#[from] libp2p::identity::ParseError),
+    InvalidPeerId(#[from] IdParseError),
     #[error("Contract error: {0}")]
     Contract(String),
     #[error("RPC provider error: {0}")]

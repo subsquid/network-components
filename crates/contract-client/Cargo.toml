@@ -7,13 +7,14 @@ edition = "2021"
 
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
-ethers = {version = "2", features = ["ws"]}
+ethers = { version = "2", features = ["ws"] }
 lazy_static = "1"
-libp2p = "0.53"
 log = "0.4"
 thiserror = "1"
 tokio = { version = "1", features = ["sync"] }
 url = "2"
+
+subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "6bb49c0" }
 
 [dev-dependencies]
 anyhow = "1"

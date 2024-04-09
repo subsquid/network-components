@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use ethers::prelude::{BlockId, Bytes, JsonRpcClient, Middleware, Provider};
-use libp2p::PeerId;
+use subsquid_network_transport::PeerId;
 
 use crate::contracts::{
     AllocationsViewer, GatewayRegistry, NetworkController, Strategy, WorkerRegistration,

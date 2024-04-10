@@ -1,6 +1,6 @@
 [package]
 name = "network-scheduler"
-version = "0.2.18"
+version = "0.2.19"
 edition = "2021"
 
 [dependencies]
@@ -11,14 +11,14 @@ aws-sdk-s3 = "1"
 axum = { version = "0.6", features = ["json"] }
 clap = { version = "4", features = ["derive", "env"] }
 derive-enum-from-into = "0.1"
-env_logger = "0.10"
+env_logger = "0.11"
 futures = "0.3"
 hex = "0.4"
 iter_num_tools = "0.7"
 itertools = "0.12"
 lazy_static = "1"
 log = "0.4"
-nonempty = { version = "0.9", features = ["serde", "serialize"] }
+nonempty = { version = "0.10", features = ["serde", "serialize"] }
 prometheus-client = "0.22"
 rand = "0.8"
 random_choice = "0.3"
@@ -32,4 +32,4 @@ tokio = { version = "1", features = ["full"] }
 
 contract-client = { version = "0.1", path = "../contract-client" }
 subsquid-messages = { version = "0.1", path = "../messages", features = ["semver", "signatures"] }
-subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "6bb49c0", features = ["metrics"] }
+subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "ffdd912", features = ["metrics"] }

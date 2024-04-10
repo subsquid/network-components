@@ -1,12 +1,12 @@
 [package]
 name = "query-gateway"
-version = "0.2.15"
+version = "0.2.16"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
 axum = "0.6"
-base64 = "0.21"
+base64 = "0.22"
 chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
 derivative = "2"
@@ -18,7 +18,7 @@ lazy_static = "1"
 log = "0.4"
 prometheus = "0.13"
 rand = "0.8"
-rusqlite = { version = "0.30", features = ["trace", "bundled"] }
+rusqlite = { version = "0.31", features = ["trace", "bundled"] }
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_with = "3"
@@ -30,4 +30,4 @@ uuid = { version = "1", features = ["v4", "fast-rng"] }
 
 contract-client = { version = "0.1", path = "../contract-client" }
 subsquid-messages = { version = "0.1", path = "../messages", features = ["semver", "signatures"] }
-subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "6bb49c0" }
+subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "ffdd912" }

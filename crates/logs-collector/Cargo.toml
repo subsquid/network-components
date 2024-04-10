@@ -1,6 +1,6 @@
 [package]
 name = "logs-collector"
-version = "0.2.8"
+version = "0.2.9"
 edition = "2021"
 
 [dependencies]
@@ -8,7 +8,7 @@ anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
 clickhouse = "0.11"
-env_logger = "0.10"
+env_logger = "0.11"
 futures = "0.3"
 log = "0.4"
 serde = { version = "1.0.188", features = ["derive"] }
@@ -18,4 +18,4 @@ tokio = { version = "1", features = ["full"] }
 
 contract-client = { version = "0.1", path = "../contract-client" }
 subsquid-messages = { version = "0.1", path = "../messages", features = ["signatures"] }
-subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "6bb49c0" }
+subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "ffdd912" }

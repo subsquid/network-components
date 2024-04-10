@@ -1,6 +1,6 @@
 [package]
 name = "subsquid-messages"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [features]
@@ -14,7 +14,7 @@ semver = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"] }
 sha3 = "0.10"
 
-subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "6bb49c0", optional = true }
+subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "ffdd912", optional = true }
 
 [build-dependencies]
 prost-build = "0.12"

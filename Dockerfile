@@ -13,7 +13,7 @@ COPY --from=archive-router-builder /archive-router/target/release/router ./route
 ENTRYPOINT ["/archive-router/router"]
 EXPOSE 3000
 
-FROM --platform=$BUILDPLATFORM lukemathwalker/cargo-chef:0.1.62-rust-1.74-bookworm AS chef
+FROM --platform=$BUILDPLATFORM lukemathwalker/cargo-chef:0.1.62-rust-1.75-bookworm AS chef
 WORKDIR /app
 
 FROM --platform=$BUILDPLATFORM chef AS network-planner

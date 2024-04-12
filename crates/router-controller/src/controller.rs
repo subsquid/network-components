@@ -13,6 +13,8 @@ use serde::Deserialize;
 use crate::atom::Atom;
 use crate::data_chunk::DataChunk;
 use crate::range::{Range, RangeSet};
+use crate::request_cache::RequestCache;
+use crate::workers_rate::WorkersRate;
 
 pub type WorkerId = String;
 pub type Url = String;
@@ -65,7 +67,9 @@ struct Schedule {
 pub struct Controller {
     schedule: parking_lot::Mutex<Schedule>,
     workers: Atom<Vec<Worker>>,
-    datasets_height: HashMap<String, AtomicI64>,
+    workers_rate: WorkersRate,
+    request_cache: RequestCache,
+    datasets_height: HashMap<Dataset, AtomicI64>,
     managed_datasets: HashMap<String, Dataset>,
     managed_workers: HashSet<WorkerId>,
     data_replication: usize,
@@ -113,7 +117,7 @@ impl Controller {
                 .filter(|w| w.is_managed)
                 .filter_map(select_candidate)
                 .collect();
-            if managed.len() > 0 {
+            if !managed.is_empty() {
                 managed
             } else {
                 workers.iter()
@@ -125,10 +129,40 @@ impl Controller {
 
         let worker = match candidates.len() {
             0 => None,
-            1 => Some(&candidates[0].url),
+            1 => {
+                let worker = &candidates[0];
+                self.workers_rate.inc(&worker.url, now);
+                Some(&worker.url)
+            },
             len => {
-                let i: usize = rand::random();
-                Some(&candidates[i % len].url)
+                let key = (dataset.clone(), first_block);
+
+                let next_worker = if let Some(url) = self.request_cache.get(&key) {
+                    let index = candidates.iter().position(|info| info.url == url);
+                    if let Some(index) = index {
+                        let worker = &candidates[(index + 1) % len];
+                        Some(worker)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let worker = if let Some(worker) = next_worker {
+                    worker
+                } else {
+                    let least_used_worker = candidates
+                        .iter()
+                        .min_by_key(|info| self.workers_rate.get_rate(&info.url, now));
+                    least_used_worker.unwrap()
+
+                };
+
+                self.request_cache.insert(key, worker.url.clone());
+                self.workers_rate.inc(&worker.url, now);
+
+                Some(&worker.url)
             }
         }.map(|url| Self::format_worker_url(url, dataset));
 
@@ -176,6 +210,7 @@ impl Controller {
                     is_managed: self.managed_workers.contains(&msg.worker_id)
                 };
                 desired_state = Some(new_worker.desired_state.clone());
+                self.workers_rate.clear();
                 Some(Arc::new(
                     workers.iter().cloned().chain(std::iter::once(new_worker)).collect()
                 ))
@@ -487,6 +522,8 @@ impl ControllerBuilder {
                 .map(|name| (name.clone(), AtomicI64::new(INITIAL_VALUE)))
                 .collect(),
             workers: Atom::new(Arc::new(Vec::new())),
+            workers_rate: WorkersRate::new(),
+            request_cache: RequestCache::new(),
             managed_datasets: self.managed_datasets.clone(),
             managed_workers: self.managed_workers.clone(),
             data_replication: self.replication,

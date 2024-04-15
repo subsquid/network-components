@@ -1,5 +1,4 @@
 use std::fmt::Display;
-use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -267,24 +266,20 @@ impl S3Storage {
             }
             Err(e) => return Err(anyhow::anyhow!(e)),
         };
-        let mut scheduler: Scheduler = serde_json::from_slice(&bytes)?;
+        let mut scheduler = Scheduler::from_json(bytes.as_ref())?;
         // List of datasets could have changed since last run, need to clear deprecated units
         scheduler.clear_deprecated_units();
         Ok(scheduler)
     }
 
-    pub async fn save_scheduler<T: Deref<Target = Scheduler>>(&self, scheduler: T) {
+    pub async fn save_scheduler(&self, scheduler_state: Vec<u8>) {
         log::debug!("Saving scheduler state");
-        let state = match serde_json::to_vec(scheduler.deref()) {
-            Ok(state) => state,
-            Err(e) => return log::error!("Error serializing scheduler state: {e:?}"),
-        };
         let _ = self
             .client
             .put_object()
             .bucket(&self.config.scheduler_state_bucket)
             .key(&self.scheduler_state_key)
-            .body(state.into())
+            .body(scheduler_state.into())
             .send()
             .await
             .map_err(|e| log::error!("Error saving scheduler state: {e:?}"));

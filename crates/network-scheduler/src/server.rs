@@ -192,7 +192,11 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
                 if current_epoch >= last_schedule_epoch + schedule_interval {
                     let mut scheduler = scheduler.write().await;
                     scheduler.schedule(current_epoch);
-                    storage_client.save_scheduler(scheduler).await
+                    scheduler.jail_stale_workers();
+                    match scheduler.to_json() {
+                        Ok(state) => storage_client.save_scheduler(state).await,
+                        Err(e) => log::error!("Error serializng scheduler: {e:?}"),
+                    }
                 }
             }
         };
@@ -275,7 +279,11 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
             async move {
                 let mut scheduler = scheduler.write().await;
                 scheduler.jail_inactive_workers();
-                storage_client.save_scheduler(scheduler).await;
+                scheduler.jail_stale_workers();
+                match scheduler.to_json() {
+                    Ok(state) => storage_client.save_scheduler(state).await,
+                    Err(e) => log::error!("Error serializng scheduler: {e:?}"),
+                }
             }
         };
         self.task_manager.spawn_periodic(task, interval);
@@ -290,7 +298,10 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
             async move {
                 let mut scheduler = scheduler.write().await;
                 scheduler.jail_stale_workers();
-                storage_client.save_scheduler(scheduler).await;
+                match scheduler.to_json() {
+                    Ok(state) => storage_client.save_scheduler(state).await,
+                    Err(e) => log::error!("Error serializng scheduler: {e:?}"),
+                }
             }
         };
         self.task_manager.spawn_periodic(task, interval);
@@ -305,7 +316,11 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
             async move {
                 let mut scheduler = scheduler.write().await;
                 scheduler.jail_unreachable_workers();
-                storage_client.save_scheduler(scheduler).await;
+                scheduler.jail_stale_workers();
+                match scheduler.to_json() {
+                    Ok(state) => storage_client.save_scheduler(state).await,
+                    Err(e) => log::error!("Error serializng scheduler: {e:?}"),
+                }
             }
         };
         self.task_manager.spawn_periodic(task, interval);

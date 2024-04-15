@@ -31,6 +31,14 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
+    pub fn to_json(&self) -> anyhow::Result<Vec<u8>> {
+        Ok(serde_json::to_vec(self)?)
+    }
+
+    pub fn from_json(payload: &[u8]) -> anyhow::Result<Self> {
+        Ok(serde_json::from_slice(payload)?)
+    }
+
     pub fn last_schedule_epoch(&self) -> u32 {
         self.last_schedule_epoch
     }

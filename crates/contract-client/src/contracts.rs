@@ -19,25 +19,25 @@ lazy_static! {
     pub static ref GATEWAY_REGISTRY_CONTRACT_ADDR: Address =
         std::env::var("GATEWAY_REGISTRY_CONTRACT_ADDR")
             .as_deref()
-            .unwrap_or("0xCe360FB8D0d12C508BFE7153573D3C4aB476f6A1")
+            .unwrap_or("0xC52D401Cf4101e6b20F6F7D51c67f5B1dF9559af")
             .parse()
             .expect("Invalid GatewayRegistry contract address");
     pub static ref WORKER_REGISTRATION_CONTRACT_ADDR: Address =
         std::env::var("WORKER_REGISTRATION_CONTRACT_ADDR")
             .as_deref()
-            .unwrap_or("0x7Bf0B1ee9767eAc70A857cEbb24b83115093477F")
+            .unwrap_or("0xCD8e983F8c4202B0085825Cf21833927D1e2b6Dc")
             .parse()
             .expect("Invalid WorkerRegistration contract address");
     pub static ref NETWORK_CONTROLLER_CONTRACT_ADDR: Address =
         std::env::var("NETWORK_CONTROLLER_CONTRACT_ADDR")
             .as_deref()
-            .unwrap_or("0xa4285F5503D903BB10978AD652D072e79cc92F0a")
+            .unwrap_or("0x68Fc7E375945d8C8dFb0050c337Ff09E962D976D")
             .parse()
             .expect("Invalid NetworkController contract address");
     pub static ref ALLOCATIONS_VIEWER_CONTRACT_ADDR: Address =
         std::env::var("ALLOCATIONS_VIEWER_CONTRACT_ADDR")
             .as_deref()
-            .unwrap_or("0x28d17930794d32AC1081C1A5A8284B86a6E8227E")
+            .unwrap_or("0xEf55fB580dc7CA408a725b53F270277E81C1442f")
             .parse()
             .expect("Invalid AllocationsViewer contract address");
     pub static ref MULTICALL_CONTRACT_ADDR: Option<Address> =

@@ -4,9 +4,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use ethers::prelude::{BlockId, Bytes, JsonRpcClient, Middleware, Provider};
+use ethers::prelude::{BlockId, Bytes, JsonRpcClient, Middleware, Multicall, Provider};
 use subsquid_network_transport::PeerId;
 
+use crate::cli::ContractAddrs;
 use crate::contracts::{
     AllocationsViewer, GatewayRegistry, NetworkController, Strategy, WorkerRegistration,
 };
@@ -87,6 +88,7 @@ pub async fn get_client(
     RpcArgs {
         rpc_url,
         l1_rpc_url,
+        contract_addrs,
     }: &RpcArgs,
 ) -> Result<Box<dyn Client>, ClientError> {
     let l1_transport = match l1_rpc_url {
@@ -99,24 +101,28 @@ pub async fn get_client(
         (None, Transport::Http(provider)) => {
             log::warn!("Layer 1 RPC URL not provided. Assuming the main RPC URL is L1");
             let client = Arc::new(provider);
-            Ok(RpcProvider::new(client.clone(), client).await?)
+            Ok(RpcProvider::new(client.clone(), client, contract_addrs).await?)
         }
         (None, Transport::Ws(provider)) => {
             log::warn!("Layer 1 RPC URL not provided. Assuming the main RPC URL is L1");
             let client = Arc::new(provider);
-            Ok(RpcProvider::new(client.clone(), client).await?)
+            Ok(RpcProvider::new(client.clone(), client, contract_addrs).await?)
         }
         (Some(Transport::Http(l1_provider)), Transport::Http(l2_provider)) => {
-            Ok(RpcProvider::new(Arc::new(l1_provider), Arc::new(l2_provider)).await?)
+            let (l1_client, l2_client) = (Arc::new(l1_provider), Arc::new(l2_provider));
+            Ok(RpcProvider::new(l1_client, l2_client, contract_addrs).await?)
         }
         (Some(Transport::Http(l1_provider)), Transport::Ws(l2_provider)) => {
-            Ok(RpcProvider::new(Arc::new(l1_provider), Arc::new(l2_provider)).await?)
+            let (l1_client, l2_client) = (Arc::new(l1_provider), Arc::new(l2_provider));
+            Ok(RpcProvider::new(l1_client, l2_client, contract_addrs).await?)
         }
         (Some(Transport::Ws(l1_provider)), Transport::Http(l2_provider)) => {
-            Ok(RpcProvider::new(Arc::new(l1_provider), Arc::new(l2_provider)).await?)
+            let (l1_client, l2_client) = (Arc::new(l1_provider), Arc::new(l2_provider));
+            Ok(RpcProvider::new(l1_client, l2_client, contract_addrs).await?)
         }
         (Some(Transport::Ws(l1_provider)), Transport::Ws(l2_provider)) => {
-            Ok(RpcProvider::new(Arc::new(l1_provider), Arc::new(l2_provider)).await?)
+            let (l1_client, l2_client) = (Arc::new(l1_provider), Arc::new(l2_provider));
+            Ok(RpcProvider::new(l1_client, l2_client, contract_addrs).await?)
         }
     }
 }
@@ -130,6 +136,7 @@ struct RpcProvider<L1, L2> {
     worker_registration: WorkerRegistration<Provider<L2>>,
     allocations_viewer: AllocationsViewer<Provider<L2>>,
     default_strategy_addr: Address,
+    multicall_contract_addr: Option<Address>,
 }
 
 impl<L1, L2> RpcProvider<L1, L2>
@@ -140,12 +147,25 @@ where
     pub async fn new(
         l1_client: Arc<Provider<L1>>,
         l2_client: Arc<Provider<L2>>,
+        contract_addrs: &ContractAddrs,
     ) -> Result<Box<Self>, ClientError> {
-        let gateway_registry = GatewayRegistry::get(l2_client.clone());
+        let gateway_registry = GatewayRegistry::get(
+            l2_client.clone(),
+            contract_addrs.gateway_registry_contract_addr,
+        );
         let default_strategy_addr = gateway_registry.default_strategy().call().await?;
-        let network_controller = NetworkController::get(l2_client.clone());
-        let worker_registration = WorkerRegistration::get(l2_client.clone());
-        let allocations_viewer = AllocationsViewer::get(l2_client.clone());
+        let network_controller = NetworkController::get(
+            l2_client.clone(),
+            contract_addrs.network_controller_contract_addr,
+        );
+        let worker_registration = WorkerRegistration::get(
+            l2_client.clone(),
+            contract_addrs.worker_registration_contract_addr,
+        );
+        let allocations_viewer = AllocationsViewer::get(
+            l2_client.clone(),
+            contract_addrs.allocations_viewer_contract_addr,
+        );
         Ok(Box::new(Self {
             l1_client,
             l2_client,
@@ -154,7 +174,12 @@ where
             network_controller,
             allocations_viewer,
             default_strategy_addr,
+            multicall_contract_addr: contract_addrs.multicall_contract_addr,
         }))
+    }
+
+    async fn multicall(&self) -> Result<Multicall<Provider<L2>>, ClientError> {
+        Ok(contracts::multicall(self.l2_client.clone(), self.multicall_contract_addr).await?)
     }
 }
 
@@ -204,7 +229,7 @@ where
     async fn active_workers(&self) -> Result<Vec<Worker>, ClientError> {
         let workers_call = self.worker_registration.method("getActiveWorkers", ())?;
         let onchain_ids_call = self.worker_registration.method("getActiveWorkerIds", ())?;
-        let mut multicall = contracts::multicall(self.l2_client.clone()).await?;
+        let mut multicall = self.multicall().await?;
         multicall
             .add_call::<Vec<contracts::Worker>>(workers_call, false)
             .add_call::<Vec<U256>>(onchain_ids_call, false);
@@ -272,7 +297,7 @@ where
                 .collect());
         }
 
-        let mut multicall = contracts::multicall(self.l2_client.clone()).await?;
+        let mut multicall = self.multicall().await?;
         for worker in workers.iter() {
             multicall.add_call::<U256>(
                 strategy.method(

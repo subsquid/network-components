@@ -30,4 +30,4 @@ uuid = { version = "1", features = ["v4", "fast-rng"] }
 
 contract-client = { version = "0.1", path = "../contract-client" }
 subsquid-messages = { version = "0.1", path = "../messages", features = ["semver", "signatures"] }
-subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "ffdd912" }
+subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "3075211" }

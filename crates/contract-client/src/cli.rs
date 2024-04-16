@@ -1,6 +1,8 @@
 use clap::Args;
 
-#[derive(Args, Default)]
+use crate::Address;
+
+#[derive(Args)]
 pub struct RpcArgs {
     #[arg(
         long,
@@ -15,4 +17,20 @@ pub struct RpcArgs {
         help = "Layer 1 blockchain RPC URL. If not provided, rpc_url is assumed to be L1"
     )]
     pub l1_rpc_url: Option<String>,
+    #[command(flatten)]
+    pub contract_addrs: ContractAddrs,
+}
+
+#[derive(Args)]
+pub struct ContractAddrs {
+    #[arg(long, env)]
+    pub gateway_registry_contract_addr: Address,
+    #[arg(long, env)]
+    pub worker_registration_contract_addr: Address,
+    #[arg(long, env)]
+    pub network_controller_contract_addr: Address,
+    #[arg(long, env)]
+    pub allocations_viewer_contract_addr: Address,
+    #[arg(long, env)]
+    pub multicall_contract_addr: Option<Address>,
 }

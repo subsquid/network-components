@@ -1,7 +1,4 @@
 {
-  "worker_versions": [
-    "0.2.4"
-  ],
   "datasets": {
     "ethereum": {
       "id": "czM6Ly9ldGhlcmV1bS1tYWlubmV0LTE",

@@ -5,8 +5,10 @@ import random
 import requests
 import sys
 import time
+
 from collections import Counter
 from concurrent import futures
+from packaging.version import InvalidVersion, Version
 from pathlib import Path
 from pydantic import BaseModel, AnyUrl, TypeAdapter, ValidationError, ConfigDict, UrlConstraints
 from typing import List, Dict, Annotated, Tuple, Any, Optional
@@ -15,6 +17,7 @@ NUM_THREADS = int(os.environ.get('NUM_THREADS', 10))
 QUERY_TIMEOUT_SEC = int(os.environ.get('QUERY_TIMEOUT_SEC', 60))
 MIN_INTERVAL_SEC = float(os.environ.get('MIN_INTERVAL_SEC', 60))
 SKIP_GREYLISTED = os.environ.get('SKIP_GREYLISTED', '').lower() in ('1', 't', 'true', 'y', 'yes')
+MIN_WORKER_VERSION = Version(os.environ.get('MIN_WORKER_VERSION', '0.3.0'))
 
 GATEWAY_URL = os.environ.get('GATEWAY_URL', "http://localhost:8000")
 SCHEDULER_URL = os.environ.get('WORKERS_URL', "https://scheduler.testnet.subsquid.io")
@@ -38,7 +41,6 @@ class Dataset(BaseModel):
 
 
 class Config(BaseModel):
-    worker_versions: List[str]
     datasets: Dict[str, Dataset]
 
 
@@ -57,6 +59,12 @@ class Worker(BaseModel):
     stored_ranges: Dict[S3Url, DatasetRanges]
 
     model_config = ConfigDict(extra='allow')
+
+    def get_version(self) -> Version:
+        try:
+            return Version(self.version)
+        except InvalidVersion:
+            return Version("0.0.0")
 
 
 worker_list = TypeAdapter(List[Worker])
@@ -118,7 +126,8 @@ class TrafficGenerator:
             logging.error(f"Error getting workers: {e}")
             return []
 
-    def _filter_workers(self, workers: List[Worker]) -> List[Worker]:
+    @staticmethod
+    def _filter_workers(workers: List[Worker]) -> List[Worker]:
         if SKIP_GREYLISTED:
             response = requests.get(f'{GATEWAY_URL}/workers/greylisted')
             response.raise_for_status()
@@ -129,8 +138,8 @@ class TrafficGenerator:
 
         return [
             w for w in workers
-            if w.version in self._config.worker_versions
-            and w.peer_id not in greylisted_ids
+            if w.get_version() >= MIN_WORKER_VERSION
+               and w.peer_id not in greylisted_ids
         ]
 
     def _query_worker(self, worker: Worker) -> Optional[int]:
@@ -187,8 +196,7 @@ def main(config_path: str = 'config.json'):
         config_json = Path(config_path).read_text()
         config = Config.model_validate_json(config_json)
         logging.info(
-            f"Config loaded worker_versions={config.worker_versions} "
-            f"datasets={list(config.datasets.keys())}")
+            f"Config loaded datasets={list(config.datasets.keys())}")
     except (IOError, ValidationError) as e:
         logging.error(f"Error reading config: {e}")
         exit(1)

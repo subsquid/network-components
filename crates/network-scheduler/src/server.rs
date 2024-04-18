@@ -6,7 +6,7 @@ use std::time::Duration;
 use prometheus_client::registry::Registry;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
 
 use subsquid_messages::envelope::Msg;
 use subsquid_messages::signatures::{msg_hash, SignedMessage};
@@ -192,10 +192,9 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
                 if current_epoch >= last_schedule_epoch + schedule_interval {
                     let mut scheduler = scheduler.write().await;
                     scheduler.schedule(current_epoch);
-                    scheduler.jail_stale_workers();
                     match scheduler.to_json() {
                         Ok(state) => storage_client.save_scheduler(state).await,
-                        Err(e) => log::error!("Error serializng scheduler: {e:?}"),
+                        Err(e) => log::error!("Error serializing scheduler: {e:?}"),
                     }
                 }
             }
@@ -227,7 +226,10 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
                         log::info!("Dialing worker {worker_id}");
                         match transport_handle.dial_peer(worker_id).await {
                             Ok(res) => scheduler.write().await.worker_dialed(worker_id, res),
-                            Err(e) => log::error!("Error dialing worker: {e:?}"),
+                            Err(e) => {
+                                log::error!("Error dialing worker: {e:?}");
+                                scheduler.write().await.worker_dialed(worker_id, false);
+                            }
                         }
                     }
                 });
@@ -271,55 +273,38 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
     }
 
     fn spawn_jail_inactive_workers_task(&mut self, storage_client: S3Storage) {
-        let interval = Config::get().worker_inactive_timeout;
-        let scheduler = self.scheduler.clone();
-        let task = move |_| {
-            let scheduler = scheduler.clone();
-            let storage_client = storage_client.clone();
-            async move {
-                let mut scheduler = scheduler.write().await;
-                scheduler.jail_inactive_workers();
-                scheduler.jail_stale_workers();
-                match scheduler.to_json() {
-                    Ok(state) => storage_client.save_scheduler(state).await,
-                    Err(e) => log::error!("Error serializng scheduler: {e:?}"),
-                }
-            }
-        };
-        self.task_manager.spawn_periodic(task, interval);
+        let timeout = Config::get().worker_inactive_timeout;
+        self.spawn_jail_task(storage_client, timeout, |s| s.jail_inactive_workers());
     }
 
     fn spawn_jail_stale_workers_task(&mut self, storage_client: S3Storage) {
-        let interval = Config::get().worker_stale_timeout;
-        let scheduler = self.scheduler.clone();
-        let task = move |_| {
-            let scheduler = scheduler.clone();
-            let storage_client = storage_client.clone();
-            async move {
-                let mut scheduler = scheduler.write().await;
-                scheduler.jail_stale_workers();
-                match scheduler.to_json() {
-                    Ok(state) => storage_client.save_scheduler(state).await,
-                    Err(e) => log::error!("Error serializng scheduler: {e:?}"),
-                }
-            }
-        };
-        self.task_manager.spawn_periodic(task, interval);
+        let timeout = Config::get().worker_stale_timeout;
+        self.spawn_jail_task(storage_client, timeout, |s| s.jail_stale_workers());
     }
 
     fn spawn_jail_unreachable_workers_task(&mut self, storage_client: S3Storage) {
-        let interval = Config::get().worker_unreachable_timeout;
+        let timeout = Config::get().worker_unreachable_timeout;
+        self.spawn_jail_task(storage_client, timeout, |s| s.jail_unreachable_workers());
+    }
+
+    fn spawn_jail_task(
+        &mut self,
+        storage_client: S3Storage,
+        interval: Duration,
+        jail_fn: fn(&mut RwLockWriteGuard<Scheduler>) -> bool,
+    ) {
         let scheduler = self.scheduler.clone();
         let task = move |_| {
             let scheduler = scheduler.clone();
             let storage_client = storage_client.clone();
             async move {
                 let mut scheduler = scheduler.write().await;
-                scheduler.jail_unreachable_workers();
-                scheduler.jail_stale_workers();
-                match scheduler.to_json() {
-                    Ok(state) => storage_client.save_scheduler(state).await,
-                    Err(e) => log::error!("Error serializng scheduler: {e:?}"),
+                if jail_fn(&mut scheduler) {
+                    // If any worker got jailed, save the changed scheduler state
+                    match scheduler.to_json() {
+                        Ok(state) => storage_client.save_scheduler(state).await,
+                        Err(e) => log::error!("Error serializing scheduler: {e:?}"),
+                    }
                 }
             }
         };

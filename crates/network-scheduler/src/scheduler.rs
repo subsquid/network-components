@@ -6,11 +6,11 @@ use lazy_static::lazy_static;
 use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
 use random_choice::random_choice;
-use semver::{Version, VersionReq};
+use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 
 use contract_client::Worker;
-use subsquid_messages::{pong::Status as WorkerStatus, Ping};
+use subsquid_messages::{pong::Status as WorkerStatus, DatasetChunks, Ping, WorkerAssignment};
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;
@@ -20,6 +20,7 @@ use crate::worker_state::{JailReason, WorkerState};
 
 lazy_static! {
     pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.3.0".parse().unwrap();
+    pub static ref ACTIVE_V2_MIN_WORKER_VER: VersionReq = ">=0.3.5".parse().unwrap();
 }
 #[derive(Default, Serialize, Deserialize)]
 pub struct Scheduler {
@@ -89,15 +90,24 @@ impl Scheduler {
         };
         worker_state.ping(msg);
         if worker_state.jailed {
-            // Legacy worker version handling
-            return if version < Version::new(0, 2, 2) {
-                WorkerStatus::JailedV1(())
-            } else {
-                WorkerStatus::Jailed(worker_state.jail_reason_str())
-            };
+            return WorkerStatus::Jailed(worker_state.jail_reason_str());
         }
-        let state = chunks_to_worker_state(worker_state.assigned_chunks(&self.known_units));
-        WorkerStatus::Active(state)
+        let assigned_chunks = worker_state.assigned_chunks(&self.known_units);
+        if ACTIVE_V2_MIN_WORKER_VER.matches(&version) {
+            let dataset_chunks = assigned_chunks
+                .map(|chunk| (chunk.dataset_url, chunk.chunk_str))
+                .into_grouping_map()
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|(dataset_url, chunks)| DatasetChunks {
+                    dataset_url,
+                    chunks,
+                })
+                .collect();
+            WorkerStatus::ActiveV2(WorkerAssignment { dataset_chunks })
+        } else {
+            WorkerStatus::Active(chunks_to_worker_state(assigned_chunks))
+        }
     }
 
     pub fn workers_to_dial(&self) -> Vec<PeerId> {

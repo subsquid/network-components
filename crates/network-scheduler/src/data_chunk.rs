@@ -23,6 +23,7 @@ pub struct DataChunk {
     pub dataset_url: String,
     pub block_range: Range,
     pub size_bytes: u64,
+    pub chunk_str: String,
 }
 
 impl Display for DataChunk {
@@ -43,6 +44,7 @@ impl DataChunk {
             dataset_url: format!("s3://{bucket}"),
             block_range: chunk.into(),
             size_bytes,
+            chunk_str: chunk_str.to_string(),
         })
     }
 

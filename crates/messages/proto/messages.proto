@@ -48,18 +48,28 @@ message Ping {
   bytes signature = 5;
 }
 
+message DatasetChunks {
+  string dataset_url = 1;
+  repeated string chunks = 2;
+}
+
+message WorkerAssignment {
+  repeated DatasetChunks dataset_chunks = 1;
+}
+
 message Pong {
   bytes ping_hash = 1;
   oneof status {
     google.protobuf.Empty not_registered = 2;
     google.protobuf.Empty unsupported_version = 3;
-    google.protobuf.Empty jailed_v1 = 4 [deprecated=true];
-    WorkerState active = 5;
+
+    WorkerState active = 5 [deprecated = true];
     string jailed = 6;
+    WorkerAssignment active_v2 = 7;
   }
 }
 
-message Query { // Optional fields enforce serializing default values
+message Query {// Optional fields enforce serializing default values
   optional string query_id = 1;
   optional string dataset = 2;
   optional string query = 3;

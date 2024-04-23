@@ -78,6 +78,7 @@ mod tests {
             dataset_url: "s3://squidnet".to_string(),
             block_range: Range::new(0, 1000),
             size_bytes: 0,
+            chunk_str: "/00000/00001-01000-fa1f6773".to_string(),
         };
         assert_eq!(chunk.to_string(), "s3://squidnet/0-1000");
         assert_eq!(
@@ -98,16 +99,19 @@ mod tests {
                 dataset_url: "s3://squidnet".to_string(),
                 block_range: Range::new(0, 1000),
                 size_bytes: 0,
+                chunk_str: "/00000/00001-01000-fa1f6773".to_string(),
             },
             DataChunk {
                 dataset_url: "s3://squidnet".to_string(),
                 block_range: Range::new(500, 1500),
                 size_bytes: 0,
+                chunk_str: "/00000/00500-01500-82315a24".to_string(),
             },
             DataChunk {
                 dataset_url: "s3://pepenet".to_string(),
                 block_range: Range::new(1234, 5678),
                 size_bytes: 0,
+                chunk_str: "00000/01234-05678-b4357d89".to_string(),
             },
         ];
 

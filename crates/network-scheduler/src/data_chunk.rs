@@ -42,9 +42,9 @@ impl DataChunk {
             .map_err(|_| anyhow::anyhow!("Invalid chunk: {chunk_str}"))?;
         Ok(Self {
             dataset_url: format!("s3://{bucket}"),
+            chunk_str: chunk.to_string(),
             block_range: chunk.into(),
             size_bytes,
-            chunk_str: chunk_str.to_string(),
         })
     }
 

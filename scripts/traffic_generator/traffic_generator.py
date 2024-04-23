@@ -160,7 +160,7 @@ class TrafficGenerator:
         logging.debug(
             f"Sending query worker_id={worker_id} query_url={query_url} "
             f"from={query['fromBlock']} to={query['toBlock']}")
-        response = requests.post(query_url, json=query)
+        response = requests.post(query_url, json=query, stream=True)  # stream=True to discard response body
 
         if response.status_code != 200:
             logging.info(

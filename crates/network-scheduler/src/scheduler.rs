@@ -169,10 +169,13 @@ impl Scheduler {
                     .get_mut(&unit_id)
                     .expect("No assignment entry for unit")
                     .retain(|worker_id| {
-                        self.worker_states
+                        let worker = self
+                            .worker_states
                             .get_mut(worker_id)
-                            .expect("Unknown worker")
-                            .try_expand_unit(&unit_id, old_size, unit_size)
+                            .expect("Unknown worker");
+                        let retained = worker.try_expand_unit(&unit_id, old_size, unit_size);
+                        worker.reset_download_progress(&self.known_units);
+                        retained
                     });
             }
         }

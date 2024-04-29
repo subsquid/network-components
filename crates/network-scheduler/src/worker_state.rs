@@ -155,7 +155,7 @@ impl WorkerState {
         }
     }
 
-    /// Assigned unit's size has increased. Unassing the unit if it doesn't fit anymore.
+    /// Assigned unit's size has increased. Unassign the unit if it doesn't fit anymore.
     /// Return true iff the unit remained assigned.
     pub fn try_expand_unit(&mut self, unit_id: &UnitId, old_size: u64, new_size: u64) -> bool {
         let size_diff = new_size - old_size;

@@ -6,8 +6,8 @@ use clap::Parser;
 use contract_client::RpcArgs;
 use env_logger::Env;
 
-use subsquid_network_transport::cli::TransportArgs;
-use subsquid_network_transport::transport::P2PTransportBuilder;
+use subsquid_network_transport::TransportArgs;
+use subsquid_network_transport::{GatewayConfig, P2PTransportBuilder};
 use tokio::sync::RwLock;
 
 use crate::config::Config;
@@ -54,8 +54,6 @@ struct Cli {
     allocations_db_path: PathBuf,
 }
 
-const PING_TOPIC: &str = "worker_ping";
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Init logger and parse arguments and config
@@ -66,18 +64,14 @@ async fn main() -> anyhow::Result<()> {
 
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
-    let keypair = transport_builder.keypair();
-    let (incoming_messages, transport_handle) = transport_builder.run().await?;
-
-    // Subscribe to dataset state updates (from p2p pub-sub)
-    transport_handle.subscribe(PING_TOPIC).await?;
+    let local_peer_id = transport_builder.local_peer_id();
+    let (incoming_messages, transport_handle) =
+        transport_builder.build_gateway(GatewayConfig::new(Config::get().logs_collector_id))?;
 
     // Instantiate contract client and check RPC connection
     let contract_client = contract_client::get_client(&args.rpc).await?;
     anyhow::ensure!(
-        contract_client
-            .is_client_registered(keypair.public().to_peer_id())
-            .await?,
+        contract_client.is_client_registered(local_peer_id).await?,
         "Client not registered on chain"
     );
 
@@ -88,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Start query client
     let query_client = client::get_client(
-        keypair,
+        local_peer_id,
         incoming_messages,
         transport_handle,
         contract_client,

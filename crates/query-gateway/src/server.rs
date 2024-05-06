@@ -11,24 +11,19 @@ use tabled::Table;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 
-use subsquid_messages::signatures::SignedMessage;
 use subsquid_messages::{
-    envelope::Msg, query_finished, query_result, Envelope, Ping, ProstMsg, Query as QueryMsg,
-    QueryFinished, QueryResult as QueryResultMsg, QuerySubmitted, SizeAndHash,
+    query_finished, query_result, Ping, Query as QueryMsg, QueryFinished,
+    QueryResult as QueryResultMsg, QuerySubmitted, SizeAndHash,
 };
-use subsquid_network_transport::task_manager::{CancellationToken, TaskManager};
-use subsquid_network_transport::transport::P2PTransportHandle;
-use subsquid_network_transport::{Keypair, MsgContent as MsgContentT, PeerId};
+use subsquid_network_transport::util::{CancellationToken, TaskManager};
+use subsquid_network_transport::PeerId;
+use subsquid_network_transport::{GatewayEvent, GatewayTransportHandle};
 
 use crate::allocations::AllocationsManager;
 use crate::config::{Config, DatasetId};
 use crate::network_state::NetworkState;
 use crate::query::{Query, QueryResult};
 use crate::task::Task;
-use crate::PING_TOPIC;
-
-pub type MsgContent = Box<[u8]>;
-pub type Message = subsquid_network_transport::Message<MsgContent>;
 
 const COMP_UNITS_PER_QUERY: u32 = 1;
 
@@ -36,31 +31,31 @@ lazy_static! {
     pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.3.0".parse().unwrap();
 }
 
-pub struct Server<S: Stream<Item = Message> + Send + Unpin + 'static> {
-    incoming_messages: S,
-    transport_handle: P2PTransportHandle<MsgContent>,
+pub struct Server<S: Stream<Item = GatewayEvent> + Send + Unpin + 'static> {
+    incoming_events: S,
+    transport_handle: GatewayTransportHandle,
     query_receiver: mpsc::Receiver<Query>,
     timeout_sender: mpsc::Sender<String>,
     timeout_receiver: mpsc::Receiver<String>,
     tasks: HashMap<String, Task>,
     network_state: Arc<RwLock<NetworkState>>,
     allocations_manager: Arc<RwLock<AllocationsManager>>,
-    keypair: Keypair,
+    local_peer_id: PeerId,
     task_manager: TaskManager,
 }
 
-impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
+impl<S: Stream<Item = GatewayEvent> + Send + Unpin + 'static> Server<S> {
     pub fn new(
-        incoming_messages: S,
-        transport_handle: P2PTransportHandle<MsgContent>,
+        local_peer_id: PeerId,
+        incoming_events: S,
+        transport_handle: GatewayTransportHandle,
         query_receiver: mpsc::Receiver<Query>,
         network_state: Arc<RwLock<NetworkState>>,
         allocations_manager: Arc<RwLock<AllocationsManager>>,
-        keypair: Keypair,
     ) -> Self {
         let (timeout_sender, timeout_receiver) = mpsc::channel(1000);
         Self {
-            incoming_messages,
+            incoming_events,
             transport_handle,
             query_receiver,
             timeout_sender,
@@ -68,7 +63,7 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
             tasks: Default::default(),
             network_state,
             allocations_manager,
-            keypair,
+            local_peer_id,
             task_manager: Default::default(),
         }
     }
@@ -87,7 +82,7 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
                 Some(query_id) = self.timeout_receiver.recv() => self.handle_timeout(query_id)
                     .await
                     .unwrap_or_else(|e| log::error!("Error handling query timeout: {e:?}")),
-                Some(msg) = self.incoming_messages.next() => self.handle_message(msg)
+                Some(ev) = self.incoming_events.next() => self.on_incoming_event(ev)
                     .await
                     .unwrap_or_else(|e| log::error!("Error handling incoming message: {e:?}")),
                 _ = cancel_token.cancelled() => break,
@@ -114,24 +109,6 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
 
     fn generate_query_id() -> String {
         uuid::Uuid::new_v4().to_string()
-    }
-
-    fn client_id(&self) -> String {
-        PeerId::from(self.keypair.public()).to_string()
-    }
-
-    async fn send_msg(&mut self, peer_id: PeerId, msg: Msg) -> anyhow::Result<()> {
-        let envelope = Envelope { msg: Some(msg) };
-        let msg_content = envelope.encode_to_vec().into();
-        self.transport_handle
-            .send_direct_msg(msg_content, peer_id)?;
-        Ok(())
-    }
-
-    async fn send_metrics(&mut self, msg: Msg) {
-        self.send_msg(Config::get().scheduler_id, msg)
-            .await
-            .unwrap_or_else(|e| log::error!("Failed to send metrics: {e:?}"));
     }
 
     async fn handle_query(&mut self, query: Query) -> anyhow::Result<()> {
@@ -179,7 +156,7 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
         let task = Task::new(worker_id, result_sender, timeout_handle);
         self.tasks.insert(query_id.clone(), task);
 
-        let mut worker_msg = QueryMsg {
+        let query_msg = QueryMsg {
             query_id: Some(query_id.clone()),
             dataset: Some(dataset.clone()),
             query: Some(query.clone()),
@@ -187,20 +164,19 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
             client_state_json: Some("{}".to_string()), // This is a placeholder field
             signature: vec![],
         };
-        worker_msg.sign(&self.keypair)?;
-        self.send_msg(worker_id, Msg::Query(worker_msg)).await?;
+        self.transport_handle.send_query(worker_id, query_msg)?;
 
         if Config::get().send_metrics {
             let query_hash = SizeAndHash::compute(&query).sha3_256;
-            let metrics_msg = Msg::QuerySubmitted(QuerySubmitted {
-                client_id: self.client_id(),
-                worker_id: worker_id.to_string(),
+            let metrics_msg = QuerySubmitted {
+                client_id: self.local_peer_id.to_base58(),
+                worker_id: worker_id.to_base58(),
                 query_id,
                 dataset,
                 query,
                 query_hash,
-            });
-            self.send_metrics(metrics_msg).await;
+            };
+            self.transport_handle.query_submitted(metrics_msg)?;
         }
 
         Ok(())
@@ -228,32 +204,24 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
 
         let task = task.timeout();
         if Config::get().send_metrics {
-            let metrics_msg = Msg::QueryFinished(QueryFinished {
-                client_id: self.client_id(),
-                worker_id: task.worker_id.to_string(),
+            let metrics_msg = QueryFinished {
+                client_id: self.local_peer_id.to_base58(),
+                worker_id: task.worker_id.to_base58(),
                 query_id,
                 exec_time_ms: task.exec_time_ms(),
                 result: Some(query_finished::Result::Timeout(())),
-            });
-            self.send_metrics(metrics_msg).await;
+            };
+            self.transport_handle.query_finished(metrics_msg)?;
         }
         Ok(())
     }
 
-    async fn handle_message(&mut self, msg: Message) -> anyhow::Result<()> {
-        let Message {
-            peer_id,
-            topic,
-            content,
-        } = msg;
-        let peer_id = peer_id.ok_or_else(|| anyhow::anyhow!("Message sender ID missing"))?;
-        let Envelope { msg } = Envelope::decode(content.as_slice())?;
-        match msg {
-            Some(Msg::QueryResult(result)) => self.query_result(peer_id, result).await?,
-            Some(Msg::Ping(ping)) if topic.as_ref().is_some_and(|t| t == PING_TOPIC) => {
-                self.ping(peer_id, ping).await
+    async fn on_incoming_event(&mut self, ev: GatewayEvent) -> anyhow::Result<()> {
+        match ev {
+            GatewayEvent::Ping { peer_id, ping } => self.ping(peer_id, ping).await,
+            GatewayEvent::QueryResult { peer_id, result } => {
+                self.query_result(peer_id, result).await?
             }
-            _ => log::debug!("Unexpected message received: {msg:?}"),
         }
         Ok(())
     }
@@ -311,14 +279,14 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
         if Config::get().send_metrics {
             // This computes hash, which could take some time, hence spawn_blocking is used here
             let result = tokio::task::spawn_blocking(move || Some((&result).into())).await?;
-            let metrics_msg = Msg::QueryFinished(QueryFinished {
-                client_id: self.client_id(),
-                worker_id: peer_id.to_string(),
+            let metrics_msg = QueryFinished {
+                client_id: self.local_peer_id.to_base58(),
+                worker_id: peer_id.to_base58(),
                 query_id,
                 exec_time_ms: task.exec_time_ms(),
                 result,
-            });
-            self.send_metrics(metrics_msg).await;
+            };
+            self.transport_handle.query_finished(metrics_msg)?;
         }
 
         Ok(())

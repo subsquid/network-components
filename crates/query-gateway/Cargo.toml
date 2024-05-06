@@ -1,6 +1,6 @@
 [package]
 name = "query-gateway"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 
 [dependencies]
@@ -29,5 +29,5 @@ tokio-rusqlite = "0.5"
 uuid = { version = "1", features = ["v4", "fast-rng"] }
 
 contract-client = { version = "0.1", path = "../contract-client" }
-subsquid-messages = { version = "0.1", path = "../messages", features = ["semver", "signatures"] }
-subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", rev = "3075211" }
+subsquid-messages = { workspace = true, features = ["semver"] }
+subsquid-network-transport = { workspace = true, features = ["gateway"] }

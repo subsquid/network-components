@@ -2,7 +2,7 @@ use clap::Parser;
 use env_logger::Env;
 use std::sync::Arc;
 use std::time::Duration;
-use subsquid_network_transport::transport::P2PTransportBuilder;
+use subsquid_network_transport::P2PTransportBuilder;
 
 use crate::cli::Cli;
 use crate::collector::LogsCollector;
@@ -15,8 +15,6 @@ mod server;
 mod storage;
 mod utils;
 
-const LOGS_TOPIC: &str = "worker_query_logs";
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Init logger and parse arguments
@@ -28,10 +26,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
-    let (incoming_messages, transport_handle) = transport_builder.run().await?;
-
-    // Subscribe to receive worker logs
-    transport_handle.subscribe(LOGS_TOPIC).await?;
+    let (incoming_messages, transport_handle) =
+        transport_builder.build_logs_collector(Default::default())?;
 
     let contract_client: Arc<dyn contract_client::Client> =
         contract_client::get_client(&args.rpc).await?.into();

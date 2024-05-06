@@ -59,7 +59,7 @@ pub struct ComputeUnitsConfig {
 #[serde_as]
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub scheduler_id: PeerId,
+    pub logs_collector_id: PeerId,
     pub send_metrics: bool,
     #[serde_as(as = "DurationSeconds")]
     #[serde(

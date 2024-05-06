@@ -1,4 +1,4 @@
-scheduler_id: "12D3KooWQER7HEpwsvqSzqzaiV36d3Bn6DZrnwEunnzS76pgZkMU"
+logs_collector_id: "12D3KooWC3GvQVqnvPwWz23sTW8G8HVokMnox62A7mnL9wwaSujk"
 send_metrics: true
 worker_inactive_threshold_sec: 120
 worker_greylist_time_sec: 1800

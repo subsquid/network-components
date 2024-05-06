@@ -11,7 +11,7 @@ use serde::Serialize;
 use tokio::sync::RwLock;
 
 use subsquid_messages::RangeSet;
-use subsquid_network_transport::task_manager::CancellationToken;
+use subsquid_network_transport::util::CancellationToken;
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;

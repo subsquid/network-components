@@ -1,6 +1,6 @@
 use clap::{Args, Parser};
 use contract_client::RpcArgs;
-use subsquid_network_transport::cli::TransportArgs;
+use subsquid_network_transport::TransportArgs;
 
 #[derive(Args)]
 pub struct ClickhouseArgs {

@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM rust:1.65.0 AS archive-router-builder
+FROM --platform=$BUILDPLATFORM rust:1.78.0 AS archive-router-builder
 RUN apt-get update && apt-get install protobuf-compiler -y
 WORKDIR /archive-router
 COPY ./ .
@@ -13,7 +13,7 @@ COPY --from=archive-router-builder /archive-router/target/release/router ./route
 ENTRYPOINT ["/archive-router/router"]
 EXPOSE 3000
 
-FROM --platform=$BUILDPLATFORM lukemathwalker/cargo-chef:0.1.62-rust-1.75-bookworm AS chef
+FROM --platform=$BUILDPLATFORM lukemathwalker/cargo-chef:0.1.66-rust-1.78-slim-bookworm AS chef
 WORKDIR /app
 
 FROM --platform=$BUILDPLATFORM chef AS network-planner
@@ -30,7 +30,7 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     --mount=target=/var/cache/apt,type=cache,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && apt-get update \
-    && apt-get -y install protobuf-compiler
+    && apt-get -y install protobuf-compiler pkg-config libssl-dev build-essential
 
 COPY --from=network-planner /app/recipe.json recipe.json
 RUN --mount=type=ssh cargo chef cook --release --recipe-path recipe.json

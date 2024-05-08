@@ -4,4 +4,4 @@ resolver = "2"
 
 [workspace.dependencies]
 subsquid-messages = { git = "ssh://git@github.com/subsquid/subsquid-network.git", version = "0.2" }
-subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", version = "0.4" }
+subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", version = "0.4.1" }

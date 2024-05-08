@@ -6,16 +6,16 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 use contract_client::Client as ContractClient;
-use subsquid_network_transport::task_manager::TaskManager;
-use subsquid_network_transport::transport::P2PTransportHandle;
-use subsquid_network_transport::{Keypair, PeerId};
+use subsquid_network_transport::util::TaskManager;
+use subsquid_network_transport::PeerId;
+use subsquid_network_transport::{GatewayEvent, GatewayTransportHandle};
 
 use crate::allocations::AllocationsManager;
 use crate::chain_updates::ChainUpdatesHandler;
 use crate::config::{Config, DatasetId};
 use crate::network_state::NetworkState;
 use crate::query::{Query, QueryResult};
-use crate::server::{Message, MsgContent, Server};
+use crate::server::Server;
 
 pub struct QueryClient {
     network_state: Arc<RwLock<NetworkState>>,
@@ -24,7 +24,7 @@ pub struct QueryClient {
 }
 
 impl QueryClient {
-    pub fn new<S: Stream<Item = Message> + Send + Unpin + 'static>(
+    pub fn new<S: Stream<Item = GatewayEvent> + Send + Unpin + 'static>(
         network_state: Arc<RwLock<NetworkState>>,
         query_sender: mpsc::Sender<Query>,
         chain_updates_handler: ChainUpdatesHandler,
@@ -92,10 +92,10 @@ impl QueryClient {
     }
 }
 
-pub async fn get_client<S: Stream<Item = Message> + Send + Unpin + 'static>(
-    keypair: Keypair,
+pub async fn get_client<S: Stream<Item = GatewayEvent> + Send + Unpin + 'static>(
+    local_peer_id: PeerId,
     incoming_messages: S,
-    transport_handle: P2PTransportHandle<MsgContent>,
+    transport_handle: GatewayTransportHandle,
     contract_client: Box<dyn ContractClient>,
     network_state: Arc<RwLock<NetworkState>>,
     allocations_db_path: PathBuf,
@@ -110,17 +110,17 @@ pub async fn get_client<S: Stream<Item = Message> + Send + Unpin + 'static>(
         network_state.clone(),
         allocations_manager.clone(),
         contract_client,
-        keypair.public().to_peer_id(),
+        local_peer_id,
     );
     chain_updates_handler.pull_chain_updates().await?;
 
     let server = Server::new(
+        local_peer_id,
         incoming_messages,
         transport_handle,
         query_receiver,
         network_state.clone(),
         allocations_manager,
-        keypair,
     );
 
     let client = QueryClient::new(network_state, query_sender, chain_updates_handler, server);

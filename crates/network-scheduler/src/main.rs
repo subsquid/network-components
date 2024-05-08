@@ -2,7 +2,7 @@ use clap::Parser;
 use env_logger::Env;
 use prometheus_client::registry::Registry;
 
-use subsquid_network_transport::transport::P2PTransportBuilder;
+use subsquid_network_transport::P2PTransportBuilder;
 
 use crate::cli::Cli;
 use crate::metrics::MetricsWriter;
@@ -20,8 +20,6 @@ mod server;
 mod storage;
 mod worker_state;
 
-const PING_TOPIC: &str = "worker_ping";
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Init logger and parse arguments and config
@@ -35,15 +33,13 @@ async fn main() -> anyhow::Result<()> {
     // Open file for writing metrics
     let metrics_writer = MetricsWriter::from_cli(&args).await?;
     let mut metrics_registry = Registry::default();
+    subsquid_network_transport::metrics::register_metrics(&mut metrics_registry);
 
     // Build P2P transport
-    let mut transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
-    transport_builder.with_registry(&mut metrics_registry);
+    let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
     let local_peer_id = transport_builder.local_peer_id();
-    let (incoming_messages, transport_handle) = transport_builder.run().await?;
-
-    // Subscribe to receive worker pings
-    transport_handle.subscribe(PING_TOPIC).await?;
+    let (incoming_messages, transport_handle) =
+        transport_builder.build_scheduler(Default::default())?;
 
     // Get scheduling units
     let storage = S3Storage::new(local_peer_id).await;

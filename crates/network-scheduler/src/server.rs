@@ -8,12 +8,10 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
 
-use subsquid_messages::envelope::Msg;
-use subsquid_messages::signatures::{msg_hash, SignedMessage};
-use subsquid_messages::{Envelope, Ping, Pong, ProstMsg};
-use subsquid_network_transport::task_manager::{CancellationToken, TaskManager};
-use subsquid_network_transport::transport::P2PTransportHandle;
-use subsquid_network_transport::{MsgContent as MsgContentT, PeerId};
+use subsquid_messages::signatures::msg_hash;
+use subsquid_messages::{Ping, Pong};
+use subsquid_network_transport::util::{CancellationToken, TaskManager};
+use subsquid_network_transport::{PeerId, SchedulerEvent, SchedulerTransportHandle};
 
 use crate::cli::Config;
 use crate::metrics::{MetricsEvent, MetricsWriter};
@@ -22,32 +20,29 @@ use crate::scheduler::Scheduler;
 use crate::scheduling_unit::SchedulingUnit;
 use crate::storage::S3Storage;
 
-type MsgContent = Box<[u8]>;
-type Message = subsquid_network_transport::Message<Box<[u8]>>;
-
 const WORKER_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
-pub struct Server<S: Stream<Item = Message> + Send + Unpin + 'static> {
-    incoming_messages: S,
+pub struct Server<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> {
+    incoming_events: S,
     incoming_units: Receiver<SchedulingUnit>,
-    transport_handle: P2PTransportHandle<MsgContent>,
+    transport_handle: SchedulerTransportHandle,
     scheduler: Arc<RwLock<Scheduler>>,
     metrics_writer: Arc<RwLock<MetricsWriter>>,
     task_manager: TaskManager,
 }
 
-impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
+impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
     pub fn new(
-        incoming_messages: S,
+        incoming_events: S,
         incoming_units: Receiver<SchedulingUnit>,
-        transport_handle: P2PTransportHandle<MsgContent>,
+        transport_handle: SchedulerTransportHandle,
         scheduler: Scheduler,
         metrics_writer: MetricsWriter,
     ) -> Self {
         let scheduler = Arc::new(RwLock::new(scheduler));
         let metrics_writer = Arc::new(RwLock::new(metrics_writer));
         Self {
-            incoming_messages,
+            incoming_events,
             incoming_units,
             transport_handle,
             scheduler,
@@ -81,8 +76,8 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
         let mut sigterm = signal(SignalKind::terminate())?;
         loop {
             tokio::select! {
-                Some(msg) = self.incoming_messages.next() => self.handle_message(msg).await,
-                Some(unit) = self.incoming_units.recv() => self.new_unit(unit).await,
+                Some(ev) = self.incoming_events.next() => self.on_incoming_event(ev).await, // FIXME: blocking event loop
+                Some(unit) = self.incoming_units.recv() => self.on_new_unit(unit).await, // FIXME: blocking event loop
                 _ = sigint.recv() => break,
                 _ = sigterm.recv() => break,
                 else => break
@@ -94,43 +89,29 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
         Ok(())
     }
 
-    async fn handle_message(&mut self, msg: Message) {
-        let peer_id = match msg.peer_id {
-            Some(peer_id) => peer_id,
-            None => return log::warn!("Dropping anonymous message"),
-        };
-        let envelope = match Envelope::decode(msg.content.as_slice()) {
-            Ok(envelope) => envelope,
-            Err(e) => return log::warn!("Error decoding message: {e:?} peer_id={peer_id}"),
-        };
-        match envelope.msg {
-            Some(Msg::Ping(msg)) => self.ping(peer_id, msg).await,
-            Some(Msg::QuerySubmitted(msg)) => self.write_metrics(peer_id, msg).await,
-            Some(Msg::QueryFinished(msg)) => self.write_metrics(peer_id, msg).await,
-            _ => log::debug!("Unexpected msg received: {envelope:?}"),
-        };
+    async fn on_incoming_event(&mut self, ev: SchedulerEvent) {
+        match ev {
+            SchedulerEvent::Ping { peer_id, ping } => self.ping(peer_id, ping).await,
+            SchedulerEvent::PeerProbed { peer_id, reachable } => self
+                .scheduler
+                .write()
+                .await
+                .worker_dialed(peer_id, reachable),
+        }
     }
 
-    async fn ping(&mut self, peer_id: PeerId, mut msg: Ping) {
+    async fn ping(&mut self, peer_id: PeerId, ping: Ping) {
         log::debug!("Got ping from {peer_id}");
-        if !msg
-            .worker_id
-            .as_ref()
-            .is_some_and(|id| *id == peer_id.to_string())
-        {
-            return log::warn!("Worker ID mismatch in ping");
-        }
-        if !msg.verify_signature(&peer_id) {
-            return log::warn!("Invalid ping signature");
-        }
-        let ping_hash = msg_hash(&msg);
-        let status = self.scheduler.write().await.ping(peer_id, msg.clone());
-        self.write_metrics(peer_id, msg).await;
-        let pong = Msg::Pong(Pong {
+        let ping_hash = msg_hash(&ping);
+        let status = self.scheduler.write().await.ping(peer_id, ping.clone());
+        self.write_metrics(peer_id, ping).await;
+        let pong = Pong {
             ping_hash,
             status: Some(status),
-        });
-        self.send_msg(peer_id, pong).await;
+        };
+        self.transport_handle
+            .send_pong(peer_id, pong)
+            .unwrap_or_else(|_| log::error!("Error sending pong: queue full"));
     }
 
     async fn write_metrics(&mut self, peer_id: PeerId, msg: impl Into<MetricsEvent>) {
@@ -142,16 +123,8 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
             .unwrap_or_else(|e| log::error!("Error writing metrics: {e:?}"));
     }
 
-    async fn new_unit(&self, unit: SchedulingUnit) {
+    async fn on_new_unit(&self, unit: SchedulingUnit) {
         self.scheduler.write().await.new_unit(unit)
-    }
-
-    async fn send_msg(&mut self, peer_id: PeerId, msg: Msg) {
-        let envelope = Envelope { msg: Some(msg) };
-        let msg_content = envelope.encode_to_vec().into();
-        self.transport_handle
-            .send_direct_msg(msg_content, peer_id)
-            .unwrap_or_else(|e| log::error!("Error sending message: {e:?}"));
     }
 
     async fn spawn_scheduling_task(
@@ -207,46 +180,20 @@ impl<S: Stream<Item = Message> + Send + Unpin + 'static> Server<S> {
     fn spawn_worker_monitoring_task(&mut self) {
         log::info!("Starting monitoring task");
         let scheduler = self.scheduler.clone();
-        let metrics_writer = self.metrics_writer.clone();
         let transport_handle = self.transport_handle.clone();
         let interval = Config::get().worker_monitoring_interval;
 
-        let task = move |cancel_token: CancellationToken| {
+        let task = move |_| {
             let scheduler = scheduler.clone();
-            let metrics_writer = metrics_writer.clone();
             let transport_handle = transport_handle.clone();
-            let cancel_token = cancel_token.clone();
             async move {
                 log::info!("Dialing workers...");
                 let workers = scheduler.read().await.workers_to_dial();
-                let futures = workers.into_iter().map(|worker_id| {
-                    let scheduler = scheduler.clone();
-                    let transport_handle = transport_handle.clone();
-                    async move {
-                        log::info!("Dialing worker {worker_id}");
-                        match transport_handle.dial_peer(worker_id).await {
-                            Ok(res) => scheduler.write().await.worker_dialed(worker_id, res),
-                            Err(e) => {
-                                log::error!("Error dialing worker: {e:?}");
-                                scheduler.write().await.worker_dialed(worker_id, false);
-                            }
-                        }
-                    }
-                });
-
-                tokio::select! {
-                    _ = futures::future::join_all(futures) => (),
-                    _ = cancel_token.cancelled() => return,
+                for peer_id in workers {
+                    transport_handle
+                        .probe_peer(peer_id)
+                        .unwrap_or_else(|_| log::error!("Cannot probe {peer_id}: queue full"))
                 }
-                log::info!("Dialing workers complete.");
-
-                let workers = scheduler.read().await.active_workers();
-                metrics_writer
-                    .write()
-                    .await
-                    .write_metrics(None, workers)
-                    .await
-                    .unwrap_or_else(|e| log::error!("Error writing metrics: {e:?}"));
             }
         };
 

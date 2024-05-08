@@ -7,7 +7,7 @@ use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::types::Object;
 use itertools::Itertools;
 use nonempty::NonEmpty;
-use subsquid_network_transport::task_manager::{CancellationToken, TaskManager};
+use subsquid_network_transport::util::{CancellationToken, TaskManager};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
 

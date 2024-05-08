@@ -7,27 +7,21 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::RwLock;
 
 use contract_client::Client as ContractClient;
-use subsquid_messages::envelope::Msg;
-use subsquid_messages::signatures::SignedMessage;
-use subsquid_messages::{Envelope, LogsCollected, ProstMsg, QueryLogs};
-use subsquid_network_transport::task_manager::TaskManager;
-use subsquid_network_transport::transport::P2PTransportHandle;
-use subsquid_network_transport::{MsgContent as MsgContentT, PeerId};
+use subsquid_messages::{LogsCollected, QueryExecuted};
+use subsquid_network_transport::util::TaskManager;
+use subsquid_network_transport::PeerId;
+use subsquid_network_transport::{LogsCollectorEvent, LogsCollectorTransportHandle};
 
 use crate::collector::LogsCollector;
 use crate::storage::LogsStorage;
-use crate::LOGS_TOPIC;
-
-type MsgContent = Box<[u8]>;
-type Message = subsquid_network_transport::Message<MsgContent>;
 
 pub struct Server<T, S>
 where
     T: LogsStorage + Send + Sync + 'static,
-    S: Stream<Item = Message> + Send + Unpin + 'static,
+    S: Stream<Item = LogsCollectorEvent> + Send + Unpin + 'static,
 {
-    incoming_messages: S,
-    transport_handle: P2PTransportHandle<MsgContent>,
+    incoming_events: S,
+    transport_handle: LogsCollectorTransportHandle,
     logs_collector: Arc<RwLock<LogsCollector<T>>>,
     registered_workers: Arc<RwLock<HashSet<PeerId>>>,
     task_manager: TaskManager,
@@ -36,16 +30,16 @@ where
 impl<T, S> Server<T, S>
 where
     T: LogsStorage + Send + Sync + 'static,
-    S: Stream<Item = Message> + Send + Unpin + 'static,
+    S: Stream<Item = LogsCollectorEvent> + Send + Unpin + 'static,
 {
     pub fn new(
-        incoming_messages: S,
-        transport_handle: P2PTransportHandle<MsgContent>,
+        incoming_events: S,
+        transport_handle: LogsCollectorTransportHandle,
         logs_collector: LogsCollector<T>,
     ) -> Self {
         let logs_collector = Arc::new(RwLock::new(logs_collector));
         Self {
-            incoming_messages,
+            incoming_events,
             transport_handle,
             logs_collector,
             registered_workers: Default::default(),
@@ -79,7 +73,7 @@ where
         let mut sigterm = signal(SignalKind::terminate())?;
         loop {
             tokio::select! {
-                Some(msg) = self.incoming_messages.next() => self.handle_message(msg).await,
+                Some(ev) = self.incoming_events.next() => self.on_incoming_event(ev).await, // FIXME: blocking event loop
                 _ = sigint.recv() => break,
                 _ = sigterm.recv() => break,
                 else => break
@@ -90,47 +84,36 @@ where
         Ok(())
     }
 
-    async fn handle_message(&mut self, msg: Message) {
-        let peer_id = match msg.peer_id {
-            Some(peer_id) => peer_id,
-            None => return log::warn!("Dropping anonymous message"),
+    async fn on_incoming_event(&mut self, ev: LogsCollectorEvent) {
+        let (worker_id, logs) = match ev {
+            LogsCollectorEvent::WorkerLogs { peer_id, logs } => (peer_id, logs),
+            LogsCollectorEvent::QuerySubmitted(query_submitted) => {
+                match serde_json::to_string(&query_submitted) {
+                    Ok(s) => println!("{s}"),
+                    Err(e) => log::error!("Error serializing log: {e:?}"),
+                }
+                return;
+            }
+            LogsCollectorEvent::QueryFinished(query_finished) => {
+                match serde_json::to_string(&query_finished) {
+                    Ok(s) => println!("{s}"),
+                    Err(e) => log::error!("Error serializing log: {e:?}"),
+                }
+                return;
+            }
         };
-        let envelope = match Envelope::decode(msg.content.as_slice()) {
-            Ok(envelope) => envelope,
-            Err(e) => return log::warn!("Error decoding message: {e:?}"),
-        };
-        match envelope.msg {
-            Some(Msg::QueryLogs(query_logs)) => self.collect_logs(peer_id, query_logs).await,
-            _ => log::debug!("Unexpected msg received: {envelope:?}"),
-        }
+        self.collect_logs(worker_id, logs).await;
     }
 
-    async fn collect_logs(
-        &self,
-        worker_id: PeerId,
-        QueryLogs {
-            mut queries_executed,
-        }: QueryLogs,
-    ) {
+    async fn collect_logs(&self, worker_id: PeerId, logs: Vec<QueryExecuted>) {
         if !self.registered_workers.read().await.contains(&worker_id) {
             log::warn!("Worker not registered: {worker_id:?}");
             return;
         }
-        queries_executed = queries_executed
-            .into_iter()
-            .filter_map(|mut log| {
-                if log.verify_signature(&worker_id) {
-                    Some(log)
-                } else {
-                    log::error!("Invalid log signature worker_id = {worker_id}");
-                    None
-                }
-            })
-            .collect();
         self.logs_collector
             .write()
             .await
-            .collect_logs(worker_id, queries_executed);
+            .collect_logs(worker_id, logs);
     }
 
     fn spawn_saving_task(&mut self, interval: Duration) {
@@ -145,13 +128,10 @@ where
                     Ok(seq_nums) => seq_nums,
                     Err(e) => return log::error!("Error saving logs to storage: {e:?}"),
                 };
-
-                let msg = Msg::LogsCollected(LogsCollected { sequence_numbers });
-                let envelope = Envelope { msg: Some(msg) };
-                let msg_content = envelope.encode_to_vec().into();
-                transport_handle
-                    .broadcast_msg(msg_content, LOGS_TOPIC)
-                    .unwrap_or_else(|e| log::error!("Error sending message: {e:?}"));
+                let logs_collected = LogsCollected { sequence_numbers };
+                if transport_handle.logs_collected(logs_collected).is_err() {
+                    log::error!("Error broadcasting logs collected: queue full");
+                }
             }
         };
         self.task_manager.spawn_periodic(task, interval);

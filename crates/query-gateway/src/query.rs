@@ -37,6 +37,7 @@ impl From<query_result::Result> for QueryResult {
             query_result::Result::BadRequest(err) => Self::BadRequest(err),
             query_result::Result::ServerError(err) => Self::ServerError(err),
             query_result::Result::NoAllocation(()) => Self::NoAllocation,
+            query_result::Result::Timeout(()) => Self::Timeout,
         }
     }
 }

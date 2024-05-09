@@ -4104,7 +4104,7 @@ checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
 name = "logs-collector"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4376,7 +4376,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5173,7 +5173,7 @@ checksum = "80b776a1b2dc779f5ee0641f8ade0125bc1298dd41a9a0c16d8bd57b42d222b1"
 dependencies = [
  "bytes",
  "heck 0.5.0",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "log",
  "multimap",
  "once_cell",
@@ -5193,7 +5193,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19de2de2a00075bf566bee3bd4db014b11587e84184d3f7a791bc17f1a8e9e48"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.60",
@@ -5216,7 +5216,7 @@ checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "query-gateway"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -6397,7 +6397,7 @@ dependencies = [
 [[package]]
 name = "subsquid-messages"
 version = "0.2.0"
-source = "git+ssh://git@github.com/subsquid/subsquid-network.git#d7797694ea17eabaa72df78b1388125adb6153a5"
+source = "git+ssh://git@github.com/subsquid/subsquid-network.git#2b86ac94fa0b674f4894ada71594be3a9ad62c6f"
 dependencies = [
  "anyhow",
  "hex",
@@ -6411,8 +6411,8 @@ dependencies = [
 
 [[package]]
 name = "subsquid-network-transport"
-version = "0.4.1"
-source = "git+ssh://git@github.com/subsquid/subsquid-network.git#d7797694ea17eabaa72df78b1388125adb6153a5"
+version = "0.4.2"
+source = "git+ssh://git@github.com/subsquid/subsquid-network.git#2b86ac94fa0b674f4894ada71594be3a9ad62c6f"
 dependencies = [
  "anyhow",
  "async-trait",

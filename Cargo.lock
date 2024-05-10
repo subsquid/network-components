@@ -2670,9 +2670,8 @@ dependencies = [
 
 [[package]]
 name = "futures-bounded"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1e2774cc104e198ef3d3e1ff4ab40f86fa3245d6cb6a3a46174f21463cee173"
+version = "0.2.3-dev"
+source = "git+https://github.com/Wiezzel/rust-futures-bounded.git#701903a89d03b960b5d65e9331580a9af3292e05"
 dependencies = [
  "futures-timer",
  "futures-util",
@@ -2681,7 +2680,8 @@ dependencies = [
 [[package]]
 name = "futures-bounded"
 version = "0.2.3"
-source = "git+https://github.com/Wiezzel/rust-futures-bounded.git?rev=579106d#579106d700faac4c52d42dcfb29c711078ba8552"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1e2774cc104e198ef3d3e1ff4ab40f86fa3245d6cb6a3a46174f21463cee173"
 dependencies = [
  "futures-timer",
  "futures-util",
@@ -3679,7 +3679,7 @@ dependencies = [
  "asynchronous-codec",
  "either",
  "futures",
- "futures-bounded 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "futures-bounded 0.2.3",
  "futures-timer",
  "instant",
  "libp2p-core",
@@ -3747,7 +3747,7 @@ dependencies = [
  "asynchronous-codec",
  "either",
  "futures",
- "futures-bounded 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "futures-bounded 0.2.3",
  "futures-timer",
  "libp2p-core",
  "libp2p-identity",
@@ -3791,7 +3791,7 @@ dependencies = [
  "either",
  "fnv",
  "futures",
- "futures-bounded 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "futures-bounded 0.2.3",
  "futures-timer",
  "instant",
  "libp2p-core",
@@ -3923,7 +3923,7 @@ dependencies = [
  "bytes",
  "either",
  "futures",
- "futures-bounded 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "futures-bounded 0.2.3",
  "futures-timer",
  "instant",
  "libp2p-core",
@@ -3945,7 +3945,7 @@ source = "git+https://github.com/Wiezzel/rust-libp2p.git?rev=299b66e4#299b66e477
 dependencies = [
  "async-trait",
  "futures",
- "futures-bounded 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "futures-bounded 0.2.3",
  "futures-timer",
  "instant",
  "libp2p-core",
@@ -4104,7 +4104,7 @@ checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
 name = "logs-collector"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4376,7 +4376,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5173,7 +5173,7 @@ checksum = "80b776a1b2dc779f5ee0641f8ade0125bc1298dd41a9a0c16d8bd57b42d222b1"
 dependencies = [
  "bytes",
  "heck 0.5.0",
- "itertools 0.12.1",
+ "itertools 0.11.0",
  "log",
  "multimap",
  "once_cell",
@@ -5193,7 +5193,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19de2de2a00075bf566bee3bd4db014b11587e84184d3f7a791bc17f1a8e9e48"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.60",
@@ -5216,7 +5216,7 @@ checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "query-gateway"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -6397,7 +6397,7 @@ dependencies = [
 [[package]]
 name = "subsquid-messages"
 version = "0.2.0"
-source = "git+ssh://git@github.com/subsquid/subsquid-network.git#2b86ac94fa0b674f4894ada71594be3a9ad62c6f"
+source = "git+ssh://git@github.com/subsquid/subsquid-network.git#54847a292e3191bd8f5205739277f1410f9bc3e4"
 dependencies = [
  "anyhow",
  "hex",
@@ -6411,8 +6411,8 @@ dependencies = [
 
 [[package]]
 name = "subsquid-network-transport"
-version = "0.4.2"
-source = "git+ssh://git@github.com/subsquid/subsquid-network.git#2b86ac94fa0b674f4894ada71594be3a9ad62c6f"
+version = "0.4.3"
+source = "git+ssh://git@github.com/subsquid/subsquid-network.git#54847a292e3191bd8f5205739277f1410f9bc3e4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6421,7 +6421,7 @@ dependencies = [
  "derivative",
  "env_logger",
  "futures",
- "futures-bounded 0.2.3 (git+https://github.com/Wiezzel/rust-futures-bounded.git?rev=579106d)",
+ "futures-bounded 0.2.3-dev",
  "futures-core",
  "lazy_static",
  "libp2p",

@@ -34,7 +34,8 @@ pub struct Config {
     #[serde_as(as = "DurationSeconds")]
     #[serde(rename = "successful_dial_retry_sec")]
     pub successful_dial_retry: Duration,
-    pub replication_factor: usize,
+    pub replication_factor: usize, // this is minimum
+    pub dynamic_replication: bool,
     pub scheduling_unit_size: usize,
     pub worker_storage_bytes: u64,
     pub mixed_units_ratio: f64,

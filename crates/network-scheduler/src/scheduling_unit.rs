@@ -35,7 +35,7 @@ impl SchedulingUnit {
     }
 
     pub fn dataset_url(&self) -> &str {
-        self.chunks.first().dataset_url.as_str()
+        self.chunks.first().dataset_id.as_str()
     }
 
     pub fn begin(&self) -> u32 {
@@ -57,7 +57,7 @@ impl Display for SchedulingUnit {
         write!(
             f,
             "{}/{}-{} ({} chunks)",
-            self.chunks.first().dataset_url,
+            self.chunks.first().dataset_id,
             self.chunks.first().block_range.begin,
             self.chunks.last().block_range.end,
             self.chunks.len()

@@ -183,7 +183,7 @@ impl WorkerState {
 
     fn count_missing_chunks<'a>(&'a self, units: &'a HashMap<UnitId, SchedulingUnit>) -> u32 {
         self.assigned_chunks(units)
-            .map(|chunk| match self.stored_ranges.get(&chunk.dataset_url) {
+            .map(|chunk| match self.stored_ranges.get(&chunk.dataset_id) {
                 Some(range_set) if range_set.includes(chunk.block_range) => 0,
                 _ => 1,
             })

@@ -10,11 +10,13 @@ use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 
 use contract_client::Worker;
-use subsquid_messages::{pong::Status as WorkerStatus, DatasetChunks, Ping, WorkerAssignment};
+use subsquid_messages::{
+    pong::Status as WorkerStatus, Ping,
+};
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;
-use crate::data_chunk::chunks_to_worker_state;
+use crate::data_chunk::{chunks_to_assignment, chunks_to_worker_state};
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::worker_state::{JailReason, WorkerState};
 
@@ -94,17 +96,7 @@ impl Scheduler {
         }
         let assigned_chunks = worker_state.assigned_chunks(&self.known_units);
         if ACTIVE_V2_MIN_WORKER_VER.matches(&version) {
-            let dataset_chunks = assigned_chunks
-                .map(|chunk| (chunk.dataset_url, chunk.chunk_str))
-                .into_grouping_map()
-                .collect::<Vec<_>>()
-                .into_iter()
-                .map(|(dataset_url, chunks)| DatasetChunks {
-                    dataset_url,
-                    chunks,
-                })
-                .collect();
-            WorkerStatus::ActiveV2(WorkerAssignment { dataset_chunks })
+            WorkerStatus::ActiveV2(chunks_to_assignment(assigned_chunks))
         } else {
             WorkerStatus::Active(chunks_to_worker_state(assigned_chunks))
         }

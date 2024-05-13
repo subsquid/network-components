@@ -73,7 +73,7 @@ async fn chunks(
                 assigned_to,
                 downloaded_by,
             };
-            (chunk.dataset_url, chunk_status)
+            (chunk.dataset_id, chunk_status)
         })
         .into_group_map();
     Json(chunk_statuses)
@@ -83,7 +83,7 @@ fn find_workers_with_chunk(
     chunk: &DataChunk,
     ranges: &HashMap<String, Vec<(PeerId, RangeSet)>>,
 ) -> Vec<String> {
-    let ranges = match ranges.get(&chunk.dataset_url) {
+    let ranges = match ranges.get(&chunk.dataset_id) {
         Some(ranges) => ranges,
         None => return vec![],
     };

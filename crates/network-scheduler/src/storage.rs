@@ -137,9 +137,11 @@ impl DatasetStorage {
         let mut last_key = None;
         let mut blocks_file_present = false;
         let mut size_bytes = 0u64;
+        let mut filenames = Vec::new();
         for obj in objs {
             last_key = Some(obj.key());
             blocks_file_present |= obj.file_name == "blocks.parquet";
+            filenames.push(obj.file_name);
             size_bytes += obj.size;
         }
         let last_key = match last_key {
@@ -147,9 +149,11 @@ impl DatasetStorage {
             None => anyhow::bail!("Empty object group"),
         };
         if !blocks_file_present {
+            // block.parquet is always the last file written in a chunk.
+            // So if it is present, all the other files are present too
             anyhow::bail!("blocks.parquet missing")
         }
-        let chunk = match DataChunk::new(&self.bucket, &last_key, size_bytes) {
+        let chunk = match DataChunk::new(&self.bucket, &last_key, size_bytes, filenames) {
             Ok(chunk) => chunk,
             Err(_) => anyhow::bail!("Invalid data chunk"),
         };

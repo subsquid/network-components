@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
@@ -6,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use sha3::{Digest, Sha3_256};
 
-use subsquid_messages::{Range, WorkerState};
+use subsquid_messages::{AssignedChunk, DatasetChunks, Range, WorkerAssignment, WorkerState};
+
+use crate::cli::Config;
 
 #[serde_as]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
@@ -20,31 +23,43 @@ impl Display for ChunkId {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DataChunk {
-    pub dataset_url: String,
+    #[serde(alias = "dataset_url")]
+    pub dataset_id: String,
+    #[serde(default)]
+    pub download_url: String,
     pub block_range: Range,
     pub size_bytes: u64,
     pub chunk_str: String,
+    #[serde(default)]
+    pub filenames: Vec<String>,
 }
 
 impl Display for DataChunk {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         format!(
             "{}/{}-{}",
-            self.dataset_url, self.block_range.begin, self.block_range.end
+            self.dataset_id, self.block_range.begin, self.block_range.end
         )
         .fmt(f)
     }
 }
 
 impl DataChunk {
-    pub fn new(bucket: &str, chunk_str: &str, size_bytes: u64) -> anyhow::Result<Self> {
+    pub fn new(
+        bucket: &str,
+        chunk_str: &str,
+        size_bytes: u64,
+        filenames: Vec<String>,
+    ) -> anyhow::Result<Self> {
         let chunk = subsquid_messages::data_chunk::DataChunk::from_str(chunk_str)
             .map_err(|_| anyhow::anyhow!("Invalid chunk: {chunk_str}"))?;
         Ok(Self {
-            dataset_url: format!("s3://{bucket}"),
+            dataset_id: format!("s3://{bucket}"),
+            download_url: format!("https://{bucket}.{}", Config::get().storage_domain),
             chunk_str: chunk.to_string(),
             block_range: chunk.into(),
             size_bytes,
+            filenames,
         })
     }
 
@@ -60,10 +75,48 @@ impl DataChunk {
 pub fn chunks_to_worker_state(chunks: impl IntoIterator<Item = DataChunk>) -> WorkerState {
     let datasets = chunks
         .into_iter()
-        .map(|chunk| (chunk.dataset_url, chunk.block_range))
+        .map(|chunk| (chunk.dataset_id, chunk.block_range))
         .into_grouping_map()
         .collect();
     WorkerState { datasets }
+}
+
+#[allow(deprecated)]
+pub fn chunks_to_assignment(chunks: impl Iterator<Item = DataChunk>) -> WorkerAssignment {
+    let mut known_filenames: HashMap<String, u32> = HashMap::new();
+    let mut filename_to_index = |filename: String| {
+        let next_index = known_filenames.len() as u32;
+        *known_filenames.entry(filename).or_insert(next_index)
+    };
+    let dataset_chunks = chunks
+        .into_group_map_by(|chunk| chunk.dataset_id.clone())
+        .into_iter()
+        .map(|(dataset_id, chunks)| DatasetChunks {
+            dataset_id: dataset_id.clone(),
+            download_url: chunks.first().unwrap().download_url.clone(),
+            chunks_legacy: chunks.iter().map(|chunk| chunk.chunk_str.clone()).collect(),
+            chunks: chunks
+                .into_iter()
+                .map(|chunk| AssignedChunk {
+                    path: chunk.chunk_str,
+                    filenames: chunk
+                        .filenames
+                        .into_iter()
+                        .map(|filename| filename_to_index(filename))
+                        .collect(),
+                })
+                .collect(),
+        })
+        .collect();
+    WorkerAssignment {
+        dataset_chunks,
+        http_headers: Default::default(),
+        known_filenames: known_filenames
+            .into_iter()
+            .sorted_by_key(|(_filename, index)| *index)
+            .map(|(filename, _index)| filename)
+            .collect(),
+    }
 }
 
 #[cfg(test)]
@@ -75,10 +128,12 @@ mod tests {
     #[test]
     fn test_chunk() {
         let chunk = DataChunk {
-            dataset_url: "s3://squidnet".to_string(),
+            dataset_id: "s3://squidnet".to_string(),
+            download_url: "https://squidnet.sqd-datasets.io".to_string(),
             block_range: Range::new(0, 1000),
             size_bytes: 0,
             chunk_str: "/00000/00001-01000-fa1f6773".to_string(),
+            filenames: vec![],
         };
         assert_eq!(chunk.to_string(), "s3://squidnet/0-1000");
         assert_eq!(
@@ -93,33 +148,85 @@ mod tests {
 
     #[test]
     #[rustfmt::skip]
-    fn test_worker_state() {
+    #[allow(deprecated)]
+    fn test_conversion() {
         let chunks = vec![
             DataChunk {
-                dataset_url: "s3://squidnet".to_string(),
+                dataset_id: "s3://squidnet".to_string(),
+                download_url: "https://squidnet.sqd-datasets.io".to_string(),
                 block_range: Range::new(0, 1000),
                 size_bytes: 0,
                 chunk_str: "/00000/00001-01000-fa1f6773".to_string(),
+                filenames: vec![
+                    "blocks.parquet".to_string(),
+                    "transactions.parquet".to_string(),
+                    "logs.parquet".to_string(),
+                ],
             },
             DataChunk {
-                dataset_url: "s3://squidnet".to_string(),
+                dataset_id: "s3://squidnet".to_string(),
+                download_url: "https://squidnet.sqd-datasets.io".to_string(),
                 block_range: Range::new(500, 1500),
                 size_bytes: 0,
                 chunk_str: "/00000/00500-01500-82315a24".to_string(),
+                filenames: vec!["blocks.parquet".to_string(), "traces.parquet".to_string()],
             },
             DataChunk {
-                dataset_url: "s3://pepenet".to_string(),
+                dataset_id: "s3://pepenet".to_string(),
+                download_url: "https://pepenet.sqd-datasets.io".to_string(),
                 block_range: Range::new(1234, 5678),
                 size_bytes: 0,
                 chunk_str: "00000/01234-05678-b4357d89".to_string(),
+                filenames: vec!["blocks.parquet".to_string(), "transactions.parquet".to_string()],
             },
         ];
 
-        assert_eq!(chunks_to_worker_state(chunks), WorkerState {
+        assert_eq!(chunks_to_worker_state(chunks.clone()), WorkerState {
             datasets: vec![
                 ("s3://squidnet".to_string(), RangeSet { ranges: vec![Range::new(0, 1500)] }),
                 ("s3://pepenet".to_string(), RangeSet { ranges: vec![Range::new(1234, 5678)] }),
             ].into_iter().collect()
-        })
+        });
+
+        assert_eq!(chunks_to_assignment(chunks.into_iter()), WorkerAssignment {
+            known_filenames: vec![
+                "blocks.parquet".to_string(),
+                "transactions.parquet".to_string(),
+                "logs.parquet".to_string(),
+                "traces.parquet".to_string(),
+            ],
+            dataset_chunks: vec![
+                DatasetChunks {
+                    dataset_id: "s3://squidnet".to_string(),
+                    download_url: "https://squidnet.sqd-datasets.io".to_string(),
+                    chunks_legacy: vec![
+                        "/00000/00001-01000-fa1f6773".to_string(),
+                        "/00000/00500-01500-82315a24".to_string(),
+                    ],
+                    chunks: vec![
+                        AssignedChunk {
+                            path: "/00000/00001-01000-fa1f6773".to_string(),
+                            filenames: vec![0, 1, 2],
+                        },
+                        AssignedChunk {
+                            path: "/00000/00500-01500-82315a24".to_string(),
+                            filenames: vec![0, 3],
+                        },
+                    ],
+                },
+                DatasetChunks{
+                    dataset_id: "s3://pepenet".to_string(),
+                    download_url: "https://pepenet.sqd-datasets.io".to_string(),
+                    chunks_legacy: vec!["00000/01234-05678-b4357d89".to_string()],
+                    chunks: vec![
+                        AssignedChunk {
+                            path: "00000/01234-05678-b4357d89".to_string(),
+                            filenames: vec![0, 1],
+                        }
+                    ]
+                }
+            ],
+            ..Default::default()
+        });
     }
 }

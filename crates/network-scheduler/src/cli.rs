@@ -40,6 +40,8 @@ pub struct Config {
     pub mixed_units_ratio: f64,
     pub mixing_recent_unit_weight: f64,
     pub s3_endpoint: String,
+    #[serde(default = "default_storage_domain")]
+    pub storage_domain: String,
     pub dataset_buckets: Vec<String>,
     pub scheduler_state_bucket: String,
 }
@@ -49,6 +51,10 @@ impl Config {
     pub fn get() -> &'static Self {
         CONFIG.get().expect("Config not initialized")
     }
+}
+
+fn default_storage_domain() -> String {
+    "sqd-datasets.io".to_string()
 }
 
 #[derive(Parser)]

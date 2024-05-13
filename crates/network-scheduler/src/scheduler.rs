@@ -10,19 +10,16 @@ use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 
 use contract_client::Worker;
-use subsquid_messages::{
-    pong::Status as WorkerStatus, Ping,
-};
+use subsquid_messages::{pong::Status as WorkerStatus, Ping};
 use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;
-use crate::data_chunk::{chunks_to_assignment, chunks_to_worker_state};
+use crate::data_chunk::chunks_to_assignment;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::worker_state::{JailReason, WorkerState};
 
 lazy_static! {
-    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.3.0".parse().unwrap();
-    pub static ref ACTIVE_V2_MIN_WORKER_VER: VersionReq = ">=0.3.5".parse().unwrap();
+    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.3.5".parse().unwrap();
 }
 #[derive(Default, Serialize, Deserialize)]
 pub struct Scheduler {
@@ -95,11 +92,7 @@ impl Scheduler {
             return WorkerStatus::Jailed(worker_state.jail_reason_str());
         }
         let assigned_chunks = worker_state.assigned_chunks(&self.known_units);
-        if ACTIVE_V2_MIN_WORKER_VER.matches(&version) {
-            WorkerStatus::ActiveV2(chunks_to_assignment(assigned_chunks))
-        } else {
-            WorkerStatus::Active(chunks_to_worker_state(assigned_chunks))
-        }
+        WorkerStatus::ActiveV2(chunks_to_assignment(assigned_chunks))
     }
 
     pub fn workers_to_dial(&self) -> Vec<PeerId> {

@@ -20,7 +20,7 @@ use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::worker_state::{JailReason, WorkerState};
 
 lazy_static! {
-    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.3.5".parse().unwrap();
+    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.4.0".parse().unwrap();
 }
 #[derive(Default, Serialize, Deserialize)]
 pub struct Scheduler {
@@ -93,7 +93,7 @@ impl Scheduler {
             return WorkerStatus::Jailed(worker_state.jail_reason_str());
         }
         let assigned_chunks = worker_state.assigned_chunks(&self.known_units);
-        WorkerStatus::ActiveV2(chunks_to_assignment(assigned_chunks))
+        WorkerStatus::Active(chunks_to_assignment(assigned_chunks))
     }
 
     pub fn workers_to_dial(&self) -> Vec<PeerId> {

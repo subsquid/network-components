@@ -1585,7 +1585,7 @@ checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
 name = "contract-client"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4104,7 +4104,7 @@ checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
 name = "logs-collector"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5216,7 +5216,7 @@ checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "query-gateway"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "anyhow",
  "axum",
@@ -6396,8 +6396,8 @@ dependencies = [
 
 [[package]]
 name = "subsquid-messages"
-version = "0.2.1"
-source = "git+ssh://git@github.com/subsquid/subsquid-network.git#e7ffe79c6ae1636a9b3549ab6423f289e2c1f972"
+version = "0.2.2"
+source = "git+ssh://git@github.com/subsquid/subsquid-network.git#0f71127c9cd16c088ae04db91f80482c2e4565c4"
 dependencies = [
  "anyhow",
  "hex",
@@ -6411,8 +6411,8 @@ dependencies = [
 
 [[package]]
 name = "subsquid-network-transport"
-version = "0.4.4"
-source = "git+ssh://git@github.com/subsquid/subsquid-network.git#e7ffe79c6ae1636a9b3549ab6423f289e2c1f972"
+version = "0.4.5"
+source = "git+ssh://git@github.com/subsquid/subsquid-network.git#0f71127c9cd16c088ae04db91f80482c2e4565c4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6430,12 +6430,10 @@ dependencies = [
  "log",
  "prometheus-client",
  "prost",
- "semver",
  "serde",
  "subsquid-messages",
  "thiserror",
  "tokio",
- "tokio-stream",
  "tokio-util",
 ]
 
@@ -6746,7 +6744,6 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
- "tokio-util",
 ]
 
 [[package]]

@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use iter_num_tools::lin_space;
@@ -349,9 +350,19 @@ impl Scheduler {
             .map(|w| (w.remaining_capacity(), w.peer_id))
             .collect();
 
-        // Use a heap based on nuber of missing replicas so that units are assigned
+        // Compute replication factor based on total available capacity
+        let data_size: u64 = self.known_units().values().map(|u| u.size_bytes()).sum();
+        if data_size == 0 {
+            return;
+        }
+        let total_capacity = Config::get().worker_storage_bytes * workers.len() as u64;
+        let rep_factor = max(
+            Config::get().replication_factor,
+            (total_capacity / data_size) as usize,
+        );
+
+        // Use a heap based on the number of missing replicas so that units are assigned
         // more evenly if there is not enough worker capacity for all
-        let rep_factor = Config::get().replication_factor;
         let mut units: BinaryHeap<(usize, u64, UnitId)> = self
             .known_units
             .iter()
@@ -362,7 +373,7 @@ impl Scheduler {
             .collect();
 
         log::info!(
-            "Workers available: {}  Units to assign: {}",
+            "Workers available: {}  Units to assign: {} Replication factor: {rep_factor}",
             workers.len(),
             units.len()
         );

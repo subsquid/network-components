@@ -11,6 +11,7 @@ use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 
 use contract_client::Worker;
+use subsquid_messages::HttpHeader;
 use subsquid_messages::{pong::Status as WorkerStatus, Ping};
 use subsquid_network_transport::PeerId;
 
@@ -22,6 +23,9 @@ use crate::worker_state::{JailReason, WorkerState};
 lazy_static! {
     pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=0.4.0".parse().unwrap();
 }
+const WORKER_ID_HEADER: &str = "worker-id";
+const WORKER_SIGNATURE_HEADER: &str = "worker-signature";
+
 #[derive(Default, Serialize, Deserialize)]
 pub struct Scheduler {
     known_units: HashMap<UnitId, SchedulingUnit>,
@@ -74,6 +78,12 @@ impl Scheduler {
         }
     }
 
+    pub fn regenerate_signatures(&mut self) {
+        for state in self.worker_states.values_mut() {
+            state.regenerate_signature();
+        }
+    }
+
     /// Register ping msg from a worker. Returns worker status if ping was accepted, otherwise None
     pub fn ping(&mut self, worker_id: PeerId, msg: Ping) -> WorkerStatus {
         let version = msg.sem_version();
@@ -93,7 +103,9 @@ impl Scheduler {
             return WorkerStatus::Jailed(worker_state.jail_reason_str());
         }
         let assigned_chunks = worker_state.assigned_chunks(&self.known_units);
-        WorkerStatus::Active(chunks_to_assignment(assigned_chunks))
+        let mut assignment = chunks_to_assignment(assigned_chunks);
+        add_signature_headers(&mut assignment, &worker_id, worker_state);
+        WorkerStatus::Active(assignment)
     }
 
     pub fn workers_to_dial(&self) -> Vec<PeerId> {
@@ -420,4 +432,24 @@ impl Scheduler {
                 log::info!("{w}")
             });
     }
+}
+
+fn add_signature_headers(
+    assignment: &mut subsquid_messages::WorkerAssignment,
+    worker_id: &PeerId,
+    worker_state: &WorkerState,
+) {
+    assignment.http_headers.extend([
+        HttpHeader {
+            name: WORKER_ID_HEADER.to_string(),
+            value: worker_id.to_string(),
+        },
+        HttpHeader {
+            name: WORKER_SIGNATURE_HEADER.to_string(),
+            value: worker_state
+                .signature
+                .clone()
+                .expect("Worker signature not initialized"),
+        },
+    ]);
 }

@@ -16,6 +16,7 @@ mod metrics_server;
 mod scheduler;
 mod scheduling_unit;
 mod server;
+mod signature;
 mod storage;
 mod worker_state;
 

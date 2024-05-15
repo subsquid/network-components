@@ -34,6 +34,9 @@ pub struct Config {
     #[serde_as(as = "DurationSeconds")]
     #[serde(rename = "successful_dial_retry_sec")]
     pub successful_dial_retry: Duration,
+    #[serde_as(as = "DurationSeconds")]
+    #[serde(rename = "signature_refresh_interval_sec")]
+    pub signature_refresh_interval: Duration,
     pub replication_factor: usize, // this is minimum
     pub dynamic_replication: bool,
     pub scheduling_unit_size: usize,
@@ -45,6 +48,8 @@ pub struct Config {
     pub storage_domain: String,
     pub dataset_buckets: Vec<String>,
     pub scheduler_state_bucket: String,
+    #[serde(skip_serializing)]
+    pub cloudflare_storage_secret: String,
 }
 
 impl Config {

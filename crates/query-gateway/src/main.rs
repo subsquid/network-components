@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use contract_client::RpcArgs;
 use env_logger::Env;
 
 use subsquid_network_transport::TransportArgs;
@@ -30,9 +29,6 @@ mod task;
 struct Cli {
     #[command(flatten)]
     pub transport: TransportArgs,
-
-    #[command(flatten)]
-    pub rpc: RpcArgs,
 
     #[arg(
         long,
@@ -64,14 +60,14 @@ async fn main() -> anyhow::Result<()> {
 
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
+    let contract_client = transport_builder.contract_client();
     let local_peer_id = transport_builder.local_peer_id();
     let (incoming_messages, transport_handle) =
         transport_builder.build_gateway(GatewayConfig::new(Config::get().logs_collector_id))?;
 
     // Instantiate contract client and check RPC connection
-    let contract_client = contract_client::get_client(&args.rpc).await?;
     anyhow::ensure!(
-        contract_client.is_client_registered(local_peer_id).await?,
+        contract_client.is_gateway_registered(local_peer_id).await?,
         "Client not registered on chain"
     );
 

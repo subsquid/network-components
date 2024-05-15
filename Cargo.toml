@@ -3,5 +3,6 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.dependencies]
-subsquid-messages = { git = "ssh://git@github.com/subsquid/subsquid-network.git", version = "0.2.3" }
-subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", version = "0.4.6" }
+contract-client = { git = "ssh://git@github.com/subsquid/subsquid-network.git", version = "1.0.0-rc1" }
+subsquid-messages = { git = "ssh://git@github.com/subsquid/subsquid-network.git", version = "1.0.0-rc1" }
+subsquid-network-transport = { git = "ssh://git@github.com/subsquid/subsquid-network.git", version = "1.0.0-rc1" }

@@ -26,11 +26,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
+    let contract_client: Arc<dyn contract_client::Client> =
+        transport_builder.contract_client().into();
     let (incoming_messages, transport_handle) =
         transport_builder.build_logs_collector(Default::default())?;
-
-    let contract_client: Arc<dyn contract_client::Client> =
-        contract_client::get_client(&args.rpc).await?.into();
 
     let storage = ClickhouseStorage::new(args.clickhouse).await?;
     let epoch_seal_timeout = Duration::from_secs(args.epoch_seal_timeout_sec as u64);

@@ -1,5 +1,4 @@
 use clap::{Args, Parser};
-use contract_client::RpcArgs;
 use subsquid_network_transport::TransportArgs;
 
 #[derive(Args)]
@@ -22,9 +21,6 @@ pub struct Cli {
 
     #[command(flatten)]
     pub clickhouse: ClickhouseArgs,
-
-    #[command(flatten)]
-    pub rpc: RpcArgs,
 
     #[arg(
         long,

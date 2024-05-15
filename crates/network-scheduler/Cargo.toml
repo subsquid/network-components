@@ -1,6 +1,6 @@
 [package]
 name = "network-scheduler"
-version = "0.4.5"
+version = "1.0.0-rc1"
 edition = "2021"
 
 [dependencies]
@@ -34,6 +34,6 @@ sha3 = "0.10"
 tokio = { version = "1", features = ["full"] }
 url = "2.5.0"
 
-contract-client = { version = "0.1", path = "../contract-client" }
+contract-client = { workspace = true }
 subsquid-messages = { workspace = true, features = ["semver"] }
 subsquid-network-transport = { workspace = true, features = ["scheduler", "metrics"] }

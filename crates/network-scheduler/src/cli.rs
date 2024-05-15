@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
-use contract_client::RpcArgs;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
 use tokio::sync::OnceCell;
@@ -68,9 +67,6 @@ fn default_storage_domain() -> String {
 pub struct Cli {
     #[command(flatten)]
     pub transport: TransportArgs,
-
-    #[command(flatten)]
-    pub rpc: RpcArgs,
 
     #[arg(
         long,

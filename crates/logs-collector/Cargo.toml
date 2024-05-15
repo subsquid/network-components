@@ -1,6 +1,6 @@
 [package]
 name = "logs-collector"
-version = "0.4.4"
+version = "1.0.0-rc1"
 edition = "2021"
 
 [dependencies]
@@ -17,6 +17,6 @@ serde_json = "1"
 serde_repr = "0.1"
 tokio = { version = "1", features = ["full"] }
 
-contract-client = { version = "0.1", path = "../contract-client" }
+contract-client = { workspace = true }
 subsquid-messages = { workspace = true }
 subsquid-network-transport = { workspace = true, features = ["logs-collector"] }

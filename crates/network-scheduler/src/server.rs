@@ -71,6 +71,7 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         self.spawn_jail_inactive_workers_task(storage_client.clone());
         self.spawn_jail_stale_workers_task(storage_client.clone());
         self.spawn_jail_unreachable_workers_task(storage_client);
+        self.spawn_regenerate_signatures_task();
 
         let mut sigint = signal(SignalKind::interrupt())?;
         let mut sigterm = signal(SignalKind::terminate())?;
@@ -217,6 +218,18 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
             .unwrap_or_else(|e| log::error!("Metrics server crashed: {e:?}"));
         };
         self.task_manager.spawn(task);
+    }
+
+    fn spawn_regenerate_signatures_task(&mut self) {
+        let scheduler = self.scheduler.clone();
+        let task = move |_| {
+            let scheduler = scheduler.clone();
+            async move {
+                log::info!("Regenerating signatures");
+                scheduler.write().await.regenerate_signatures();
+            }
+        };
+        self.task_manager.spawn_periodic(task, Config::get().signature_refresh_interval);
     }
 
     fn spawn_jail_inactive_workers_task(&mut self, storage_client: S3Storage) {

@@ -273,6 +273,7 @@ impl S3Storage {
         let mut scheduler = Scheduler::from_json(bytes.as_ref())?;
         // List of datasets could have changed since last run, need to clear deprecated units
         scheduler.clear_deprecated_units();
+        scheduler.regenerate_signatures();
         Ok(scheduler)
     }
 

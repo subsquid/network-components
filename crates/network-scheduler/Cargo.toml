@@ -1,6 +1,6 @@
 [package]
 name = "network-scheduler"
-version = "0.4.4"
+version = "0.4.5"
 edition = "2021"
 
 [dependencies]
@@ -9,11 +9,13 @@ async-trait = "0.1"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1"
 axum = { version = "0.6", features = ["json"] }
+base64 = "0.22.1"
 clap = { version = "4", features = ["derive", "env"] }
 derive-enum-from-into = "0.1"
 env_logger = "0.11"
 futures = "0.3"
 hex = "0.4"
+hmac = "0.12.1"
 iter_num_tools = "0.7"
 itertools = "0.12"
 lazy_static = "1"
@@ -27,8 +29,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_with = { version = "3", features = ["hex"] }
 serde_yaml = "0.9"
+sha2 = "0.10.8"
 sha3 = "0.10"
 tokio = { version = "1", features = ["full"] }
+url = "2.5.0"
 
 contract-client = { version = "0.1", path = "../contract-client" }
 subsquid-messages = { workspace = true, features = ["semver"] }

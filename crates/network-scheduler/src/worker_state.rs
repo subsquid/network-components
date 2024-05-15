@@ -12,6 +12,7 @@ use subsquid_network_transport::PeerId;
 use crate::cli::Config;
 use crate::data_chunk::DataChunk;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
+use crate::signature::timed_hmac_now;
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +38,8 @@ pub struct WorkerState {
     pub unreachable_since: Option<SystemTime>,
     #[serde(default)]
     pub jail_reason: Option<JailReason>,
+    #[serde(skip)]
+    pub signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -82,6 +85,10 @@ impl WorkerState {
             last_dial_ok: false,
             unreachable_since: None,
             jail_reason: None,
+            signature: Some(timed_hmac_now(
+                &peer_id.to_string(),
+                &Config::get().cloudflare_storage_secret,
+            )),
         }
     }
 
@@ -247,6 +254,13 @@ impl WorkerState {
         log::info!("Releasing worker {}", self.peer_id);
         self.jailed = false;
         self.jail_reason = None;
+    }
+
+    pub fn regenerate_signature(&mut self) {
+        self.signature = Some(timed_hmac_now(
+            &self.peer_id.to_string(),
+            &Config::get().cloudflare_storage_secret,
+        ));
     }
 }
 

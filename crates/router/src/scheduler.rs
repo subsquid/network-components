@@ -5,43 +5,39 @@ use tracing::{error, info};
 
 use router_controller::controller::Controller;
 
-use crate::dataset::Storage;
+use crate::dataset::Dataset;
 use crate::metrics::{DATASET_HEIGHT, DATASET_SYNC_ERRORS};
-
-type Dataset = (String, String, Arc<dyn Storage + Sync + Send>);
 
 async fn update_datasets(controller: &Arc<Controller>, datasets: &Vec<Dataset>) {
     let mut tasks = Vec::with_capacity(datasets.len());
 
-    for (name, dataset, storage) in datasets.clone() {
+    for dataset in datasets.clone() {
         let controller = controller.clone();
         tasks.push(tokio::spawn(async move {
-            let next_block = controller.get_height(&name)
+            let next_block = controller.get_height(dataset.name())
                 .expect("dataset must be supported")
-                .map(|height| height + 1)
-                .unwrap_or(0)
-                .try_into()
-                .expect("next block can't be negative");
+                .map(|height| u32::try_from(height).expect("next block can't be negative") + 1)
+                .unwrap_or(dataset.start_block().unwrap_or(0));
 
-            let chunks = match storage.get_chunks(next_block).await {
+            let chunks = match dataset.storage().get_chunks(next_block).await {
                 Ok(chunks) => {
-                    info!("found new chunks in {}: {:?}", dataset, chunks);
+                    info!("found new chunks in {}: {:?}", dataset.url(), chunks);
                     if let Some(chunk) = chunks.last() {
                         DATASET_HEIGHT
-                            .with_label_values(&[&dataset])
+                            .with_label_values(&[&dataset.url()])
                             .set(chunk.last_block().into())
                     }
                     chunks
                 },
                 Err(err) => {
-                    error!("failed to download new chunks for {}: {:?}", dataset, err);
-                    DATASET_SYNC_ERRORS.with_label_values(&[&dataset]).inc();
+                    error!("failed to download new chunks for {}: {:?}", dataset.url(), err);
+                    DATASET_SYNC_ERRORS.with_label_values(&[dataset.url()]).inc();
                     return
                 }
             };
 
-            if let Err(err) = controller.update_dataset(&dataset, chunks) {
-                error!("failed to update dataset {}: {:?}", dataset, err);
+            if let Err(err) = controller.update_dataset(dataset.url(), chunks) {
+                error!("failed to update dataset {}: {:?}", dataset.url(), err);
             }
         }));
     }

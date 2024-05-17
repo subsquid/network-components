@@ -1,133 +1,48 @@
-use std::str::FromStr;
+use std::sync::Arc;
 
-use aws_sdk_s3::Client;
-use router_controller::data_chunk::DataChunk;
+use crate::storage::Storage;
 
-#[async_trait::async_trait]
-pub trait Storage {
-    /// Get data chunks in the dataset.
-    async fn get_chunks(&self, next_block: u32) -> Result<Vec<DataChunk>, String>;
+#[derive(Clone)]
+pub struct Dataset {
+    name: String,
+    url: String,
+    start_block: Option<u32>,
+    storage: Option<Arc<dyn Storage + Sync + Send>>,
 }
 
-fn invalid_object_key(key: &str) -> String {
-    format!("invalid object key - {key}")
-}
-
-fn trim_trailing_slash(value: &str) -> String {
-    let mut value = value.to_string();
-    value.pop();
-    value
-}
-
-pub struct S3Storage {
-    client: Client,
-    bucket: String,
-}
-
-#[async_trait::async_trait]
-impl Storage for S3Storage {
-    async fn get_chunks(&self, next_block: u32) -> Result<Vec<DataChunk>, String> {
-        let mut objects = vec![];
-
-        let prefix = None;
-        let tops = self.ls(prefix).await?;
-
-        let mut top: Option<String> = None;
-        for item in tops.into_iter().rev() {
-            let block_num = item.parse::<u32>().map_err(|err| err.to_string())?;
-            top = Some(item);
-            if block_num <= next_block {
-                break;
-            }
+impl Dataset {
+    pub fn new(name: String, url: String, start_block: Option<u32>) -> Dataset {
+        Dataset {
+            name,
+            url,
+            start_block,
+            storage: None,
         }
+    }
 
-        if let Some(top) = top {
-            let prefix = format!("{}/", top);
-            let top_chunks = self.ls(Some(&prefix)).await?;
+    pub fn name(&self) -> &String {
+        &self.name
+    }
 
-            let mut next_chunk: Option<DataChunk> = None;
-            for chunk in top_chunks {
-                let chunk = DataChunk::from_str(&chunk)
-                    .map_err(|_| format!("invalid chunk name - {}", &chunk))?;
-                if chunk.first_block() == next_block || next_block == 0 {
-                    next_chunk = Some(chunk);
-                    break;
-                }
-            }
+    pub fn url(&self) -> &String {
+        &self.url
+    }
 
-            if let Some(chunk) = next_chunk {
-                let start_after = chunk.to_string();
-                let output = self
-                    .client
-                    .list_objects_v2()
-                    .bucket(&self.bucket)
-                    .start_after(start_after)
-                    .send()
-                    .await
-                    .map_err(|err| err.to_string())?;
-                let mut continuation_token = output.next_continuation_token.clone();
-                if let Some(contents) = output.contents() {
-                    objects.extend_from_slice(contents);
-                }
-                while let Some(token) = continuation_token {
-                    let output = self
-                        .client
-                        .list_objects_v2()
-                        .bucket(&self.bucket)
-                        .continuation_token(token)
-                        .send()
-                        .await
-                        .map_err(|err| err.to_string())?;
-                    continuation_token = output.next_continuation_token.clone();
-                    if let Some(contents) = output.contents() {
-                        objects.extend_from_slice(contents);
-                    }
-                }
-            }
-        }
+    pub fn start_block(&self) -> &Option<u32> {
+        &self.start_block
+    }
 
-        let mut chunks = vec![];
-        for object in &objects {
-            if let Some(key) = object.key() {
-                if key.ends_with("blocks.parquet") {
-                    match DataChunk::from_str(key) {
-                        Ok(chunk) => chunks.push(chunk),
-                        Err(..) => return Err(invalid_object_key(key)),
-                    }
-                }
-            }
-        }
+    pub fn set_storage(&mut self, storage: Arc<dyn Storage + Sync + Send>) {
+        self.storage = Some(storage)
+    }
 
-        Ok(chunks)
+    pub fn storage(&self) -> &Arc<dyn Storage + Sync + Send> {
+        self.storage.as_ref().expect("storage wasn't set on the dataset")
     }
 }
 
-impl S3Storage {
-    pub fn new(client: Client, bucket: String) -> Self {
-        S3Storage { client, bucket }
-    }
-
-    async fn ls(&self, prefix: Option<&str>) -> Result<Vec<String>, String> {
-        let mut builder = self
-            .client
-            .list_objects_v2()
-            .bucket(&self.bucket)
-            .delimiter('/');
-        if let Some(prefix) = prefix {
-            builder = builder.prefix(prefix)
-        }
-        let output = builder.send()
-            .await
-            .map_err(|err| err.to_string())?;
-        let mut items = vec![];
-        if let Some(prefixes) = output.common_prefixes() {
-            for prefix in prefixes {
-                if let Some(value) = prefix.prefix() {
-                    let value = trim_trailing_slash(value);
-                    items.push(value);
-                }
-            }
-        }
-        Ok(items)
+impl From<&Dataset> for (String, String) {
+    fn from(value: &Dataset) -> Self {
+        (value.name.clone(), value.url.clone())
     }
 }

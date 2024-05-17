@@ -1,6 +1,8 @@
 use clap::Parser;
 
-fn parse_dataset(s: &str) -> Result<(String, String), String> {
+use crate::dataset::Dataset;
+
+fn parse_dataset(s: &str) -> Result<Dataset, String> {
     let pos = s
         .find('=')
         .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{}`", s))?;
@@ -10,19 +12,31 @@ fn parse_dataset(s: &str) -> Result<(String, String), String> {
         return Err(format!("invalid KEY=value: the KEY is empty in `{}`", s));
     }
 
-    let url = s[pos + 1..].to_string();
-    if !url.starts_with("s3://") {
-        return Err(format!("invalid S3 URL: `{}`", url));
+    let value = &s[pos + 1..];
+    if !value.starts_with("s3://") {
+        return Err(format!("invalid S3 URL: `{}`", value));
     }
 
-    Ok((name, url))
+    let mut split = s[pos + 6..].split(':');
+    let url = format!("s3://{}", split.next().unwrap());
+    let start_block = match split.next() {
+        Some(value) => {
+            match value.parse::<u32>() {
+                Ok(value) => Some(value),
+                Err(_) => return Err(format!("invalid START_BLOCK: `{}`", value))
+            }
+        },
+        None => None,
+    };
+
+    Ok(Dataset::new(name, url, start_block))
 }
 
 #[derive(Parser)]
 pub struct Cli {
     /// Add dataset `NAME` pointing to S3 `URL`
-    #[clap(short, long, value_parser = parse_dataset, value_name = "NAME=URL")]
-    pub dataset: Vec<(String, String)>,
+    #[clap(short, long, value_parser = parse_dataset, value_name = "NAME=URL[:START_BLOCK]")]
+    pub dataset: Vec<Dataset>,
 
     /// Add managed worker
     #[clap(short, long, value_name = "ID")]

@@ -1,48 +1,48 @@
 use clap::Parser;
 use cli::Cli;
-use dataset::{S3Storage, Storage};
 use router_controller::controller::ControllerBuilder;
 use server::Server;
 use std::env;
 use std::sync::Arc;
 use std::time::Duration;
+use storage::{S3Storage, Storage};
 use url::Url;
 
 mod cli;
-mod dataset;
 mod logger;
 mod metrics;
 mod middleware;
 mod scheduler;
 mod server;
+mod storage;
+mod dataset;
 
 #[tokio::main]
 async fn main() {
-    let args = Cli::parse();
+    let mut args = Cli::parse();
     logger::init();
 
-    let mut datasets: Vec<_> = Vec::with_capacity(args.dataset.len());
-    for (name, dataset) in &args.dataset {
-        let storage = create_storage(dataset).await;
-        datasets.push((name.clone(), dataset.clone(), storage));
+    for dataset in &mut args.dataset {
+        let storage = create_storage(dataset.url()).await;
+        dataset.set_storage(storage);
     }
 
     let controller = ControllerBuilder::new()
         .set_data_replication(args.replication)
         .set_data_management_unit(args.scheduling_unit)
         .set_workers(args.worker)
-        .set_datasets(args.dataset)
+        .set_datasets(args.dataset.iter().map(|ds| ds.into()))
         .build();
 
     let controller = Arc::new(controller);
 
     let scheduling_interval = Duration::from_secs(args.scheduling_interval);
-    scheduler::start(controller.clone(), datasets, scheduling_interval);
+    scheduler::start(controller.clone(), args.dataset, scheduling_interval);
 
     Server::new(controller).run().await;
 }
 
-async fn create_storage(dataset: &String) -> Arc<dyn Storage + Sync + Send> {
+async fn create_storage(dataset: &str) -> Arc<dyn Storage + Sync + Send> {
     let url = Url::parse(dataset);
     match url {
         Ok(url) => match url.scheme() {

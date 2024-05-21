@@ -1,6 +1,6 @@
 [package]
 name = "query-gateway"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 edition = "2021"
 
 [dependencies]
@@ -31,3 +31,6 @@ uuid = { version = "1", features = ["v4", "fast-rng"] }
 contract-client = { workspace = true }
 subsquid-messages = { workspace = true, features = ["semver"] }
 subsquid-network-transport = { workspace = true, features = ["gateway"] }
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.5"

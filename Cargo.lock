@@ -1576,7 +1576,7 @@ checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 [[package]]
 name = "contract-client"
 version = "1.0.0-rc1"
-source = "git+ssh://git@github.com/subsquid/subsquid-network.git#7412a2c565da669a6845d7c5080a5b77d5f53828"
+source = "git+ssh://git@github.com/subsquid/subsquid-network.git#ed9ee4e612b407729cd59d90d2e1749e93f83981"
 dependencies = [
  "async-trait",
  "clap",
@@ -4095,7 +4095,7 @@ checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
 name = "logs-collector"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4111,6 +4111,7 @@ dependencies = [
  "serde_repr",
  "subsquid-messages",
  "subsquid-network-transport",
+ "tikv-jemallocator",
  "tokio",
 ]
 
@@ -4367,7 +4368,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4399,6 +4400,7 @@ dependencies = [
  "sha3",
  "subsquid-messages",
  "subsquid-network-transport",
+ "tikv-jemallocator",
  "tokio",
  "url",
 ]
@@ -5159,7 +5161,7 @@ checksum = "80b776a1b2dc779f5ee0641f8ade0125bc1298dd41a9a0c16d8bd57b42d222b1"
 dependencies = [
  "bytes",
  "heck 0.5.0",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "log",
  "multimap",
  "once_cell",
@@ -5179,7 +5181,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19de2de2a00075bf566bee3bd4db014b11587e84184d3f7a791bc17f1a8e9e48"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.63",
@@ -5202,7 +5204,7 @@ checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "query-gateway"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 dependencies = [
  "anyhow",
  "axum",
@@ -5227,6 +5229,7 @@ dependencies = [
  "subsquid-messages",
  "subsquid-network-transport",
  "tabled",
+ "tikv-jemallocator",
  "tokio",
  "tokio-rusqlite",
  "uuid 1.8.0",
@@ -6370,8 +6373,8 @@ dependencies = [
 
 [[package]]
 name = "subsquid-messages"
-version = "1.0.0-rc1"
-source = "git+ssh://git@github.com/subsquid/subsquid-network.git#7412a2c565da669a6845d7c5080a5b77d5f53828"
+version = "1.0.0-rc2"
+source = "git+ssh://git@github.com/subsquid/subsquid-network.git#ed9ee4e612b407729cd59d90d2e1749e93f83981"
 dependencies = [
  "anyhow",
  "hex",
@@ -6385,8 +6388,8 @@ dependencies = [
 
 [[package]]
 name = "subsquid-network-transport"
-version = "1.0.0-rc1"
-source = "git+ssh://git@github.com/subsquid/subsquid-network.git#7412a2c565da669a6845d7c5080a5b77d5f53828"
+version = "1.0.0-rc2"
+source = "git+ssh://git@github.com/subsquid/subsquid-network.git#ed9ee4e612b407729cd59d90d2e1749e93f83981"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6579,6 +6582,26 @@ checksum = "8b9ef9bad013ada3808854ceac7b46812a6465ba368859a37e2100283d2d719c"
 dependencies = [
  "cfg-if",
  "once_cell",
+]
+
+[[package]]
+name = "tikv-jemalloc-sys"
+version = "0.5.4+5.3.0-patched"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9402443cb8fd499b6f327e40565234ff34dbda27460c5b47db0db77443dd85d1"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
+name = "tikv-jemallocator"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "965fe0c26be5c56c94e38ba547249074803efd52adfb66de62107d95aab3eaca"
+dependencies = [
+ "libc",
+ "tikv-jemalloc-sys",
 ]
 
 [[package]]

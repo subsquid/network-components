@@ -1,6 +1,6 @@
 [package]
 name = "logs-collector"
-version = "1.0.0-rc1"
+version = "1.0.0-rc2"
 edition = "2021"
 
 [dependencies]
@@ -20,3 +20,6 @@ tokio = { version = "1", features = ["full"] }
 contract-client = { workspace = true }
 subsquid-messages = { workspace = true }
 subsquid-network-transport = { workspace = true, features = ["logs-collector"] }
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.5"

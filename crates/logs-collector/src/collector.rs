@@ -36,12 +36,10 @@ impl<T: LogsStorage + Sync> LogsCollector<T> {
         log::trace!("Logs collected: {logs:?}");
         let mut rows: Vec<QueryExecutedRow> = logs
             .into_iter()
-            .filter_map(|log| match log.try_into() {
-                Ok(log) => Some(log),
-                Err(e) => {
-                    log::error!("Invalid log message: {e}");
-                    None
-                }
+            .filter_map(|log| {
+                log.try_into()
+                    .map_err(|e| log::error!("Invalid log message: {e}"))
+                    .ok()
             })
             .collect();
 

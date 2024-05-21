@@ -24,6 +24,13 @@ mod scheme_extractor;
 mod server;
 mod task;
 
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 #[derive(Parser)]
 #[command(version)]
 struct Cli {

@@ -94,7 +94,6 @@ pub fn chunks_to_assignment(chunks: impl Iterator<Item = DataChunk>) -> WorkerAs
         .map(|(dataset_id, chunks)| DatasetChunks {
             dataset_id: dataset_id.clone(),
             download_url: chunks.first().unwrap().download_url.clone(),
-            chunks_legacy: chunks.iter().map(|chunk| chunk.chunk_str.clone()).collect(),
             chunks: chunks
                 .into_iter()
                 .map(|chunk| AssignedChunk {
@@ -199,10 +198,6 @@ mod tests {
                 DatasetChunks {
                     dataset_id: "s3://squidnet".to_string(),
                     download_url: "https://squidnet.sqd-datasets.io".to_string(),
-                    chunks_legacy: vec![
-                        "/00000/00001-01000-fa1f6773".to_string(),
-                        "/00000/00500-01500-82315a24".to_string(),
-                    ],
                     chunks: vec![
                         AssignedChunk {
                             path: "/00000/00001-01000-fa1f6773".to_string(),
@@ -217,7 +212,6 @@ mod tests {
                 DatasetChunks{
                     dataset_id: "s3://pepenet".to_string(),
                     download_url: "https://pepenet.sqd-datasets.io".to_string(),
-                    chunks_legacy: vec!["00000/01234-05678-b4357d89".to_string()],
                     chunks: vec![
                         AssignedChunk {
                             path: "00000/01234-05678-b4357d89".to_string(),

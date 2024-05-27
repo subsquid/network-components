@@ -21,7 +21,7 @@ use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::worker_state::{JailReason, WorkerState};
 
 lazy_static! {
-    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=1.0.0-rc2".parse().unwrap();
+    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=1.0.0-rc3".parse().unwrap();
 }
 const WORKER_ID_HEADER: &str = "worker-id";
 const WORKER_SIGNATURE_HEADER: &str = "worker-signature";

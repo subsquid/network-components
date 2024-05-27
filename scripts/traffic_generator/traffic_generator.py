@@ -17,7 +17,7 @@ NUM_THREADS = int(os.environ.get('NUM_THREADS', 10))
 QUERY_TIMEOUT_SEC = int(os.environ.get('QUERY_TIMEOUT_SEC', 60))
 MIN_INTERVAL_SEC = float(os.environ.get('MIN_INTERVAL_SEC', 60))
 SKIP_GREYLISTED = os.environ.get('SKIP_GREYLISTED', '').lower() in ('1', 't', 'true', 'y', 'yes')
-MIN_WORKER_VERSION = Version(os.environ.get('MIN_WORKER_VERSION', '1.0.0-rc1'))
+MIN_WORKER_VERSION = Version(os.environ.get('MIN_WORKER_VERSION', '1.0.0-rc3'))
 
 GATEWAY_URL = os.environ.get('GATEWAY_URL', "http://localhost:8000")
 SCHEDULER_URL = os.environ.get('WORKERS_URL', "https://scheduler.testnet.subsquid.io")

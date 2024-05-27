@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::Parser;
+use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
 use tokio::sync::OnceCell;
@@ -10,6 +11,10 @@ use tokio::sync::OnceCell;
 use subsquid_network_transport::TransportArgs;
 
 static CONFIG: OnceCell<Config> = OnceCell::const_new();
+
+fn default_worker_version() -> VersionReq {
+    ">=1.0.0-rc3".parse().unwrap()
+}
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +54,8 @@ pub struct Config {
     pub scheduler_state_bucket: String,
     #[serde(skip_serializing)]
     pub cloudflare_storage_secret: String,
+    #[serde(default = "default_worker_version")]
+    pub supported_worker_versions: VersionReq,
 }
 
 impl Config {

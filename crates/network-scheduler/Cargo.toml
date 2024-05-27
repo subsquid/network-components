@@ -18,7 +18,6 @@ hex = "0.4"
 hmac = "0.12.1"
 iter_num_tools = "0.7"
 itertools = "0.12"
-lazy_static = "1"
 log = "0.4"
 nonempty = { version = "0.10", features = ["serde", "serialize"] }
 prometheus-client = "0.22"

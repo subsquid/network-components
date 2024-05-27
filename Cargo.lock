@@ -4327,7 +4327,6 @@ dependencies = [
  "hmac",
  "iter_num_tools",
  "itertools 0.12.1",
- "lazy_static",
  "log",
  "nonempty",
  "prometheus-client",

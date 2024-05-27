@@ -3,11 +3,9 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use iter_num_tools::lin_space;
 use itertools::Itertools;
-use lazy_static::lazy_static;
 use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
 use random_choice::random_choice;
-use semver::VersionReq;
 use serde::{Deserialize, Serialize};
 
 use contract_client::Worker;
@@ -20,9 +18,6 @@ use crate::data_chunk::chunks_to_assignment;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::worker_state::{JailReason, WorkerState};
 
-lazy_static! {
-    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq = ">=1.0.0-rc3".parse().unwrap();
-}
 const WORKER_ID_HEADER: &str = "worker-id";
 const WORKER_SIGNATURE_HEADER: &str = "worker-signature";
 
@@ -87,7 +82,7 @@ impl Scheduler {
     /// Register ping msg from a worker. Returns worker status if ping was accepted, otherwise None
     pub fn ping(&mut self, worker_id: PeerId, msg: Ping) -> WorkerStatus {
         let version = msg.sem_version();
-        if !SUPPORTED_WORKER_VERSIONS.matches(&version) {
+        if !Config::get().supported_worker_versions.matches(&version) {
             log::debug!("Worker {worker_id} version not supported: {}", version);
             return WorkerStatus::UnsupportedVersion(());
         }

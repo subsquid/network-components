@@ -4,4 +4,3 @@
 /.env
 *.test.*
 /out
-/crates/query-gateway/allocations.db

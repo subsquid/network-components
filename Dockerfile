@@ -3,7 +3,7 @@ RUN apt-get update && apt-get install protobuf-compiler -y
 WORKDIR /archive-router
 COPY ./ .
 RUN rm -r crates/network-scheduler
-RUN rm -r crates/query-gateway
+RUN rm -r crates/logs-collector
 RUN --mount=type=ssh cargo build --release
 
 FROM --platform=$BUILDPLATFORM debian:bullseye-slim AS archive-router
@@ -69,37 +69,6 @@ ENV BOOTSTRAP="true"
 CMD ["network-scheduler"]
 
 COPY crates/network-scheduler/healthcheck.sh .
-RUN chmod +x ./healthcheck.sh
-HEALTHCHECK --interval=5s CMD ./healthcheck.sh
-
-FROM --platform=$BUILDPLATFORM network-base as query-gateway
-ARG TARGETOS
-ARG TARGETARCH
-ARG YQ_VERSION="4.40.5"
-
-RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
-    --mount=target=/var/cache/apt,type=cache,sharing=locked \
-    rm -f /etc/apt/apt.conf.d/docker-clean \
-    && apt-get update \
-    && apt-get -y install curl
-
-RUN curl -sL https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_${TARGETOS}_${TARGETARCH} -o /usr/bin/yq \
-    && chmod +x /usr/bin/yq
-
-WORKDIR /run
-
-COPY --from=network-builder /app/target/release/query-gateway /usr/local/bin/query-gateway
-COPY --from=network-builder /app/crates/query-gateway/config.yml .
-
-ENV P2P_LISTEN_ADDRS="/ip4/0.0.0.0/udp/12345/quic-v1"
-ENV HTTP_LISTEN_ADDR="0.0.0.0:8000"
-ENV BOOTSTRAP="true"
-ENV PRIVATE_NODE="true"
-ENV CONFIG_PATH="/run/config.yml"
-
-CMD ["query-gateway"]
-
-COPY crates/query-gateway/healthcheck.sh .
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
 

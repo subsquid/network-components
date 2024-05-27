@@ -20,7 +20,7 @@ jobs:
       - name: Load ssh key to fetch private dependencies
         uses: webfactory/ssh-agent@v0.9.0
         with:
-            ssh-private-key: ${{ secrets.NETWORK_SSH_KEY }}
+          ssh-private-key: ${{ secrets.NETWORK_SSH_KEY }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -55,34 +55,6 @@ jobs:
           tags: |
             subsquid/network-scheduler:${{ env.SCHEDULER_VERSION }}
             subsquid/network-scheduler:${{ inputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          ssh: default=${{ env.SSH_AUTH_SOCK }}
-
-      - name: Build query gateway
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          target: query-gateway
-          load: true
-          tags: subsquid/query-gateway:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          ssh: default=${{ env.SSH_AUTH_SOCK }}
-
-      - name: Get query gateway version
-        run: echo "GATEWAY_VERSION=$(docker run --rm subsquid/query-gateway:test query-gateway --version | cut -d ' ' -f2)" >> $GITHUB_ENV
-
-      - name: Build & publish query gateway
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
-          target: query-gateway
-          push: true
-          tags: |
-            subsquid/query-gateway:${{ env.GATEWAY_VERSION }}
-            subsquid/query-gateway:${{ inputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           ssh: default=${{ env.SSH_AUTH_SOCK }}

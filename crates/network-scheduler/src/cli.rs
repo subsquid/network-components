@@ -43,6 +43,7 @@ pub struct Config {
     pub signature_refresh_interval: Duration,
     pub replication_factor: usize, // this is minimum
     pub dynamic_replication: bool,
+    pub dyn_rep_capacity_share: f64,
     pub scheduling_unit_size: usize,
     pub worker_storage_bytes: u64,
     pub mixed_units_ratio: f64,

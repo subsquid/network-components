@@ -42,10 +42,7 @@ async fn chunks(
     let assigned_ranges = workers
         .iter()
         .flat_map(|w| {
-            let chunks = w
-                .assigned_units
-                .iter()
-                .flat_map(|unit_id| units.get(unit_id).unwrap().clone());
+            let chunks = w.assigned_chunks(&units);
             chunks_to_worker_state(chunks)
                 .datasets
                 .into_iter()

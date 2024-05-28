@@ -4310,7 +4310,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4327,6 +4327,7 @@ dependencies = [
  "hmac",
  "iter_num_tools",
  "itertools 0.12.1",
+ "lazy_static",
  "log",
  "nonempty",
  "prometheus-client",

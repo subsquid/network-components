@@ -23,6 +23,7 @@ failed_dial_retry_sec: 60
 successful_dial_retry_sec: 3600
 replication_factor: 5
 dynamic_replication: true
+dyn_rep_capacity_share: 0.9
 scheduling_unit_size: 10
 worker_storage_bytes: 549755813888
 mixed_units_ratio: 0.1

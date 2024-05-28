@@ -340,6 +340,20 @@ impl Scheduler {
         }
     }
 
+    fn clear_redundant_replicas(&mut self, rep_factor: usize) {
+        for (unit_id, holder_ids) in self.units_assignments.iter_mut() {
+            let unit = self.known_units.get(unit_id).expect("Unknown unit");
+            while holder_ids.len() > rep_factor {
+                let random_idx = thread_rng().gen_range(0..holder_ids.len());
+                let holder_id = holder_ids.remove(random_idx);
+                self.worker_states
+                    .get_mut(&holder_id)
+                    .expect("Unknown worker")
+                    .remove_unit(unit_id, unit.size_bytes());
+            }
+        }
+    }
+
     fn assign_units(&mut self) {
         log::info!("Assigning units");
 
@@ -360,14 +374,12 @@ impl Scheduler {
 
         // Compute replication factor based on total available capacity
         let data_size: u64 = self.known_units().values().map(|u| u.size_bytes()).sum();
-        if data_size == 0 {
-            return;
-        }
-        let total_capacity = Config::get().worker_storage_bytes * workers.len() as u64;
-        let rep_factor = max(
-            Config::get().replication_factor,
-            (total_capacity / data_size) as usize,
-        );
+        let rep_factor = match replication_factor(data_size, workers.len() as u64) {
+            Some(rep_factor) => rep_factor,
+            None => return,
+        };
+
+        self.clear_redundant_replicas(rep_factor);
 
         // Use a heap based on the number of missing replicas so that units are assigned
         // more evenly if there is not enough worker capacity for all
@@ -375,7 +387,9 @@ impl Scheduler {
             .known_units
             .iter()
             .filter_map(|(unit_id, unit)| {
-                let missing_replicas = rep_factor - self.num_replicas(unit_id);
+                let missing_replicas = rep_factor
+                    .checked_sub(self.num_replicas(unit_id))
+                    .expect("Redundant replicas");
                 (missing_replicas > 0).then_some((missing_replicas, unit.size_bytes(), *unit_id))
             })
             .collect();
@@ -459,4 +473,21 @@ fn add_signature_headers(
                 .expect("Worker signature not initialized"),
         },
     ]);
+}
+
+fn replication_factor(data_size_bytes: u64, num_workers: u64) -> Option<usize> {
+    if data_size_bytes == 0 {
+        return None;
+    }
+    let conf = Config::get();
+    if !conf.dynamic_replication {
+        return Some(conf.replication_factor);
+    }
+    // We aim to fill `dynamic_replication_factor` * total available capacity
+    let target_capacity =
+        (conf.worker_storage_bytes * num_workers) as f64 * conf.dyn_rep_capacity_share;
+    // How many times would the whole data fit in the target capacity
+    let rep_factor = (target_capacity / data_size_bytes as f64).floor() as usize;
+    // Replication factor set in the config is treated as minimum
+    Some(max(conf.replication_factor, rep_factor))
 }

@@ -13,6 +13,7 @@ mod cli;
 mod data_chunk;
 mod metrics;
 mod metrics_server;
+mod prometheus_metrics;
 mod scheduler;
 mod scheduling_unit;
 mod server;
@@ -41,6 +42,7 @@ async fn main() -> anyhow::Result<()> {
     let metrics_writer = MetricsWriter::from_cli(&args).await?;
     let mut metrics_registry = Registry::default();
     subsquid_network_transport::metrics::register_metrics(&mut metrics_registry);
+    prometheus_metrics::register_metrics(&mut metrics_registry);
 
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;

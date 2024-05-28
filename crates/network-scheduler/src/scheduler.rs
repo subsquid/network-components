@@ -15,6 +15,7 @@ use subsquid_network_transport::PeerId;
 
 use crate::cli::Config;
 use crate::data_chunk::chunks_to_assignment;
+use crate::prometheus_metrics;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::worker_state::{JailReason, WorkerState};
 
@@ -384,6 +385,9 @@ impl Scheduler {
             workers.len(),
             units.len()
         );
+        prometheus_metrics::active_workers(workers.len());
+        prometheus_metrics::total_units(self.known_units.len());
+        prometheus_metrics::replication_factor(rep_factor);
 
         while let Some((missing_replicas, unit_size, unit_id)) = units.pop() {
             let mut rejected_workers = vec![];
@@ -412,13 +416,21 @@ impl Scheduler {
             workers.extend(rejected_workers);
         }
 
-        log::info!(
-            "Assignment complete. {} units are missing some replicas",
+        let incomplete_units = self
+            .units_assignments
+            .values()
+            .filter(|workers| workers.len() < rep_factor)
+            .count();
+        log::info!("Assignment complete. {incomplete_units} units are missing some replicas");
+
+        prometheus_metrics::units_assigned(
             self.units_assignments
-                .values()
-                .filter(|workers| workers.len() < rep_factor)
-                .count()
+                .iter()
+                .map(|(unit_id, workers)| (unit_id, workers.len()))
+                .collect(),
         );
+        prometheus_metrics::partially_assigned_units(incomplete_units);
+
         self.worker_states
             .values_mut()
             .filter(|w| w.is_active() && !w.jailed)

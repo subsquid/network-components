@@ -57,6 +57,8 @@ pub struct Config {
     pub cloudflare_storage_secret: String,
     #[serde(default = "default_worker_version")]
     pub supported_worker_versions: VersionReq,
+    #[serde(default = "default_worker_version")]
+    pub recommended_worker_versions: VersionReq,
 }
 
 impl Config {

@@ -19,8 +19,8 @@ use crate::signature::timed_hmac_now;
 pub struct WorkerState {
     pub peer_id: PeerId,
     pub address: Address,
-    #[serde_as(as = "TimestampMilliSeconds")]
-    pub last_ping: SystemTime,
+    #[serde_as(as = "Option<TimestampMilliSeconds>")]
+    pub last_ping: Option<SystemTime>,
     pub version: Option<String>,
     pub jailed: bool,
     pub assigned_units: HashSet<UnitId>,
@@ -28,10 +28,10 @@ pub struct WorkerState {
     pub stored_ranges: HashMap<String, RangeSet>, // dataset -> ranges
     pub stored_bytes: u64,
     pub num_missing_chunks: u32,
-    #[serde_as(as = "TimestampMilliSeconds")]
-    pub last_assignment: SystemTime,
-    #[serde_as(as = "TimestampMilliSeconds")]
-    pub last_dial_time: SystemTime,
+    #[serde_as(as = "Option<TimestampMilliSeconds>")]
+    pub last_assignment: Option<SystemTime>,
+    #[serde_as(as = "Option<TimestampMilliSeconds>")]
+    pub last_dial_time: Option<SystemTime>,
     pub last_dial_ok: bool,
     #[serde_as(as = "Option<TimestampMilliSeconds>")]
     #[serde(default)]
@@ -72,7 +72,7 @@ impl WorkerState {
         Self {
             peer_id,
             address,
-            last_ping: SystemTime::now(),
+            last_ping: None,
             version: None,
             jailed: false,
             assigned_units: HashSet::new(),
@@ -80,8 +80,8 @@ impl WorkerState {
             stored_bytes: 0,
             assigned_bytes: 0,
             num_missing_chunks: 0,
-            last_assignment: SystemTime::now(),
-            last_dial_time: SystemTime::now(),
+            last_assignment: None,
+            last_dial_time: None,
             last_dial_ok: false,
             unreachable_since: None,
             jail_reason: None,
@@ -99,13 +99,14 @@ impl WorkerState {
             .unwrap_or_else(|| "??".to_string())
     }
 
-    fn time_since_last_ping(&self) -> Duration {
-        self.last_ping.elapsed().expect("Time doesn't go backwards")
+    fn time_since_last_ping(&self) -> Option<Duration> {
+        self.last_ping
+            .map(|t| t.elapsed().expect("Time doesn't go backwards"))
     }
 
     /// Register ping msg from a worker.
     pub fn ping(&mut self, msg: Ping) {
-        self.last_ping = SystemTime::now();
+        self.last_ping = Some(SystemTime::now());
         self.version = msg.version;
         self.stored_ranges = msg
             .stored_ranges
@@ -117,7 +118,7 @@ impl WorkerState {
 
     pub fn dialed(&mut self, reachable: bool) {
         let now = SystemTime::now();
-        self.last_dial_time = now;
+        self.last_dial_time = Some(now);
         self.last_dial_ok = reachable;
         if reachable {
             self.unreachable_since = None
@@ -127,7 +128,8 @@ impl WorkerState {
     }
 
     pub fn is_active(&self) -> bool {
-        self.time_since_last_ping() < Config::get().worker_inactive_timeout
+        self.time_since_last_ping()
+            .is_some_and(|t| t < Config::get().worker_inactive_timeout)
     }
 
     pub fn is_unreachable(&self) -> bool {
@@ -204,8 +206,10 @@ impl WorkerState {
         units: &'a HashMap<UnitId, SchedulingUnit>,
     ) -> bool {
         assert!(!self.jailed);
-        if self
-            .last_assignment
+        let Some(last_assignment) = self.last_assignment.as_ref() else {
+            return true; // worker doesn't have any assignment
+        };
+        if last_assignment
             .elapsed()
             .is_ok_and(|d| d < Config::get().worker_stale_timeout)
         {
@@ -237,7 +241,7 @@ impl WorkerState {
 
     pub fn reset_download_progress<'a>(&'a mut self, units: &'a HashMap<UnitId, SchedulingUnit>) {
         self.num_missing_chunks = self.count_missing_chunks(units);
-        self.last_assignment = SystemTime::now();
+        self.last_assignment = Some(SystemTime::now());
     }
 
     /// Jail the worker, unassign all units and return their IDs.

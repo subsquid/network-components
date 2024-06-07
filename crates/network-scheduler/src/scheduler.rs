@@ -124,7 +124,7 @@ impl Scheduler {
                     return None;
                 }
                 let time_since_last_dial = state
-                    .last_dial_time
+                    .last_dial_time?
                     .elapsed()
                     .expect("time doesn't go backwards");
                 let retry_interval = if state.last_dial_ok {

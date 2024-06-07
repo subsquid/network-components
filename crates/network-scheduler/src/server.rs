@@ -1,4 +1,6 @@
 use futures::{Stream, StreamExt};
+use itertools::Itertools;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,18 +11,21 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
 
 use subsquid_messages::signatures::msg_hash;
-use subsquid_messages::{Ping, Pong};
+use subsquid_messages::{Ping, Pong, RangeSet};
 use subsquid_network_transport::util::{CancellationToken, TaskManager};
 use subsquid_network_transport::{PeerId, SchedulerEvent, SchedulerTransportHandle};
 
 use crate::cli::Config;
+use crate::data_chunk::{chunks_to_worker_state, DataChunk};
 use crate::metrics::{MetricsEvent, MetricsWriter};
 use crate::metrics_server;
-use crate::scheduler::Scheduler;
-use crate::scheduling_unit::SchedulingUnit;
+use crate::scheduler::{ChunkStatus, Scheduler};
+use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::storage::S3Storage;
+use crate::worker_state::WorkerState;
 
 const WORKER_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+const CHUNKS_SUMMARY_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct Server<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> {
     incoming_events: S,
@@ -72,6 +77,7 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         self.spawn_jail_stale_workers_task(storage_client.clone());
         self.spawn_jail_unreachable_workers_task(storage_client);
         self.spawn_regenerate_signatures_task();
+        self.spawn_chunks_summary_task();
 
         let mut sigint = signal(SignalKind::interrupt())?;
         let mut sigterm = signal(SignalKind::terminate())?;
@@ -229,7 +235,8 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
                 scheduler.write().await.regenerate_signatures();
             }
         };
-        self.task_manager.spawn_periodic(task, Config::get().signature_refresh_interval);
+        self.task_manager
+            .spawn_periodic(task, Config::get().signature_refresh_interval);
     }
 
     fn spawn_jail_inactive_workers_task(&mut self, storage_client: S3Storage) {
@@ -270,4 +277,83 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         };
         self.task_manager.spawn_periodic(task, interval);
     }
+
+    fn spawn_chunks_summary_task(&mut self) {
+        let scheduler = self.scheduler.clone();
+        let task = move |_| {
+            let scheduler = scheduler.clone();
+            async move {
+                log::info!("Updating chunks summary");
+                let workers = scheduler.read().await.all_workers();
+                let units = scheduler.read().await.known_units();
+                let summary = build_chunks_summary(workers, units);
+                scheduler.write().await.update_chunks_summary(summary);
+            }
+        };
+        self.task_manager
+            .spawn_periodic(task, CHUNKS_SUMMARY_REFRESH_INTERVAL);
+    }
+}
+
+fn find_workers_with_chunk(
+    chunk: &DataChunk,
+    ranges: &HashMap<String, Vec<(Arc<str>, RangeSet)>>,
+) -> Vec<Arc<str>> {
+    let ranges = match ranges.get(&chunk.dataset_id) {
+        Some(ranges) => ranges,
+        None => return vec![],
+    };
+    ranges
+        .iter()
+        .filter_map(|(worker_id, ranget_set)| {
+            ranget_set
+                .includes(chunk.block_range)
+                .then_some(worker_id.clone())
+        })
+        .collect()
+}
+
+fn build_chunks_summary(
+    workers: Vec<WorkerState>,
+    units: HashMap<UnitId, SchedulingUnit>,
+) -> HashMap<String, Vec<ChunkStatus>> {
+    let assigned_ranges = workers
+        .iter()
+        .flat_map(|w| {
+            let chunks = w.assigned_chunks(&units);
+            chunks_to_worker_state(chunks)
+                .datasets
+                .into_iter()
+                .map(|(dataset, ranges)| {
+                    (dataset, (<Arc<str>>::from(w.peer_id.to_base58()), ranges))
+                })
+        })
+        .into_group_map();
+    let stored_ranges = workers
+        .iter()
+        .flat_map(|w| {
+            w.stored_ranges.iter().map(|(dataset, ranges)| {
+                (
+                    dataset.clone(),
+                    (<Arc<str>>::from(w.peer_id.to_base58()), ranges.clone()),
+                )
+            })
+        })
+        .into_group_map();
+    units
+        .into_values()
+        .flatten()
+        .map(|chunk| {
+            let assigned_to = find_workers_with_chunk(&chunk, &assigned_ranges);
+            let downloaded_by = find_workers_with_chunk(&chunk, &stored_ranges);
+            let chunk_status = ChunkStatus {
+                begin: chunk.block_range.begin,
+                end: chunk.block_range.end,
+                size_bytes: chunk.size_bytes,
+                assigned_to,
+                downloaded_by,
+            };
+            (chunk.dataset_id, chunk_status)
+        })
+        .into_group_map()
 }

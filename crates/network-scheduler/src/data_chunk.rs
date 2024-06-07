@@ -88,6 +88,7 @@ pub fn chunks_to_assignment(chunks: impl Iterator<Item = DataChunk>) -> WorkerAs
         let next_index = known_filenames.len() as u32;
         *known_filenames.entry(filename).or_insert(next_index)
     };
+    #[allow(clippy::redundant_closure)]
     let dataset_chunks = chunks
         .into_group_map_by(|chunk| chunk.dataset_id.clone())
         .into_iter()

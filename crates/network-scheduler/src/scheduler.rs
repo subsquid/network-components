@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::sync::Arc;
 
 use iter_num_tools::lin_space;
 use itertools::Itertools;
@@ -22,11 +23,22 @@ use crate::worker_state::{JailReason, WorkerState};
 const WORKER_ID_HEADER: &str = "worker-id";
 const WORKER_SIGNATURE_HEADER: &str = "worker-signature";
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChunkStatus {
+    pub begin: u32,
+    pub end: u32,
+    pub size_bytes: u64,
+    pub assigned_to: Vec<Arc<str>>, // Will deserialize duplicated, but it's short-lived
+    pub downloaded_by: Vec<Arc<str>>, // Will deserialize duplicated, but it's short-lived
+}
+
 #[derive(Default, Serialize, Deserialize)]
 pub struct Scheduler {
     known_units: HashMap<UnitId, SchedulingUnit>,
     units_assignments: HashMap<UnitId, Vec<PeerId>>,
     worker_states: HashMap<PeerId, WorkerState>,
+    #[serde(default)]
+    chunks_summary: HashMap<String, Vec<ChunkStatus>>, // dataset -> chunks statuses
     #[serde(default)]
     last_schedule_epoch: u32,
 }
@@ -452,6 +464,14 @@ impl Scheduler {
                 w.reset_download_progress(&self.known_units);
                 log::info!("{w}")
             });
+    }
+
+    pub fn get_chunks_summary(&self) -> HashMap<String, Vec<ChunkStatus>> {
+        self.chunks_summary.clone()
+    }
+
+    pub fn update_chunks_summary(&mut self, summary: HashMap<String, Vec<ChunkStatus>>) {
+        self.chunks_summary = summary;
     }
 }
 

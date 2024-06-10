@@ -1,8 +1,8 @@
 {
   "datasets": {
     "ethereum": {
-      "id": "czM6Ly9ldGhlcmV1bS1tYWlubmV0LTE",
-      "url": "s3://ethereum-mainnet-1"
+      "id": "czM6Ly9ldGhlcmV1bS1tYWlubmV0",
+      "url": "s3://ethereum-mainnet"
     }
   }
 }

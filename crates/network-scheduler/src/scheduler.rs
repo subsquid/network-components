@@ -121,12 +121,12 @@ impl Scheduler {
             .iter()
             .filter_map(|(worker_id, state)| {
                 if !state.is_active() {
-                    return None;
+                    return None; // Worker not active - don't dial
                 }
-                let time_since_last_dial = state
-                    .last_dial_time?
-                    .elapsed()
-                    .expect("time doesn't go backwards");
+                let Some(last_dial) = state.last_dial_time else {
+                    return Some(*worker_id); // Worker has never been dialed - dial now
+                };
+                let time_since_last_dial = last_dial.elapsed().expect("time doesn't go backwards");
                 let retry_interval = if state.last_dial_ok {
                     Config::get().successful_dial_retry
                 } else {

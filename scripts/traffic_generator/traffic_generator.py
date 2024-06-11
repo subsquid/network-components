@@ -38,10 +38,11 @@ S3Url = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["s3"])]
 class Dataset(BaseModel):
     id: str
     url: S3Url
+    template_dir: str
 
 
 class Config(BaseModel):
-    datasets: Dict[str, Dataset]
+    datasets: List[Dataset]
 
 
 class BlockRange(BaseModel):
@@ -74,9 +75,7 @@ class TrafficGenerator:
     def __init__(self, config: Config):
         self._config = config
         self._executor = futures.ThreadPoolExecutor(max_workers=NUM_THREADS)
-        self._query_templates: Dict[str, Any] = {
-            dataset: read_templates(dataset) for dataset in config.datasets
-        }
+        self._query_templates: Dict[str, List[Any]] = read_templates()
         self._worker_timeouts = Counter()
 
     def run(self):
@@ -145,16 +144,16 @@ class TrafficGenerator:
     def _query_worker(self, worker: Worker) -> Optional[int]:
         worker_id = worker.peer_id
         stored_datasets = [
-            (name, details.id, details.url) for name, details in self._config.datasets.items()
-            if details.url in worker.stored_ranges
+            (dataset.template_dir, dataset.id, dataset.url) for dataset in self._config.datasets
+            if dataset.url in worker.stored_ranges
         ]
         if not stored_datasets:
             logging.warning(f"Worker {worker_id} has no datasets to query")
             return None
 
-        dataset, dataset_id, dataset_url = random.choice(stored_datasets)
+        template, dataset_id, dataset_url = random.choice(stored_datasets)
         query_url = f'{GATEWAY_URL}/query/{dataset_id}/{worker_id}?timeout={QUERY_TIMEOUT_SEC}s'
-        query = random.choice(self._query_templates[dataset])
+        query = random.choice(self._query_templates[template])
         query['fromBlock'], query['toBlock'] = random_range(worker.stored_ranges[dataset_url])
 
         logging.debug(
@@ -178,16 +177,19 @@ def random_range(ranges: DatasetRanges) -> Tuple[int, int]:
     return from_block, to_block
 
 
-def read_templates(dataset: str) -> List[Any]:
-    templates_dir = TEMPLATES_DIR / dataset
-    templates = []
-    for template in templates_dir.glob('**/*.json'):
-        logging.info(f"Loading template {template}")
-        try:
-            templates.append(json.loads(template.read_text()))
-        except (IOError, json.JSONDecodeError) as e:
-            logging.error(f"Template {template} invalid: {e}")
-    return templates
+def read_templates() -> Dict[str, List[Any]]:
+    result = {}
+    for dataset in TEMPLATES_DIR.iterdir():
+        templates_dir = TEMPLATES_DIR / dataset
+        templates = []
+        for template in templates_dir.glob('**/*.json'):
+            logging.info(f"Loading template {template}")
+            try:
+                templates.append(json.loads(template.read_text()))
+            except (IOError, json.JSONDecodeError) as e:
+                logging.error(f"Template {template} invalid: {e}")
+        result[dataset.name] = templates
+    return result
 
 
 def main(config_path: str = 'config.json'):
@@ -196,7 +198,7 @@ def main(config_path: str = 'config.json'):
         config_json = Path(config_path).read_text()
         config = Config.model_validate_json(config_json)
         logging.info(
-            f"Config loaded datasets={list(config.datasets.keys())}")
+            f"Config loaded datasets={[str(dataset.url) for dataset in config.datasets]}")
     except (IOError, ValidationError) as e:
         logging.error(f"Error reading config: {e}")
         exit(1)

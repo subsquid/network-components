@@ -1,8 +1,14 @@
 {
-  "datasets": {
-    "ethereum": {
-      "id": "czM6Ly9ldGhlcmV1bS1tYWlubmV0",
-      "url": "s3://ethereum-mainnet"
+  "datasets": [
+    {
+      "url": "s3://ethereum-mainnet",
+      "template_dir": "ethereum",
+      "id": "czM6Ly9ldGhlcmV1bS1tYWlubmV0"
+    },
+    {
+      "url": "s3://binance-mainnet",
+      "template_dir": "ethereum",
+      "id": "czM6Ly9iaW5hbmNlLW1haW5uZXQ"
     }
-  }
+  ]
 }

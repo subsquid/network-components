@@ -132,6 +132,10 @@ impl WorkerState {
             .is_some_and(|t| t < Config::get().worker_inactive_timeout)
     }
 
+    pub fn ever_been_active(&self) -> bool {
+        self.last_ping.is_some()
+    }
+
     pub fn is_unreachable(&self) -> bool {
         // Worker is considered unreachable if it hasn't been successfully dialed
         // for at least `worker_unreachable_timeout`

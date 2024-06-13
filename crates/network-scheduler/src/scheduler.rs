@@ -292,6 +292,9 @@ impl Scheduler {
             .values_mut()
             .filter(|w| !w.jailed)
             .for_each(|w| {
+                if !w.ever_been_active() {
+                    return; // Don't jail workers that haven't been started yet
+                }
                 if !criterion(w) {
                     return;
                 }

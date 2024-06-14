@@ -43,6 +43,8 @@ class Dataset(BaseModel):
 
 class Config(BaseModel):
     datasets: List[Dataset]
+    worker_whitelist: Optional[List[str]] = None
+    worker_blacklist: Optional[List[str]] = None
 
 
 class BlockRange(BaseModel):
@@ -125,21 +127,19 @@ class TrafficGenerator:
             logging.error(f"Error getting workers: {e}")
             return []
 
-    @staticmethod
-    def _filter_workers(workers: List[Worker]) -> List[Worker]:
+    def _filter_workers(self, workers: List[Worker]) -> List[Worker]:
+        workers = filter(lambda w: w.get_version() >= MIN_WORKER_VERSION, workers)
         if SKIP_GREYLISTED:
             response = requests.get(f'{GATEWAY_URL}/workers/greylisted')
             response.raise_for_status()
-            greylisted_ids = set(response.json())
-            logging.info(f"Omitting {len(greylisted_ids)} grey-listed workers")
-        else:
-            greylisted_ids = set()
-
-        return [
-            w for w in workers
-            if w.get_version() >= MIN_WORKER_VERSION
-               and w.peer_id not in greylisted_ids
-        ]
+            greylisted = set(response.json())
+            logging.info(f"Omitting {len(greylisted)} grey-listed workers")
+            workers = filter(lambda w: w.peer_id not in greylisted, workers)
+        if self._config.worker_whitelist is not None:
+            workers = filter(lambda w: w.peer_id in self._config.worker_whitelist, workers)
+        elif self._config.worker_blacklist is not None:
+            workers = filter(lambda w: w.peer_id not in self._config.worker_blacklist, workers)
+        return list(workers)
 
     def _query_worker(self, worker: Worker) -> Optional[int]:
         worker_id = worker.peer_id

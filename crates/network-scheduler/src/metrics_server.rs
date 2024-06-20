@@ -4,7 +4,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use axum::routing::get;
-use axum::{Extension, Json, Router, Server};
+use axum::{Extension, Json, Router};
 use prometheus_client::registry::Registry;
 use tokio::sync::RwLock;
 
@@ -53,8 +53,8 @@ pub async fn run_server(
         .route("/metrics", get(get_metrics))
         .layer(Extension(scheduler))
         .layer(Extension(metrics_registry));
-    Server::bind(&addr)
-        .serve(app.into_make_service())
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app)
         .with_graceful_shutdown(cancel_token.cancelled_owned())
         .await?;
     Ok(())

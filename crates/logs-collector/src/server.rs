@@ -80,6 +80,7 @@ where
             }
         }
         log::info!("Server shutting down");
+        self.logs_collector.write().await.storage_sync().await?;
         self.task_manager.await_stop().await;
         Ok(())
     }

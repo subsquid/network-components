@@ -41,7 +41,7 @@ COPY crates ./crates
 
 RUN --mount=type=ssh cargo build --release --workspace
 
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim as network-base
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim AS network-base
 
 RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     --mount=target=/var/cache/apt,type=cache,sharing=locked \
@@ -49,7 +49,7 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     && apt-get update \
     && apt-get -y install ca-certificates net-tools
 
-FROM --platform=$BUILDPLATFORM network-base as network-scheduler
+FROM --platform=$BUILDPLATFORM network-base AS network-scheduler
 
 RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     --mount=target=/var/cache/apt,type=cache,sharing=locked \
@@ -72,7 +72,7 @@ COPY crates/network-scheduler/healthcheck.sh .
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
 
-FROM --platform=$BUILDPLATFORM network-base as logs-collector
+FROM --platform=$BUILDPLATFORM network-base AS logs-collector
 
 COPY --from=network-builder /app/target/release/logs-collector /usr/local/bin/logs-collector
 

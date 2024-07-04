@@ -1,6 +1,6 @@
 [package]
 name = "logs-collector"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 
 [dependencies]
@@ -10,6 +10,7 @@ clap = { version = "4", features = ["derive", "env"] }
 clickhouse = "0.11"
 env_logger = "0.11"
 futures = "0.3"
+lazy_static = "1"
 log = "0.4"
 serde = { version = "1.0.188", features = ["derive"] }
 serde_bytes = "0.11"
@@ -23,3 +24,6 @@ subsquid-network-transport = { workspace = true, features = ["logs-collector"] }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.5"
+
+[dev-dependencies]
+test-with = "0.12"

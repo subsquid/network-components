@@ -45,4 +45,12 @@ pub struct Cli {
         default_value = "600"
     )]
     pub epoch_seal_timeout_sec: u32,
+
+    #[arg(
+        long,
+        env,
+        help = "Minimum interval between pings from a worker (seconds)",
+        default_value = "15"
+    )]
+    pub min_ping_interval_sec: u32,
 }

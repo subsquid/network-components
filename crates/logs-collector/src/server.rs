@@ -7,7 +7,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::RwLock;
 
 use contract_client::Client as ContractClient;
-use subsquid_messages::{LogsCollected, QueryExecuted};
+use subsquid_messages::{LogsCollected, Ping, QueryExecuted};
 use subsquid_network_transport::util::TaskManager;
 use subsquid_network_transport::PeerId;
 use subsquid_network_transport::{LogsCollectorEvent, LogsCollectorTransportHandle};
@@ -85,24 +85,24 @@ where
     }
 
     async fn on_incoming_event(&mut self, ev: LogsCollectorEvent) {
-        let (worker_id, logs) = match ev {
-            LogsCollectorEvent::WorkerLogs { peer_id, logs } => (peer_id, logs),
+        match ev {
+            LogsCollectorEvent::WorkerLogs { peer_id, logs } => {
+                self.collect_logs(peer_id, logs).await
+            }
+            LogsCollectorEvent::Ping { peer_id, ping } => self.collect_ping(peer_id, ping).await,
             LogsCollectorEvent::QuerySubmitted(query_submitted) => {
                 match serde_json::to_string(&query_submitted) {
                     Ok(s) => println!("{s}"),
                     Err(e) => log::error!("Error serializing log: {e:?}"),
                 }
-                return;
             }
             LogsCollectorEvent::QueryFinished(query_finished) => {
                 match serde_json::to_string(&query_finished) {
                     Ok(s) => println!("{s}"),
                     Err(e) => log::error!("Error serializing log: {e:?}"),
                 }
-                return;
             }
-        };
-        self.collect_logs(worker_id, logs).await;
+        }
     }
 
     async fn collect_logs(&self, worker_id: PeerId, logs: Vec<QueryExecuted>) {
@@ -114,6 +114,17 @@ where
             .write()
             .await
             .collect_logs(worker_id, logs);
+    }
+
+    async fn collect_ping(&self, worker_id: PeerId, ping: Ping) {
+        if !self.registered_workers.read().await.contains(&worker_id) {
+            log::warn!("Worker not registered: {worker_id:?}");
+            return;
+        }
+        self.logs_collector
+            .write()
+            .await
+            .collect_ping(worker_id, ping);
     }
 
     fn spawn_saving_task(&mut self, interval: Duration) {

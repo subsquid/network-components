@@ -1,46 +1,77 @@
-use crate::cli::ClickhouseArgs;
-use crate::utils::timestamp_now_ms;
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use clickhouse::{Client, Row};
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::collections::HashMap;
-use subsquid_messages::{query_executed, InputAndOutput, Query, QueryExecuted, SizeAndHash};
+use subsquid_messages::{query_executed, InputAndOutput, Ping, Query, QueryExecuted, SizeAndHash};
 
-const LOGS_TABLE: &str = "worker_query_logs";
-const LOGS_TABLE_DEFINITION: &str = "
-CREATE TABLE IF NOT EXISTS worker_query_logs
-(
-    client_id String NOT NULL,
-    worker_id String NOT NULL,
-    query_id String NOT NULL,
-    dataset String NOT NULL,
-    query String NOT NULL,
-    profiling Boolean NOT NULL,
-    client_state_json String NOT NULL,
-    query_hash String NOT NULL,
-    exec_time_ms UInt32 NOT NULL,
-    result Enum8('ok' = 1, 'bad_request' = 2, 'server_error' = 3) NOT NULL,
-    num_read_chunks UInt32 NOT NULL DEFAULT 0,
-    output_size UInt32 NOT NULL DEFAULT 0,
-    output_hash String NOT NULL DEFAULT '',
-    error_msg String NOT NULL DEFAULT '',
-    seq_no UInt64 NOT NULL,
-    client_signature String NOT NULL,
-    worker_signature String NOT NULL,
-    worker_timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD),
-    collector_timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD)
-)
-ENGINE = MergeTree
-PARTITION BY toYYYYMM(worker_timestamp)
-ORDER BY (worker_timestamp, worker_id);
-";
+use crate::cli::ClickhouseArgs;
+lazy_static! {
+    static ref LOGS_TABLE: String =
+        std::env::var("LOGS_TABLE").unwrap_or("worker_query_logs".to_string());
+    static ref PINGS_TABLE: String =
+        std::env::var("PINGS_TABLE").unwrap_or("worker_pings_v2".to_string());
+    static ref LOGS_TABLE_DEFINITION: String = format!(
+        "
+        CREATE TABLE IF NOT EXISTS {}
+        (
+            client_id String NOT NULL,
+            worker_id String NOT NULL,
+            query_id String NOT NULL,
+            dataset String NOT NULL,
+            query String NOT NULL,
+            profiling Boolean NOT NULL,
+            client_state_json String NOT NULL,
+            query_hash String NOT NULL,
+            exec_time_ms UInt32 NOT NULL,
+            result Enum8('ok' = 1, 'bad_request' = 2, 'server_error' = 3) NOT NULL,
+            num_read_chunks UInt32 NOT NULL DEFAULT 0,
+            output_size UInt32 NOT NULL DEFAULT 0,
+            output_hash String NOT NULL DEFAULT '',
+            error_msg String NOT NULL DEFAULT '',
+            seq_no UInt64 NOT NULL,
+            client_signature String NOT NULL,
+            worker_signature String NOT NULL,
+            worker_timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD),
+            collector_timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD)
+        )
+        ENGINE = MergeTree
+        PARTITION BY toYYYYMM(worker_timestamp)
+        ORDER BY (worker_timestamp, worker_id);
+    ",
+        &*LOGS_TABLE
+    );
+    static ref PINGS_TABLE_DEFINITION: String = format!(
+        "
+        CREATE TABLE IF NOT EXISTS {}
+        (
+            timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD),
+            worker_id String NOT NULL,
+            stored_bytes UInt64 NOT NULL CODEC(Delta, ZSTD),
+            version LowCardinality(TEXT) NOT NULL
+        )
+        ENGINE = MergeTree
+        PARTITION BY toYYYYMM(timestamp)
+        ORDER BY (timestamp, worker_id);
+    ",
+        &*PINGS_TABLE
+    );
+}
+
+use crate::utils::timestamp_now_ms;
 
 #[async_trait]
 pub trait LogsStorage {
     async fn store_logs<'a, T: Iterator<Item = QueryExecutedRow> + Sized + Send>(
         &self,
         query_logs: T,
+    ) -> anyhow::Result<()>;
+
+    async fn store_pings<'a, T: Iterator<Item = PingRow> + Sized + Send>(
+        &self,
+        pings: T,
     ) -> anyhow::Result<()>;
 
     /// Get the sequence number & timestamp of the last stored log for each worker
@@ -179,6 +210,27 @@ impl From<QueryExecutedRow> for QueryExecuted {
     }
 }
 
+#[derive(Row, Debug, Clone, Serialize, Deserialize)]
+pub struct PingRow {
+    timestamp: u64,
+    worker_id: String,
+    stored_bytes: u64,
+    version: String,
+}
+
+impl TryFrom<Ping> for PingRow {
+    type Error = &'static str;
+
+    fn try_from(ping: Ping) -> Result<Self, Self::Error> {
+        Ok(Self {
+            stored_bytes: ping.stored_bytes(),
+            worker_id: ping.worker_id.ok_or("worker_id missing")?,
+            version: ping.version.ok_or("version missing")?,
+            timestamp: timestamp_now_ms(),
+        })
+    }
+}
+
 #[derive(Row, Debug, Deserialize)]
 struct SeqNoRow {
     worker_id: String,
@@ -193,7 +245,8 @@ impl ClickhouseStorage {
             .with_database(args.clickhouse_database)
             .with_user(args.clickhouse_user)
             .with_password(args.clickhouse_password);
-        client.query(LOGS_TABLE_DEFINITION).execute().await?;
+        client.query(&LOGS_TABLE_DEFINITION).execute().await?;
+        client.query(&PINGS_TABLE_DEFINITION).execute().await?;
         Ok(Self(client))
     }
 }
@@ -205,9 +258,23 @@ impl LogsStorage for ClickhouseStorage {
         query_logs: T,
     ) -> anyhow::Result<()> {
         log::debug!("Storing logs in clickhouse");
-        let mut insert = self.0.insert(LOGS_TABLE)?;
+        let mut insert = self.0.insert(&LOGS_TABLE)?;
         for row in query_logs {
-            log::debug!("Storing query log {:?}", row);
+            log::trace!("Storing query log {:?}", row);
+            insert.write(&row).await?;
+        }
+        insert.end().await?;
+        Ok(())
+    }
+
+    async fn store_pings<'a, T: Iterator<Item = PingRow> + Sized + Send>(
+        &self,
+        pings: T,
+    ) -> anyhow::Result<()> {
+        log::debug!("Storing pings in clickhouse");
+        let mut insert = self.0.insert(&PINGS_TABLE)?;
+        for row in pings {
+            println!("Storing ping {:?}", row);
             insert.write(&row).await?;
         }
         insert.end().await?;
@@ -219,7 +286,8 @@ impl LogsStorage for ClickhouseStorage {
         let mut cursor = self
             .0
             .query(&format!(
-                "SELECT worker_id, MAX(seq_no), MAX(worker_timestamp) FROM {LOGS_TABLE} GROUP BY worker_id"
+                "SELECT worker_id, MAX(seq_no), MAX(worker_timestamp) FROM {} GROUP BY worker_id",
+                &*LOGS_TABLE
             ))
             .fetch::<SeqNoRow>()?;
         let mut result = HashMap::new();
@@ -233,10 +301,11 @@ impl LogsStorage for ClickhouseStorage {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use subsquid_messages::signatures::SignedMessage;
     use subsquid_messages::{InputAndOutput, Query, SizeAndHash};
     use subsquid_network_transport::{Keypair, PeerId};
+
+    use super::*;
 
     // To run this test, start a local clickhouse instance first
     // docker run --rm \
@@ -247,7 +316,8 @@ mod tests {
     //   --network=host \
     //   --ulimit nofile=262144:262144 \
     //   clickhouse/clickhouse-server
-    //
+    // And set `STORAGE_TEST` env variable to a non-empty value
+    #[test_with::env(STORAGE_TEST)]
     #[tokio::test]
     async fn test_storage() {
         let storage = ClickhouseStorage::new(ClickhouseArgs {
@@ -262,7 +332,13 @@ mod tests {
         // Clean up database
         storage
             .0
-            .query(&format!("TRUNCATE TABLE {LOGS_TABLE}"))
+            .query(&format!("TRUNCATE TABLE {}", &LOGS_TABLE))
+            .execute()
+            .await
+            .unwrap();
+        storage
+            .0
+            .query(&format!("TRUNCATE TABLE {}", &PINGS_TABLE))
             .execute()
             .await
             .unwrap();
@@ -329,12 +405,38 @@ mod tests {
         // Verify the signatures
         let mut cursor = storage
             .0
-            .query(&format!("SELECT * FROM {LOGS_TABLE}"))
+            .query(&format!("SELECT * FROM {}", &LOGS_TABLE))
             .fetch::<QueryExecutedRow>()
             .unwrap();
         let row = cursor.next().await.unwrap().unwrap();
         let mut saved_log: QueryExecuted = row.into();
         assert_eq!(query_log, saved_log);
-        assert!(saved_log.verify_signature(&worker_id))
+        assert!(saved_log.verify_signature(&worker_id));
+
+        // Check pings storing
+        let ping = Ping {
+            worker_id: Some("worker_id".to_string()),
+            version: Some("1.0.0".to_string()),
+            stored_bytes: Some(1024),
+            stored_ranges: vec![],
+            signature: vec![],
+        };
+        let ts = timestamp_now_ms();
+        storage
+            .store_pings(std::iter::once(ping.clone().try_into().unwrap()))
+            .await
+            .unwrap();
+
+        let mut cursor = storage
+            .0
+            .query(&format!("SELECT * FROM {}", &PINGS_TABLE))
+            .fetch::<PingRow>()
+            .unwrap();
+        let row = cursor.next().await.unwrap().unwrap();
+        assert_eq!(ping.worker_id.unwrap(), row.worker_id);
+        assert_eq!(ping.version.unwrap(), row.version);
+        assert_eq!(ping.stored_bytes.unwrap(), row.stored_bytes);
+        assert!(row.timestamp >= ts);
+        assert!(row.timestamp <= timestamp_now_ms());
     }
 }

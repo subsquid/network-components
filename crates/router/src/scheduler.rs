@@ -16,7 +16,7 @@ async fn update_datasets(controller: &Arc<Controller>, datasets: &Vec<Dataset>) 
         tasks.push(tokio::spawn(async move {
             let next_block = controller.get_height(dataset.name())
                 .expect("dataset must be supported")
-                .map(|height| u32::try_from(height).expect("next block can't be negative") + 1)
+                .and_then(|height| u32::try_from(height).ok().map(|height| height + 1))
                 .unwrap_or(dataset.start_block().unwrap_or(0));
 
             let chunks = match dataset.storage().get_chunks(next_block).await {

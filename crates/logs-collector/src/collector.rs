@@ -160,5 +160,6 @@ impl<T: LogsStorage + Sync> LogsCollector<T> {
         }
         log::info!("Clearing buffered pings");
         self.buffered_pings.clear();
+        self.buffered_pings.shrink_to_fit();
     }
 }

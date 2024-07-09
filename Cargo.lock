@@ -1697,8 +1697,8 @@ checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
 name = "contract-client"
-version = "1.0.2"
-source = "git+https://github.com/subsquid/subsquid-network.git#b765605e4e8d97caf52cfd877a1c5569f03cdff6"
+version = "1.0.3"
+source = "git+https://github.com/subsquid/subsquid-network.git#7f7303c72f75e6d03843ab2b245b30e088a12a42"
 dependencies = [
  "async-trait",
  "clap",
@@ -3239,7 +3239,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -4195,7 +4195,7 @@ checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
 name = "logs-collector"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4470,7 +4470,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6568,7 +6568,7 @@ dependencies = [
 [[package]]
 name = "subsquid-messages"
 version = "1.0.1"
-source = "git+https://github.com/subsquid/subsquid-network.git#b765605e4e8d97caf52cfd877a1c5569f03cdff6"
+source = "git+https://github.com/subsquid/subsquid-network.git#7f7303c72f75e6d03843ab2b245b30e088a12a42"
 dependencies = [
  "anyhow",
  "hex",
@@ -6583,7 +6583,7 @@ dependencies = [
 [[package]]
 name = "subsquid-network-transport"
 version = "1.0.4"
-source = "git+https://github.com/subsquid/subsquid-network.git#b765605e4e8d97caf52cfd877a1c5569f03cdff6"
+source = "git+https://github.com/subsquid/subsquid-network.git#7f7303c72f75e6d03843ab2b245b30e088a12a42"
 dependencies = [
  "anyhow",
  "async-trait",

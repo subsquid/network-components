@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
+use serde_partial::SerializePartial;
 use serde_with::{serde_as, TimestampMilliSeconds};
 
 use contract_client::Address;
@@ -15,7 +16,7 @@ use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::signature::timed_hmac_now;
 
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, SerializePartial)]
 pub struct WorkerState {
     pub peer_id: PeerId,
     pub address: Address,

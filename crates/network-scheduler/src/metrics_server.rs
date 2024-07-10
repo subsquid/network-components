@@ -3,21 +3,37 @@ use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Json, Router};
 use prometheus_client::registry::Registry;
-use tokio::sync::RwLock;
-
+use serde_partial::{Field, SerializePartial};
 use subsquid_network_transport::util::CancellationToken;
+use tokio::sync::RwLock;
 
 use crate::cli::Config;
 use crate::scheduler::{ChunkStatus, Scheduler};
 use crate::worker_state::WorkerState;
 
+const JAIL_INFO_FIELDS: [Field<'static, WorkerState>; 3] = [
+    Field::new("peer_id"),
+    Field::new("jailed"),
+    Field::new("jail_reason"),
+];
+
 async fn active_workers(
     Extension(scheduler): Extension<Arc<RwLock<Scheduler>>>,
 ) -> Json<Vec<WorkerState>> {
     Json(scheduler.read().await.active_workers())
+}
+
+async fn workers_jail_info(Extension(scheduler): Extension<Arc<RwLock<Scheduler>>>) -> Response {
+    let active_workers = scheduler.read().await.active_workers();
+    let jail_info = active_workers
+        .iter()
+        .map(|w| w.with_fields(|_| JAIL_INFO_FIELDS))
+        .collect::<Vec<_>>();
+    Json(jail_info).into_response()
 }
 
 async fn chunks(
@@ -48,6 +64,7 @@ pub async fn run_server(
     let metrics_registry = Arc::new(RwLock::new(metrics_registry));
     let app = Router::new()
         .route("/workers/pings", get(active_workers))
+        .route("/workers/jail_info", get(workers_jail_info))
         .route("/chunks", get(chunks))
         .route("/config", get(get_config))
         .route("/metrics", get(get_metrics))

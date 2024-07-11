@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use prometheus_client::metrics::counter::Counter;
 use prometheus_client::metrics::gauge::Gauge;
 use prometheus_client::metrics::histogram::{linear_buckets, Histogram};
 use prometheus_client::registry::Registry;
@@ -12,6 +13,7 @@ lazy_static::lazy_static! {
     static ref ACTIVE_WORKERS: Gauge = Default::default();
     static ref REPLICATION_FACTOR: Gauge = Default::default();
     static ref PARTIALLY_ASSIGNED_UNITS: Gauge = Default::default();
+    static ref S3_REQUESTS: Counter = Default::default();
 }
 
 pub fn register_metrics(registry: &mut Registry) {
@@ -41,6 +43,11 @@ pub fn register_metrics(registry: &mut Registry) {
         "Number of units that are missing some replicas",
         PARTIALLY_ASSIGNED_UNITS.clone(),
     );
+    registry.register(
+        "s3_requests",
+        "Total number of S3 API requests since application start",
+        S3_REQUESTS.clone(),
+    )
 }
 
 pub fn units_assigned(counts: HashMap<&UnitId, usize>) {
@@ -63,4 +70,8 @@ pub fn replication_factor(factor: usize) {
 
 pub fn partially_assigned_units(count: usize) {
     PARTIALLY_ASSIGNED_UNITS.set(count as i64);
+}
+
+pub fn s3_request() {
+    S3_REQUESTS.inc();
 }

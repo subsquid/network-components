@@ -7,12 +7,14 @@ use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::types::Object;
 use itertools::Itertools;
 use nonempty::NonEmpty;
-use subsquid_network_transport::util::{CancellationToken, TaskManager};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
 
+use subsquid_network_transport::util::{CancellationToken, TaskManager};
+
 use crate::cli::Config;
 use crate::data_chunk::DataChunk;
+use crate::prometheus_metrics;
 use crate::scheduler::Scheduler;
 use crate::scheduling_unit::{bundle_chunks, SchedulingUnit};
 
@@ -77,6 +79,7 @@ impl DatasetStorage {
                 .set_start_after(last_key)
                 .send()
                 .await?;
+            prometheus_metrics::s3_request();
             let objects: NonEmpty<S3Object> = match s3_result
                 .contents
                 .and_then(|objects| {

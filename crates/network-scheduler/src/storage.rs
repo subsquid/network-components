@@ -265,6 +265,7 @@ impl S3Storage {
             .key(&self.scheduler_state_key)
             .send()
             .await;
+        prometheus_metrics::s3_request();
         let bytes = match api_result {
             Ok(res) => res.body.collect().await?.to_vec(),
             Err(SdkError::ServiceError(e)) if e.err().is_no_such_key() => {
@@ -291,5 +292,6 @@ impl S3Storage {
             .send()
             .await
             .map_err(|e| log::error!("Error saving scheduler state: {e:?}"));
+        prometheus_metrics::s3_request();
     }
 }

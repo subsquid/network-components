@@ -59,6 +59,8 @@ pub struct Config {
     pub supported_worker_versions: VersionReq,
     #[serde(default = "default_worker_version")]
     pub recommended_worker_versions: VersionReq,
+    #[serde(default)]
+    pub jail_unreachable: bool,
 }
 
 impl Config {

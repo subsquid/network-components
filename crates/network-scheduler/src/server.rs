@@ -75,7 +75,7 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         self.spawn_metrics_server_task(metrics_listen_addr, metrics_registry);
         self.spawn_jail_inactive_workers_task(storage_client.clone());
         self.spawn_jail_stale_workers_task(storage_client.clone());
-        // self.spawn_jail_unreachable_workers_task(storage_client);
+        self.spawn_jail_unreachable_workers_task(storage_client);
         self.spawn_regenerate_signatures_task();
         self.spawn_chunks_summary_task();
 
@@ -249,7 +249,6 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         self.spawn_jail_task(storage_client, timeout, |s| s.jail_stale_workers());
     }
 
-    #[allow(dead_code)]
     fn spawn_jail_unreachable_workers_task(&mut self, storage_client: S3Storage) {
         let timeout = Config::get().worker_unreachable_timeout;
         self.spawn_jail_task(storage_client, timeout, |s| s.jail_unreachable_workers());

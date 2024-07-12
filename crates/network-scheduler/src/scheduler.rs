@@ -253,9 +253,10 @@ impl Scheduler {
 
     fn release_jailed_workers(&mut self) {
         log::info!("Releasing jailed workers");
+        let release_unreachable = !Config::get().jail_unreachable;
         self.worker_states
             .values_mut()
-            .filter(|w| w.jailed && w.is_active() && !w.is_unreachable())
+            .filter(|w| w.jailed && w.is_active() && (release_unreachable || !w.is_unreachable()))
             .for_each(|w| w.release());
     }
 
@@ -276,8 +277,17 @@ impl Scheduler {
     }
 
     pub fn jail_unreachable_workers(&mut self) -> bool {
-        log::info!("Jailing unreachable workers");
-        self.jail_workers(|w| w.is_unreachable(), JailReason::Unreachable)
+        if Config::get().jail_unreachable {
+            log::info!("Jailing unreachable workers");
+            self.jail_workers(|w| w.is_unreachable(), JailReason::Unreachable)
+        } else {
+            log::info!("Jailing unreachable workers is disabled");
+            self.worker_states
+                .values()
+                .filter(|w| w.ever_been_active() && w.is_unreachable())
+                .for_each(|w| log::info!("Worker  {} is unreachable", w.peer_id));
+            false
+        }
     }
 
     fn jail_workers(

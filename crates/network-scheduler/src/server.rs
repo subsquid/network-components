@@ -101,7 +101,7 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
             SchedulerEvent::Ping { peer_id, ping } => self.ping(peer_id, ping).await,
             SchedulerEvent::PeerProbed { peer_id, reachable } => self
                 .scheduler
-                .write()
+                .read()
                 .await
                 .worker_dialed(peer_id, reachable),
         }
@@ -110,7 +110,7 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
     async fn ping(&mut self, peer_id: PeerId, ping: Ping) {
         log::debug!("Got ping from {peer_id}");
         let ping_hash = msg_hash(&ping);
-        let status = self.scheduler.write().await.ping(peer_id, ping.clone());
+        let status = self.scheduler.read().await.ping(peer_id, ping.clone());
         self.write_metrics(peer_id, ping).await;
         let pong = Pong {
             ping_hash,

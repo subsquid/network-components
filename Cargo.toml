@@ -5,4 +5,4 @@ resolver = "2"
 [workspace.dependencies]
 contract-client = { git = "https://github.com/subsquid/subsquid-network.git", version = "1.0.3" }
 subsquid-messages = { git = "https://github.com/subsquid/subsquid-network.git", version = "1.0.1" }
-subsquid-network-transport = { git = "https://github.com/subsquid/subsquid-network.git", version = "1.0.4" }
+subsquid-network-transport = { git = "https://github.com/subsquid/subsquid-network.git", version = "1.0.5" }

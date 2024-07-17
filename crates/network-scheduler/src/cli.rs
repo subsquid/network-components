@@ -96,16 +96,6 @@ pub struct Cli {
     pub metrics_path: Option<PathBuf>,
 
     #[arg(
-        long,
-        env,
-        help = "Choose which metrics should be printed.",
-        value_delimiter = ',',
-        num_args = 0..,
-        default_value = "QuerySubmitted,QueryFinished,WorkersSnapshot"
-    )]
-    pub metrics: Vec<String>,
-
-    #[arg(
         short,
         long,
         env = "CONFIG_PATH",

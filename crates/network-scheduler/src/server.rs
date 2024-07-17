@@ -1,14 +1,16 @@
-use futures::{Stream, StreamExt};
-use itertools::Itertools;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use dashmap::DashMap;
+use futures::{Stream, StreamExt};
+use itertools::Itertools;
+use parking_lot::Mutex;
 use prometheus_client::registry::Registry;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::{Mutex, RwLock, RwLockWriteGuard};
+use tokio::time::Instant;
 
 use subsquid_messages::signatures::msg_hash;
 use subsquid_messages::{Ping, Pong, RangeSet};
@@ -17,12 +19,11 @@ use subsquid_network_transport::{PeerId, SchedulerEvent, SchedulerTransportHandl
 
 use crate::cli::Config;
 use crate::data_chunk::{chunks_to_worker_state, DataChunk};
-use crate::metrics::{MetricsEvent, MetricsWriter};
-use crate::metrics_server;
 use crate::scheduler::{ChunkStatus, Scheduler};
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::storage::S3Storage;
 use crate::worker_state::WorkerState;
+use crate::{metrics_server, prometheus_metrics};
 
 const WORKER_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const CHUNKS_SUMMARY_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
@@ -31,8 +32,7 @@ pub struct Server<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> {
     incoming_events: S,
     incoming_units: Receiver<SchedulingUnit>,
     transport_handle: SchedulerTransportHandle,
-    scheduler: Arc<RwLock<Scheduler>>,
-    metrics_writer: Arc<RwLock<MetricsWriter>>,
+    scheduler: Scheduler,
     task_manager: TaskManager,
 }
 
@@ -42,16 +42,12 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         incoming_units: Receiver<SchedulingUnit>,
         transport_handle: SchedulerTransportHandle,
         scheduler: Scheduler,
-        metrics_writer: MetricsWriter,
     ) -> Self {
-        let scheduler = Arc::new(RwLock::new(scheduler));
-        let metrics_writer = Arc::new(RwLock::new(metrics_writer));
         Self {
             incoming_events,
             incoming_units,
             transport_handle,
             scheduler,
-            metrics_writer,
             task_manager: Default::default(),
         }
     }
@@ -67,7 +63,7 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
 
         // Get worker set immediately to accept pings
         let workers = contract_client.active_workers().await?;
-        self.scheduler.write().await.update_workers(workers);
+        self.scheduler.update_workers(workers);
 
         self.spawn_scheduling_task(contract_client, storage_client.clone())
             .await?;
@@ -83,8 +79,8 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         let mut sigterm = signal(SignalKind::terminate())?;
         loop {
             tokio::select! {
-                Some(ev) = self.incoming_events.next() => self.on_incoming_event(ev).await, // FIXME: blocking event loop
-                Some(unit) = self.incoming_units.recv() => self.on_new_unit(unit).await, // FIXME: blocking event loop
+                Some(ev) = self.incoming_events.next() => self.on_incoming_event(ev),
+                Some(unit) = self.incoming_units.recv() => self.on_new_unit(unit),
                 _ = sigint.recv() => break,
                 _ = sigterm.recv() => break,
                 else => break
@@ -96,22 +92,20 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         Ok(())
     }
 
-    async fn on_incoming_event(&mut self, ev: SchedulerEvent) {
+    fn on_incoming_event(&self, ev: SchedulerEvent) {
         match ev {
-            SchedulerEvent::Ping { peer_id, ping } => self.ping(peer_id, ping).await,
-            SchedulerEvent::PeerProbed { peer_id, reachable } => self
-                .scheduler
-                .read()
-                .await
-                .worker_dialed(peer_id, reachable),
+            SchedulerEvent::Ping { peer_id, ping } => self.ping(peer_id, ping),
+            SchedulerEvent::PeerProbed { peer_id, reachable } => {
+                self.scheduler.worker_dialed(peer_id, reachable)
+            }
         }
     }
 
-    async fn ping(&mut self, peer_id: PeerId, ping: Ping) {
+    fn ping(&self, peer_id: PeerId, ping: Ping) {
         log::debug!("Got ping from {peer_id}");
+        let start = Instant::now();
         let ping_hash = msg_hash(&ping);
-        let status = self.scheduler.read().await.ping(peer_id, ping.clone());
-        self.write_metrics(peer_id, ping).await;
+        let status = self.scheduler.ping(peer_id, ping.clone());
         let pong = Pong {
             ping_hash,
             status: Some(status),
@@ -119,19 +113,11 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         self.transport_handle
             .send_pong(peer_id, pong)
             .unwrap_or_else(|_| log::error!("Error sending pong: queue full"));
+        prometheus_metrics::exec_time("ping", start.elapsed());
     }
 
-    async fn write_metrics(&mut self, peer_id: PeerId, msg: impl Into<MetricsEvent>) {
-        self.metrics_writer
-            .write()
-            .await
-            .write_metrics(Some(peer_id), msg)
-            .await
-            .unwrap_or_else(|e| log::error!("Error writing metrics: {e:?}"));
-    }
-
-    async fn on_new_unit(&self, unit: SchedulingUnit) {
-        self.scheduler.write().await.new_unit(unit)
+    fn on_new_unit(&self, unit: SchedulingUnit) {
+        self.scheduler.new_unit(unit)
     }
 
     async fn spawn_scheduling_task(
@@ -158,19 +144,17 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
                 };
 
                 // Update workers every epoch
-                let mut last_epoch = last_epoch.lock().await;
-                if current_epoch > *last_epoch {
+                if current_epoch > *last_epoch.lock() {
                     match contract_client.active_workers().await {
-                        Ok(workers) => scheduler.write().await.update_workers(workers),
+                        Ok(workers) => scheduler.update_workers(workers),
                         Err(e) => log::error!("Error getting workers: {e:?}"),
                     }
-                    *last_epoch = current_epoch;
+                    *last_epoch.lock() = current_epoch;
                 }
 
                 // Schedule chunks every `schedule_interval_epochs`
-                let last_schedule_epoch = scheduler.read().await.last_schedule_epoch();
+                let last_schedule_epoch = scheduler.last_schedule_epoch();
                 if current_epoch >= last_schedule_epoch + schedule_interval {
-                    let mut scheduler = scheduler.write().await;
                     scheduler.schedule(current_epoch);
                     match scheduler.to_json() {
                         Ok(state) => storage_client.save_scheduler(state).await,
@@ -195,7 +179,7 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
             let transport_handle = transport_handle.clone();
             async move {
                 log::info!("Dialing workers...");
-                let workers = scheduler.read().await.workers_to_dial();
+                let workers = scheduler.workers_to_dial();
                 for peer_id in workers {
                     transport_handle
                         .probe_peer(peer_id)
@@ -232,7 +216,7 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
             let scheduler = scheduler.clone();
             async move {
                 log::info!("Regenerating signatures");
-                scheduler.write().await.regenerate_signatures();
+                scheduler.regenerate_signatures();
             }
         };
         self.task_manager
@@ -258,15 +242,14 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         &mut self,
         storage_client: S3Storage,
         interval: Duration,
-        jail_fn: fn(&mut RwLockWriteGuard<Scheduler>) -> bool,
+        jail_fn: fn(&Scheduler) -> bool,
     ) {
         let scheduler = self.scheduler.clone();
         let task = move |_| {
             let scheduler = scheduler.clone();
             let storage_client = storage_client.clone();
             async move {
-                let mut scheduler = scheduler.write().await;
-                if jail_fn(&mut scheduler) {
+                if jail_fn(&scheduler) {
                     // If any worker got jailed, save the changed scheduler state
                     match scheduler.to_json() {
                         Ok(state) => storage_client.save_scheduler(state).await,
@@ -284,10 +267,10 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
             let scheduler = scheduler.clone();
             async move {
                 log::info!("Updating chunks summary");
-                let workers = scheduler.read().await.all_workers();
-                let units = scheduler.read().await.known_units();
+                let workers = scheduler.all_workers();
+                let units = scheduler.known_units();
                 let summary = build_chunks_summary(workers, units);
-                scheduler.write().await.update_chunks_summary(summary);
+                scheduler.update_chunks_summary(summary);
             }
         };
         self.task_manager
@@ -315,7 +298,7 @@ fn find_workers_with_chunk(
 
 fn build_chunks_summary(
     workers: Vec<WorkerState>,
-    units: HashMap<UnitId, SchedulingUnit>,
+    units: DashMap<UnitId, SchedulingUnit>,
 ) -> HashMap<String, Vec<ChunkStatus>> {
     let assigned_ranges = workers
         .iter()
@@ -341,8 +324,8 @@ fn build_chunks_summary(
         })
         .into_group_map();
     units
-        .into_values()
-        .flatten()
+        .into_iter()
+        .flat_map(|(_, unit)| unit)
         .map(|chunk| {
             let assigned_to = find_workers_with_chunk(&chunk, &assigned_ranges);
             let downloaded_by = find_workers_with_chunk(&chunk, &stored_ranges);

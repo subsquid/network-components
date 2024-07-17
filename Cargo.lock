@@ -4200,6 +4200,7 @@ checksum = "07af8b9cdd281b7915f413fa73f29ebd5d55d0d3f0155584dade1ff18cea1b17"
 dependencies = [
  "autocfg",
  "scopeguard",
+ "serde",
 ]
 
 [[package]]
@@ -4485,7 +4486,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "1.0.12"
+version = "1.0.13"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4506,6 +4507,7 @@ dependencies = [
  "lazy_static",
  "log",
  "nonempty",
+ "parking_lot",
  "prometheus-client",
  "rand 0.8.5",
  "random_choice",

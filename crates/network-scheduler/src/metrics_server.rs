@@ -21,14 +21,12 @@ const JAIL_INFO_FIELDS: [Field<'static, WorkerState>; 3] = [
     Field::new("jail_reason"),
 ];
 
-async fn active_workers(
-    Extension(scheduler): Extension<Arc<RwLock<Scheduler>>>,
-) -> Json<Vec<WorkerState>> {
-    Json(scheduler.read().await.active_workers())
+async fn active_workers(Extension(scheduler): Extension<Scheduler>) -> Json<Vec<WorkerState>> {
+    Json(scheduler.active_workers())
 }
 
-async fn workers_jail_info(Extension(scheduler): Extension<Arc<RwLock<Scheduler>>>) -> Response {
-    let active_workers = scheduler.read().await.active_workers();
+async fn workers_jail_info(Extension(scheduler): Extension<Scheduler>) -> Response {
+    let active_workers = scheduler.active_workers();
     let jail_info = active_workers
         .iter()
         .map(|w| w.with_fields(|_| JAIL_INFO_FIELDS))
@@ -37,9 +35,9 @@ async fn workers_jail_info(Extension(scheduler): Extension<Arc<RwLock<Scheduler>
 }
 
 async fn chunks(
-    Extension(scheduler): Extension<Arc<RwLock<Scheduler>>>,
+    Extension(scheduler): Extension<Scheduler>,
 ) -> Json<HashMap<String, Vec<ChunkStatus>>> {
-    let chunks_summary = scheduler.read().await.get_chunks_summary();
+    let chunks_summary = scheduler.get_chunks_summary();
     Json(chunks_summary)
 }
 
@@ -55,7 +53,7 @@ async fn get_metrics(Extension(metrics_registry): Extension<Arc<RwLock<Registry>
 }
 
 pub async fn run_server(
-    scheduler: Arc<RwLock<Scheduler>>,
+    scheduler: Scheduler,
     addr: SocketAddr,
     metrics_registry: Registry,
     cancel_token: CancellationToken,

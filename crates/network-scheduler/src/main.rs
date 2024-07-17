@@ -5,13 +5,11 @@ use prometheus_client::registry::Registry;
 use subsquid_network_transport::P2PTransportBuilder;
 
 use crate::cli::Cli;
-use crate::metrics::MetricsWriter;
 use crate::server::Server;
 use crate::storage::S3Storage;
 
 mod cli;
 mod data_chunk;
-mod metrics;
 mod metrics_server;
 mod prometheus_metrics;
 mod scheduler;
@@ -39,7 +37,6 @@ async fn main() -> anyhow::Result<()> {
     args.read_config().await?;
 
     // Open file for writing metrics
-    let metrics_writer = MetricsWriter::from_cli(&args).await?;
     let mut metrics_registry = Registry::default();
     subsquid_network_transport::metrics::register_metrics(&mut metrics_registry);
     prometheus_metrics::register_metrics(&mut metrics_registry);
@@ -61,7 +58,6 @@ async fn main() -> anyhow::Result<()> {
         incoming_units,
         transport_handle,
         scheduler,
-        metrics_writer,
     )
     .run(
         contract_client,

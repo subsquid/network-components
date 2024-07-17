@@ -7,6 +7,7 @@ use serde_partial::SerializePartial;
 use serde_with::{serde_as, TimestampMilliSeconds};
 
 use contract_client::Address;
+use dashmap::DashMap;
 use subsquid_messages::{Ping, RangeSet};
 use subsquid_network_transport::PeerId;
 
@@ -185,7 +186,7 @@ impl WorkerState {
 
     pub fn assigned_chunks<'a>(
         &'a self,
-        units_map: &'a HashMap<UnitId, SchedulingUnit>,
+        units_map: &'a DashMap<UnitId, SchedulingUnit>,
     ) -> impl Iterator<Item = DataChunk> + 'a {
         self.assigned_units.iter().flat_map(|unit_id| {
             units_map
@@ -195,7 +196,7 @@ impl WorkerState {
         })
     }
 
-    fn count_missing_chunks<'a>(&'a self, units: &'a HashMap<UnitId, SchedulingUnit>) -> u32 {
+    fn count_missing_chunks<'a>(&'a self, units: &'a DashMap<UnitId, SchedulingUnit>) -> u32 {
         self.assigned_chunks(units)
             .map(|chunk| match self.stored_ranges.get(&chunk.dataset_id) {
                 Some(range_set) if range_set.includes(chunk.block_range) => 0,
@@ -208,7 +209,7 @@ impl WorkerState {
     /// Returns true iff the worker is fully synced or making progress.
     pub fn check_download_progress<'a>(
         &'a mut self,
-        units: &'a HashMap<UnitId, SchedulingUnit>,
+        units: &'a DashMap<UnitId, SchedulingUnit>,
     ) -> bool {
         assert!(!self.jailed);
         let Some(last_assignment) = self.last_assignment.as_ref() else {
@@ -244,7 +245,7 @@ impl WorkerState {
         }
     }
 
-    pub fn reset_download_progress<'a>(&'a mut self, units: &'a HashMap<UnitId, SchedulingUnit>) {
+    pub fn reset_download_progress<'a>(&'a mut self, units: &'a DashMap<UnitId, SchedulingUnit>) {
         self.num_missing_chunks = self.count_missing_chunks(units);
         self.last_assignment = Some(SystemTime::now());
     }

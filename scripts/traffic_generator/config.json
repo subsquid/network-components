@@ -2,13 +2,23 @@
   "datasets": [
     {
       "url": "s3://ethereum-mainnet",
-      "template_dir": "ethereum",
+      "template_dir": "evm",
       "id": "czM6Ly9ldGhlcmV1bS1tYWlubmV0"
     },
     {
       "url": "s3://binance-mainnet",
-      "template_dir": "ethereum",
+      "template_dir": "evm",
       "id": "czM6Ly9iaW5hbmNlLW1haW5uZXQ"
+    },
+    {
+      "url": "s3://polygon-mainnet-traceless-1",
+      "template_dir": "evm",
+      "id": "czM6Ly9wb2x5Z29uLW1haW5uZXQtdHJhY2VsZXNzLTE"
+    },
+    {
+      "url": "s3://zksync-mainnet-1",
+      "template_dir": "evm",
+      "id": "czM6Ly96a3N5bmMtbWFpbm5ldC0x"
     }
   ]
 }

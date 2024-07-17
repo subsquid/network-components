@@ -61,6 +61,8 @@ pub struct Config {
     pub recommended_worker_versions: VersionReq,
     #[serde(default)]
     pub jail_unreachable: bool,
+    #[serde(default = "num_cpus::get")]
+    pub ping_processing_threads: usize,
 }
 
 impl Config {
@@ -87,13 +89,6 @@ pub struct Cli {
         default_value = "0.0.0.0:8000"
     )]
     pub http_listen_addr: SocketAddr,
-
-    #[arg(
-        long,
-        env,
-        help = "Path to save metrics. If not present, stdout is used."
-    )]
-    pub metrics_path: Option<PathBuf>,
 
     #[arg(
         short,

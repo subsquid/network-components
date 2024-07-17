@@ -53,17 +53,13 @@ async fn main() -> anyhow::Result<()> {
     let incoming_units = storage.get_incoming_units().await;
     let scheduler = storage.load_scheduler().await?;
 
-    Server::new(
-        incoming_messages,
-        incoming_units,
-        transport_handle,
-        scheduler,
-    )
-    .run(
-        contract_client,
-        storage,
-        args.http_listen_addr,
-        metrics_registry,
-    )
-    .await
+    Server::new(incoming_units, transport_handle, scheduler)
+        .run(
+            contract_client,
+            storage,
+            args.http_listen_addr,
+            metrics_registry,
+            incoming_messages,
+        )
+        .await
 }

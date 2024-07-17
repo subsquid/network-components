@@ -13,9 +13,9 @@ use tokio::sync::mpsc::Receiver;
 use tokio::time::Instant;
 
 use subsquid_messages::signatures::msg_hash;
-use subsquid_messages::{Ping, Pong, RangeSet};
+use subsquid_messages::{Pong, RangeSet};
 use subsquid_network_transport::util::{CancellationToken, TaskManager};
-use subsquid_network_transport::{PeerId, SchedulerEvent, SchedulerTransportHandle};
+use subsquid_network_transport::{SchedulerEvent, SchedulerTransportHandle};
 
 use crate::cli::Config;
 use crate::data_chunk::{chunks_to_worker_state, DataChunk};
@@ -28,23 +28,20 @@ use crate::{metrics_server, prometheus_metrics};
 const WORKER_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const CHUNKS_SUMMARY_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
-pub struct Server<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> {
-    incoming_events: S,
+pub struct Server {
     incoming_units: Receiver<SchedulingUnit>,
     transport_handle: SchedulerTransportHandle,
     scheduler: Scheduler,
     task_manager: TaskManager,
 }
 
-impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
+impl Server {
     pub fn new(
-        incoming_events: S,
         incoming_units: Receiver<SchedulingUnit>,
         transport_handle: SchedulerTransportHandle,
         scheduler: Scheduler,
     ) -> Self {
         Self {
-            incoming_events,
             incoming_units,
             transport_handle,
             scheduler,
@@ -52,12 +49,13 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         }
     }
 
-    pub async fn run(
+    pub async fn run<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static>(
         mut self,
         contract_client: Box<dyn contract_client::Client>,
         storage_client: S3Storage,
         metrics_listen_addr: SocketAddr,
         metrics_registry: Registry,
+        incoming_events: S,
     ) -> anyhow::Result<()> {
         log::info!("Starting scheduler server");
 
@@ -74,12 +72,12 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         self.spawn_jail_unreachable_workers_task(storage_client);
         self.spawn_regenerate_signatures_task();
         self.spawn_chunks_summary_task();
+        self.spawn_event_processing_task(incoming_events);
 
         let mut sigint = signal(SignalKind::interrupt())?;
         let mut sigterm = signal(SignalKind::terminate())?;
         loop {
             tokio::select! {
-                Some(ev) = self.incoming_events.next() => self.on_incoming_event(ev),
                 Some(unit) = self.incoming_units.recv() => self.on_new_unit(unit),
                 _ = sigint.recv() => break,
                 _ = sigterm.recv() => break,
@@ -92,32 +90,49 @@ impl<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static> Server<S> {
         Ok(())
     }
 
-    fn on_incoming_event(&self, ev: SchedulerEvent) {
-        match ev {
-            SchedulerEvent::Ping { peer_id, ping } => self.ping(peer_id, ping),
-            SchedulerEvent::PeerProbed { peer_id, reachable } => {
-                self.scheduler.worker_dialed(peer_id, reachable)
-            }
-        }
-    }
-
-    fn ping(&self, peer_id: PeerId, ping: Ping) {
-        log::debug!("Got ping from {peer_id}");
-        let start = Instant::now();
-        let ping_hash = msg_hash(&ping);
-        let status = self.scheduler.ping(peer_id, ping.clone());
-        let pong = Pong {
-            ping_hash,
-            status: Some(status),
-        };
-        self.transport_handle
-            .send_pong(peer_id, pong)
-            .unwrap_or_else(|_| log::error!("Error sending pong: queue full"));
-        prometheus_metrics::exec_time("ping", start.elapsed());
-    }
-
     fn on_new_unit(&self, unit: SchedulingUnit) {
         self.scheduler.new_unit(unit)
+    }
+
+    fn spawn_event_processing_task<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static>(
+        &mut self,
+        incoming_events: S,
+    ) {
+        log::info!("Starting event processing task");
+        let scheduler = self.scheduler.clone();
+        let transport_handle = self.transport_handle.clone();
+        let num_threads = Config::get().ping_processing_threads;
+
+        let task = move |cancel_token: CancellationToken| {
+            incoming_events
+                .take_until(cancel_token.cancelled_owned())
+                .for_each_concurrent(num_threads, move |ev| {
+                    let scheduler = scheduler.clone();
+                    let transport_handle = transport_handle.clone();
+                    async move {
+                        let (peer_id, ping) = match ev {
+                            SchedulerEvent::Ping { peer_id, ping } => (peer_id, ping),
+                            SchedulerEvent::PeerProbed { peer_id, reachable } => {
+                                return scheduler.worker_dialed(peer_id, reachable)
+                            }
+                        };
+
+                        log::debug!("Got ping from {peer_id}");
+                        let start = Instant::now();
+                        let ping_hash = msg_hash(&ping);
+                        let status = scheduler.ping(peer_id, ping.clone());
+                        let pong = Pong {
+                            ping_hash,
+                            status: Some(status),
+                        };
+                        transport_handle
+                            .send_pong(peer_id, pong)
+                            .unwrap_or_else(|_| log::error!("Error sending pong: queue full"));
+                        prometheus_metrics::exec_time("ping", start.elapsed());
+                    }
+                })
+        };
+        self.task_manager.spawn(task);
     }
 
     async fn spawn_scheduling_task(

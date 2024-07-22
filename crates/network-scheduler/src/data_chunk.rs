@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 use itertools::Itertools;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use sha3::{Digest, Sha3_256};
@@ -32,6 +33,8 @@ pub struct DataChunk {
     pub chunk_str: String,
     #[serde(default)]
     pub filenames: Vec<String>,
+    #[serde(skip)]
+    id: OnceCell<ChunkId>,
 }
 
 impl Display for DataChunk {
@@ -60,15 +63,18 @@ impl DataChunk {
             block_range: chunk.into(),
             size_bytes,
             filenames,
+            id: Default::default(),
         })
     }
 
-    pub fn id(&self) -> ChunkId {
-        let mut result = [0u8; 32];
-        let mut hasher = Sha3_256::default();
-        hasher.update(self.to_string().as_bytes());
-        Digest::finalize_into(hasher, result.as_mut_slice().into());
-        ChunkId(result)
+    pub fn id(&self) -> &ChunkId {
+        self.id.get_or_init(|| {
+            let mut result = [0u8; 32];
+            let mut hasher = Sha3_256::default();
+            hasher.update(self.to_string().as_bytes());
+            Digest::finalize_into(hasher, result.as_mut_slice().into());
+            ChunkId(result)
+        })
     }
 }
 

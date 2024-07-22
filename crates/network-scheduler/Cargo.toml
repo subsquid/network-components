@@ -1,6 +1,6 @@
 [package]
 name = "network-scheduler"
-version = "1.0.14"
+version = "1.0.15"
 edition = "2021"
 
 [dependencies]
@@ -23,6 +23,7 @@ lazy_static = "1.4.0"
 log = "0.4"
 nonempty = { version = "0.10", features = ["serde", "serialize"] }
 num_cpus = "1"
+once_cell = "1"
 parking_lot = { version = "0.12", features = ["serde"] }
 prometheus-client = "0.22"
 rand = "0.8"

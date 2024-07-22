@@ -4486,7 +4486,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "1.0.14"
+version = "1.0.15"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4508,6 +4508,7 @@ dependencies = [
  "log",
  "nonempty",
  "num_cpus",
+ "once_cell",
  "parking_lot",
  "prometheus-client",
  "rand 0.8.5",

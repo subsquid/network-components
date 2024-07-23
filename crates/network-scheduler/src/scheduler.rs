@@ -165,7 +165,7 @@ impl Scheduler {
         let unit_id = *unit.id();
         let unit_size = unit.size_bytes();
         let unit_str = unit.to_string();
-        match self.known_units.insert(unit_id, unit) {
+        let old_size = match self.known_units.insert(unit_id, unit) {
             None => {
                 // New unit
                 log::debug!("New scheduling unit: {unit_str}");
@@ -173,30 +173,32 @@ impl Scheduler {
                     unit_id,
                     Vec::with_capacity(Config::get().replication_factor),
                 );
+                return;
             }
-            Some(old_unit) => {
-                // New chunks added to an existing unit
-                let old_size = old_unit.size_bytes();
-                if old_size == unit_size {
-                    return;
-                }
-                log::debug!(
-                    "Scheduling unit {unit_str} resized from {old_size} bytes to {unit_size} bytes"
-                );
-                self.units_assignments
-                    .get_mut(&unit_id)
-                    .expect("No assignment entry for unit")
-                    .retain(|worker_id| {
-                        let mut worker = self
-                            .worker_states
-                            .get_mut(worker_id)
-                            .expect("Unknown worker");
-                        let retained = worker.try_expand_unit(&unit_id, old_size, unit_size);
-                        worker.reset_download_progress(&self.known_units);
-                        retained
-                    });
-            }
-        }
+            Some(old_unit) => old_unit.size_bytes(),
+        };
+        log::debug!(
+            "Scheduling unit {unit_str} resized from {old_size} bytes to {unit_size} bytes"
+        );
+        // Clone to avoid locking unit_assignments and worker_states simultaneously
+        let mut holders = self
+            .units_assignments
+            .get(&unit_id)
+            .expect("No assignment entry for unit")
+            .clone();
+        holders.retain(|worker_id| {
+            let mut worker = self
+                .worker_states
+                .get_mut(worker_id)
+                .expect("Unknown worker");
+            let retained = worker.try_expand_unit(&unit_id, old_size, unit_size);
+            worker.reset_download_progress(&self.known_units);
+            retained
+        });
+        self.units_assignments
+            .get_mut(&unit_id)
+            .expect("No assignment entry for unit")
+            .retain(|worker_id| holders.contains(worker_id));
         prometheus_metrics::exec_time("new_unit", start.elapsed());
     }
 

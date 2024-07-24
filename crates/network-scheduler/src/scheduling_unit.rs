@@ -28,7 +28,7 @@ impl SchedulingUnit {
         self.chunks.iter().map(|x| x.size_bytes).sum()
     }
 
-    pub fn id(&self) -> UnitId {
+    pub fn id(&self) -> &UnitId {
         // ID of the unit is just ID of the first chunk. This way, when an incomplete unit is filled
         // later, it will still have the same ID.
         self.chunks.first().id()

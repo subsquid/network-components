@@ -66,11 +66,11 @@ impl Scheduler {
             .iter()
             .map(|bucket| format!("s3://{bucket}"))
             .collect();
-        let deprecated_unit_ids: Vec<UnitId> = self
+        let deprecated_unit_ids = self
             .known_units
             .iter()
             .filter_map(|unit| (!dataset_urls.contains(unit.dataset_url())).then_some(*unit.key()))
-            .collect();
+            .collect_vec();
         for unit_id in deprecated_unit_ids.iter() {
             let (_, unit) = self.known_units.remove(unit_id).expect("unknown unit");
             log::info!("Removing deprecated scheduling unit {unit}");
@@ -162,10 +162,10 @@ impl Scheduler {
 
     pub fn new_unit(&self, unit: SchedulingUnit) {
         let start = Instant::now();
-        let unit_id = unit.id();
+        let unit_id = *unit.id();
         let unit_size = unit.size_bytes();
         let unit_str = unit.to_string();
-        match self.known_units.insert(unit_id, unit) {
+        let old_size = match self.known_units.insert(unit_id, unit) {
             None => {
                 // New unit
                 log::debug!("New scheduling unit: {unit_str}");
@@ -173,30 +173,32 @@ impl Scheduler {
                     unit_id,
                     Vec::with_capacity(Config::get().replication_factor),
                 );
+                return;
             }
-            Some(old_unit) => {
-                // New chunks added to an existing unit
-                let old_size = old_unit.size_bytes();
-                if old_size == unit_size {
-                    return;
-                }
-                log::debug!(
-                    "Scheduling unit {unit_str} resized from {old_size} bytes to {unit_size} bytes"
-                );
-                self.units_assignments
-                    .get_mut(&unit_id)
-                    .expect("No assignment entry for unit")
-                    .retain(|worker_id| {
-                        let mut worker = self
-                            .worker_states
-                            .get_mut(worker_id)
-                            .expect("Unknown worker");
-                        let retained = worker.try_expand_unit(&unit_id, old_size, unit_size);
-                        worker.reset_download_progress(&self.known_units);
-                        retained
-                    });
-            }
-        }
+            Some(old_unit) => old_unit.size_bytes(),
+        };
+        log::debug!(
+            "Scheduling unit {unit_str} resized from {old_size} bytes to {unit_size} bytes"
+        );
+        // Clone to avoid locking unit_assignments and worker_states simultaneously
+        let mut holders = self
+            .units_assignments
+            .get(&unit_id)
+            .expect("No assignment entry for unit")
+            .clone();
+        holders.retain(|worker_id| {
+            let mut worker = self
+                .worker_states
+                .get_mut(worker_id)
+                .expect("Unknown worker");
+            let retained = worker.try_expand_unit(&unit_id, old_size, unit_size);
+            worker.reset_download_progress(&self.known_units);
+            retained
+        });
+        self.units_assignments
+            .get_mut(&unit_id)
+            .expect("No assignment entry for unit")
+            .retain(|worker_id| holders.contains(worker_id));
         prometheus_metrics::exec_time("new_unit", start.elapsed());
     }
 
@@ -319,31 +321,33 @@ impl Scheduler {
         reason: JailReason,
     ) -> bool {
         let start = Instant::now();
-        let mut num_jailed_workers: usize = 0;
-        let mut num_unassigned_units = 0;
 
-        self.worker_states
+        let jailed = self
+            .worker_states
             .iter_mut()
-            .filter(|w| !w.jailed)
-            .for_each(|mut w| {
-                if !w.ever_been_active() {
-                    return; // Don't jail workers that haven't been started yet
+            .filter(|w| !w.jailed) // Don't jail workers that are already jailed
+            .filter(|w| w.ever_been_active()) // Don't jail workers that haven't been started yet
+            .filter_map(|mut w| {
+                if criterion(&mut w) {
+                    let units = w.jail(reason);
+                    Some((w.peer_id, units))
+                } else {
+                    None
                 }
-                if !criterion(&mut w) {
-                    return;
-                }
+            })
+            .collect_vec();
 
-                let units = w.jail(reason);
-                num_jailed_workers += 1;
-                num_unassigned_units += units.len();
-                for unit_id in units {
-                    self.units_assignments
-                        .get_mut(&unit_id)
-                        .expect("Unit assignment missing")
-                        .retain(|id| *id != w.peer_id)
-                }
-            });
+        for (worker_id, units) in jailed.iter() {
+            for unit_id in units {
+                self.units_assignments
+                    .get_mut(unit_id)
+                    .expect("unknown unit")
+                    .retain(|id| id != worker_id)
+            }
+        }
 
+        let num_jailed_workers = jailed.len();
+        let num_unassigned_units: usize = jailed.iter().map(|(_, u)| u.len()).sum();
         log::info!("Jailed {num_jailed_workers} workers. Unassigned {num_unassigned_units} units");
         if num_unassigned_units > 0 {
             self.assign_units();
@@ -361,6 +365,7 @@ impl Scheduler {
             .known_units
             .iter()
             .filter(|u| self.num_replicas(u.key()) > 0)
+            .map(|u| u.clone())
             .into_group_map_by(|u| u.dataset_url().to_owned());
 
         for (dataset_url, mut dataset_units) in grouped_units {
@@ -370,41 +375,50 @@ impl Scheduler {
             let num_units = dataset_units.len();
             let num_mixed = ((num_units as f64) * Config::get().mixed_units_ratio) as usize;
             let max_weight = Config::get().mixing_recent_unit_weight;
-            let weights: Vec<f64> = lin_space(1.0..=max_weight, num_units).collect();
+            let weights = lin_space(1.0..=max_weight, num_units).collect_vec();
             let mixed_units =
                 random_choice().random_choice_f64(&dataset_units, &weights, num_mixed);
             log::info!("Mixing {num_mixed} out of {num_units} units for dataset {dataset_url}");
 
             // For each of the randomly selected units, remove one random replica
             for unit in mixed_units {
-                let mut holder_ids = self
-                    .units_assignments
-                    .get_mut(unit.key())
-                    .expect("no empty assignments");
-                let random_idx = thread_rng().gen_range(0..holder_ids.len());
-                let holder_id = holder_ids.remove(random_idx);
-                self.worker_states
-                    .get_mut(&holder_id)
-                    .expect("Unknown worker")
-                    .remove_unit(unit.key(), unit.size_bytes());
+                self.remove_random_replica(unit.id())
             }
         }
         prometheus_metrics::exec_time("mix_units", start.elapsed());
     }
 
+    fn remove_random_replica(&self, unit_id: &UnitId) {
+        let holder_id = {
+            let mut holder_ids = self
+                .units_assignments
+                .get_mut(unit_id)
+                .expect("cannot remove replica: no assignees");
+            let random_idx = thread_rng().gen_range(0..holder_ids.len());
+            holder_ids.remove(random_idx)
+        };
+        let unit_size = self
+            .known_units
+            .get(unit_id)
+            .expect("Unknown unit")
+            .size_bytes();
+        self.worker_states
+            .get_mut(&holder_id)
+            .expect("Unknown worker")
+            .remove_unit(unit_id, unit_size);
+    }
+
     fn clear_redundant_replicas(&self, rep_factor: usize) {
-        for mut unit_holders in self.units_assignments.iter_mut() {
-            let unit = self
-                .known_units
-                .get(unit_holders.key())
-                .expect("Unknown unit");
-            while unit_holders.len() > rep_factor {
-                let random_idx = thread_rng().gen_range(0..unit_holders.len());
-                let holder_id = unit_holders.remove(random_idx);
-                self.worker_states
-                    .get_mut(&holder_id)
-                    .expect("Unknown worker")
-                    .remove_unit(unit_holders.key(), unit.size_bytes());
+        log::info!("Clearing redundant replicas");
+        let units_to_clear = self
+            .units_assignments
+            .iter()
+            .filter_map(|u| (u.len() > rep_factor).then_some((*u.key(), u.len() - rep_factor)))
+            .collect_vec();
+
+        for (unit_id, num_redundant) in units_to_clear {
+            for _ in 0..num_redundant {
+                self.remove_random_replica(&unit_id);
             }
         }
     }
@@ -414,11 +428,11 @@ impl Scheduler {
         let start = Instant::now();
 
         // Only active and non-jailed workers are eligible for assignment
-        let mut workers: Vec<_> = self
+        let mut workers = self
             .worker_states
             .iter()
             .filter(|w| w.is_active() && !w.jailed)
-            .collect();
+            .collect_vec();
 
         // Randomly shuffle workers, then use a heap based on remaining capacity to make
         // the data distribution as uniform as possible

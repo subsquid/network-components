@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 use itertools::Itertools;
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use sha3::{Digest, Sha3_256};
@@ -32,6 +33,8 @@ pub struct DataChunk {
     pub chunk_str: String,
     #[serde(default)]
     pub filenames: Vec<String>,
+    #[serde(skip)]
+    id: OnceCell<ChunkId>,
 }
 
 impl Display for DataChunk {
@@ -60,15 +63,18 @@ impl DataChunk {
             block_range: chunk.into(),
             size_bytes,
             filenames,
+            id: Default::default(),
         })
     }
 
-    pub fn id(&self) -> ChunkId {
-        let mut result = [0u8; 32];
-        let mut hasher = Sha3_256::default();
-        hasher.update(self.to_string().as_bytes());
-        Digest::finalize_into(hasher, result.as_mut_slice().into());
-        ChunkId(result)
+    pub fn id(&self) -> &ChunkId {
+        self.id.get_or_init(|| {
+            let mut result = [0u8; 32];
+            let mut hasher = Sha3_256::default();
+            hasher.update(self.to_string().as_bytes());
+            Digest::finalize_into(hasher, result.as_mut_slice().into());
+            ChunkId(result)
+        })
     }
 }
 
@@ -134,10 +140,11 @@ mod tests {
             size_bytes: 0,
             chunk_str: "/00000/00001-01000-fa1f6773".to_string(),
             filenames: vec![],
+            id: Default::default(),
         };
         assert_eq!(chunk.to_string(), "s3://squidnet/0-1000");
         assert_eq!(
-            chunk.id(),
+            *chunk.id(),
             ChunkId([
                 0xcd, 0x62, 0xa3, 0xf1, 0xf2, 0x48, 0x5b, 0x3d, 0x88, 0x0d, 0x77, 0x03, 0x75, 0xe4,
                 0x52, 0x3e, 0x63, 0x8f, 0x08, 0xdf, 0xf0, 0x98, 0x89, 0x9c, 0xbf, 0xbc, 0x02, 0xf3,
@@ -162,6 +169,7 @@ mod tests {
                     "transactions.parquet".to_string(),
                     "logs.parquet".to_string(),
                 ],
+                id: Default::default(),
             },
             DataChunk {
                 dataset_id: "s3://squidnet".to_string(),
@@ -170,6 +178,7 @@ mod tests {
                 size_bytes: 0,
                 chunk_str: "/00000/00500-01500-82315a24".to_string(),
                 filenames: vec!["blocks.parquet".to_string(), "traces.parquet".to_string()],
+                id: Default::default(),
             },
             DataChunk {
                 dataset_id: "s3://pepenet".to_string(),
@@ -178,6 +187,7 @@ mod tests {
                 size_bytes: 0,
                 chunk_str: "00000/01234-05678-b4357d89".to_string(),
                 filenames: vec!["blocks.parquet".to_string(), "transactions.parquet".to_string()],
+                id: Default::default(),
             },
         ];
 

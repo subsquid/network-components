@@ -332,13 +332,13 @@ mod tests {
         // Clean up database
         storage
             .0
-            .query(&format!("TRUNCATE TABLE {}", &LOGS_TABLE))
+            .query(&format!("TRUNCATE TABLE {}", &*LOGS_TABLE))
             .execute()
             .await
             .unwrap();
         storage
             .0
-            .query(&format!("TRUNCATE TABLE {}", &PINGS_TABLE))
+            .query(&format!("TRUNCATE TABLE {}", &*PINGS_TABLE))
             .execute()
             .await
             .unwrap();
@@ -405,7 +405,7 @@ mod tests {
         // Verify the signatures
         let mut cursor = storage
             .0
-            .query(&format!("SELECT * FROM {}", &LOGS_TABLE))
+            .query(&format!("SELECT * FROM {}", &*LOGS_TABLE))
             .fetch::<QueryExecutedRow>()
             .unwrap();
         let row = cursor.next().await.unwrap().unwrap();
@@ -429,7 +429,7 @@ mod tests {
 
         let mut cursor = storage
             .0
-            .query(&format!("SELECT * FROM {}", &PINGS_TABLE))
+            .query(&format!("SELECT * FROM {}", &*PINGS_TABLE))
             .fetch::<PingRow>()
             .unwrap();
         let row = cursor.next().await.unwrap().unwrap();

@@ -109,7 +109,7 @@ impl DatasetStorage {
         let last_key = objects.last().key();
         let chunks = objects
             .into_iter()
-            .group_by(|obj| obj.prefix.clone())
+            .chunk_by(|obj| obj.prefix.clone())
             .into_iter()
             .map(|(_, objects)| self.objects_to_chunk(objects))
             .collect::<anyhow::Result<Vec<DataChunk>>>()?;

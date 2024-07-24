@@ -8,19 +8,16 @@ import time
 
 from collections import Counter
 from concurrent import futures
-from packaging.version import InvalidVersion, Version
 from pathlib import Path
-from pydantic import BaseModel, AnyUrl, TypeAdapter, ValidationError, ConfigDict, UrlConstraints
-from typing import List, Dict, Annotated, Tuple, Any, Optional
+from pydantic import BaseModel, AnyUrl, TypeAdapter, ValidationError, UrlConstraints
+from typing import List, Dict, Annotated, Tuple, Any, Optional, NewType
 
 NUM_THREADS = int(os.environ.get('NUM_THREADS', 10))
 QUERY_TIMEOUT_SEC = int(os.environ.get('QUERY_TIMEOUT_SEC', 60))
 MIN_INTERVAL_SEC = float(os.environ.get('MIN_INTERVAL_SEC', 60))
 SKIP_GREYLISTED = os.environ.get('SKIP_GREYLISTED', '').lower() in ('1', 't', 'true', 'y', 'yes')
-MIN_WORKER_VERSION = Version(os.environ.get('MIN_WORKER_VERSION', '1.0.0-rc3'))
 
-GATEWAY_URL = os.environ.get('GATEWAY_URL', "http://localhost:8000")
-SCHEDULER_URL = os.environ.get('WORKERS_URL', "https://scheduler.testnet.subsquid.io")
+GATEWAY_URL = os.environ.get('GATEWAY_URL', "https://public-gateway.testnet.subsquid.io")
 
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
 
@@ -33,18 +30,20 @@ logging.basicConfig(
 )
 
 S3Url = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["s3"])]
+DatasetId = NewType('DatasetId', str)
+WorkerId = NewType('WorkerId', str)
 
 
 class Dataset(BaseModel):
-    id: str
+    id: DatasetId
     url: S3Url
     template_dir: str
 
 
 class Config(BaseModel):
     datasets: List[Dataset]
-    worker_whitelist: Optional[List[str]] = None
-    worker_blacklist: Optional[List[str]] = None
+    worker_whitelist: Optional[List[WorkerId]] = None
+    worker_blacklist: Optional[List[WorkerId]] = None
 
 
 class BlockRange(BaseModel):
@@ -56,21 +55,13 @@ class DatasetRanges(BaseModel):
     ranges: List[BlockRange]
 
 
-class Worker(BaseModel):
-    peer_id: str
-    version: str
-    stored_ranges: Dict[S3Url, DatasetRanges]
-
-    model_config = ConfigDict(extra='allow')
-
-    def get_version(self) -> Version:
-        try:
-            return Version(self.version)
-        except InvalidVersion:
-            return Version("0.0.0")
+class DatasetState(BaseModel):
+    worker_ranges: Dict[WorkerId, DatasetRanges]
 
 
-worker_list = TypeAdapter(List[Worker])
+NetworkState = TypeAdapter(Dict[DatasetId, DatasetState])
+WorkerState = Dict[DatasetId, List[BlockRange]]
+WorkersDict = Dict[WorkerId, WorkerState]
 
 
 class TrafficGenerator:
@@ -103,7 +94,7 @@ class TrafficGenerator:
         logging.info(f"Querying {len(workers)} workers")
         results = Counter()
         try:
-            tasks = self._executor.map(self._query_worker, workers)
+            tasks = self._executor.map(self._query_worker, workers.keys(), workers.values())
             for worker, res in zip(workers, tasks):
                 if res == 504:
                     self._worker_timeouts[worker.peer_id] += 1
@@ -116,36 +107,38 @@ class TrafficGenerator:
         for w, c in self._worker_timeouts.items():
             logging.debug(f"{w}: {c}")
 
-    def _get_workers(self) -> List[Worker]:
+    def _get_workers(self) -> WorkersDict:
         try:
             logging.info("Getting active workers")
-            response = requests.get(f'{SCHEDULER_URL}/workers/pings')
+            response = requests.get(f'{GATEWAY_URL}/network/state')
             response.raise_for_status()
-            workers = worker_list.validate_json(response.content)
+            network_state = NetworkState.validate_json(response.content)
+            workers = {}
+            for dataset_id, dataset_state in network_state.items():
+                for worker_id, ranges in dataset_state.worker_ranges.items():
+                    workers.setdefault(worker_id, {})[dataset_id] = ranges.ranges
             return self._filter_workers(workers)
         except (requests.HTTPError, ValidationError) as e:
             logging.error(f"Error getting workers: {e}")
-            return []
+            return {}
 
-    def _filter_workers(self, workers: List[Worker]) -> List[Worker]:
-        workers = filter(lambda w: w.get_version() >= MIN_WORKER_VERSION, workers)
+    def _filter_workers(self, workers: WorkersDict) -> WorkersDict:
         if SKIP_GREYLISTED:
             response = requests.get(f'{GATEWAY_URL}/workers/greylisted')
             response.raise_for_status()
             greylisted = set(response.json())
             logging.info(f"Omitting {len(greylisted)} grey-listed workers")
-            workers = filter(lambda w: w.peer_id not in greylisted, workers)
+            workers = {w: s for w, s in workers.items() if w not in greylisted}
         if self._config.worker_whitelist is not None:
-            workers = filter(lambda w: w.peer_id in self._config.worker_whitelist, workers)
+            workers = {w: s for w, s in workers.items() if w in self._config.worker_whitelist}
         elif self._config.worker_blacklist is not None:
-            workers = filter(lambda w: w.peer_id not in self._config.worker_blacklist, workers)
-        return list(workers)
+            workers = {w: s for w, s in workers.items() if w not in self._config.worker_blacklist}
+        return workers
 
-    def _query_worker(self, worker: Worker) -> Optional[int]:
-        worker_id = worker.peer_id
+    def _query_worker(self, worker_id: WorkerId, state: WorkerState) -> Optional[int]:
         stored_datasets = [
             (dataset.template_dir, dataset.id, dataset.url) for dataset in self._config.datasets
-            if dataset.url in worker.stored_ranges
+            if dataset.id in state
         ]
         if not stored_datasets:
             logging.warning(f"Worker {worker_id} has no datasets to query")
@@ -154,7 +147,7 @@ class TrafficGenerator:
         template, dataset_id, dataset_url = random.choice(stored_datasets)
         query_url = f'{GATEWAY_URL}/query/{dataset_id}/{worker_id}?timeout={QUERY_TIMEOUT_SEC}s'
         query = random.choice(self._query_templates[template])
-        query['fromBlock'], query['toBlock'] = random_range(worker.stored_ranges[dataset_url])
+        query['fromBlock'], query['toBlock'] = random_range(state[dataset_id])
 
         logging.debug(
             f"Sending query worker_id={worker_id} query_url={query_url} "
@@ -170,8 +163,8 @@ class TrafficGenerator:
         return response.status_code
 
 
-def random_range(ranges: DatasetRanges) -> Tuple[int, int]:
-    r = random.choice(ranges.ranges)
+def random_range(ranges: List[BlockRange]) -> Tuple[int, int]:
+    r = random.choice(ranges)
     from_block = random.randint(r.begin, r.end)
     to_block = random.randint(from_block, r.end)
     return from_block, to_block

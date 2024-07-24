@@ -69,7 +69,7 @@ class TrafficGenerator:
         self._config = config
         self._executor = futures.ThreadPoolExecutor(max_workers=NUM_THREADS)
         self._query_templates: Dict[str, List[Any]] = read_templates()
-        self._worker_timeouts = Counter()
+        self._worker_timeouts: Counter[WorkerId] = Counter()
 
     def run(self):
         logging.info("Starting traffic generation")
@@ -95,9 +95,9 @@ class TrafficGenerator:
         results = Counter()
         try:
             tasks = self._executor.map(self._query_worker, workers.keys(), workers.values())
-            for worker, res in zip(workers, tasks):
+            for worker_id, res in zip(workers.keys(), tasks):
                 if res == 504:
-                    self._worker_timeouts[worker.peer_id] += 1
+                    self._worker_timeouts[worker_id] += 1
                 results[res] += 1
         except futures.TimeoutError:
             logging.error("Querying workers timed out")
@@ -113,10 +113,11 @@ class TrafficGenerator:
             response = requests.get(f'{GATEWAY_URL}/network/state')
             response.raise_for_status()
             network_state = NetworkState.validate_json(response.content)
-            workers = {}
+            workers: WorkersDict = {}
             for dataset_id, dataset_state in network_state.items():
                 for worker_id, ranges in dataset_state.worker_ranges.items():
-                    workers.setdefault(worker_id, {})[dataset_id] = ranges.ranges
+                    if ranges.ranges:
+                        workers.setdefault(worker_id, {})[dataset_id] = ranges.ranges
             return self._filter_workers(workers)
         except (requests.HTTPError, ValidationError) as e:
             logging.error(f"Error getting workers: {e}")

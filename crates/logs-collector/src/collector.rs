@@ -2,42 +2,33 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use subsquid_messages::{Ping, QueryExecuted};
+use subsquid_messages::QueryExecuted;
 use subsquid_network_transport::PeerId;
-use tokio::time::Instant;
 
-use crate::storage::{LogsStorage, PingRow, QueryExecutedRow};
-use crate::utils::timestamp_now_ms;
+use collector_utils::{timestamp_now_ms, QueryExecutedRow, Storage};
 
 type SeqNo = u64;
 
-pub struct LogsCollector<T: LogsStorage + Sync> {
+pub struct LogsCollector<T: Storage + Sync> {
     storage: T,
     contract_client: Arc<dyn contract_client::Client>,
     epoch_seal_timeout: Duration,
-    min_ping_interval: Duration,
     last_stored: HashMap<String, (SeqNo, u64)>, // Last sequence number & timestamp saved in storage for each worker
     buffered_logs: HashMap<String, BTreeMap<SeqNo, QueryExecutedRow>>, // Local buffer, persisted periodically
-    buffered_pings: Vec<PingRow>,
-    last_ping: HashMap<PeerId, Instant>, // To avoid a malicious worker spamming with logs
 }
 
-impl<T: LogsStorage + Sync> LogsCollector<T> {
+impl<T: Storage + Sync> LogsCollector<T> {
     pub fn new(
         storage: T,
         contract_client: Arc<dyn contract_client::Client>,
         epoch_seal_timeout: Duration,
-        min_ping_interval: Duration,
     ) -> Self {
         Self {
             storage,
             contract_client,
             epoch_seal_timeout,
-            min_ping_interval,
             last_stored: HashMap::new(),
             buffered_logs: HashMap::new(),
-            buffered_pings: Vec::new(),
-            last_ping: HashMap::new(),
         }
     }
 
@@ -75,34 +66,12 @@ impl<T: LogsStorage + Sync> LogsCollector<T> {
         }
     }
 
-    pub fn collect_ping(&mut self, worker_id: PeerId, ping: Ping) {
-        log::debug!("Collecting ping from {worker_id}");
-        log::trace!("Ping collected: {ping:?}");
-        if self
-            .last_ping
-            .get(&worker_id)
-            .is_some_and(|t| t.elapsed() < self.min_ping_interval)
-        {
-            log::warn!("Worker {worker_id} sending pings too often");
-            return;
-        }
-        let ping_row = match ping.try_into() {
-            Ok(row) => row,
-            Err(e) => return log::error!("Invalid ping from {worker_id}: {e}"),
-        };
-        self.buffered_pings.push(ping_row);
-        self.last_ping.insert(worker_id, Instant::now());
-    }
-
     pub async fn storage_sync(&mut self) -> anyhow::Result<HashMap<String, SeqNo>> {
         log::info!("Syncing state with storage");
         let logs_to_store = self.get_logs_to_store().await?;
         self.storage.store_logs(logs_to_store).await?;
         self.last_stored = self.storage.get_last_stored().await?;
-        self.storage
-            .store_pings(self.buffered_pings.iter().cloned())
-            .await?;
-        self.clear_buffers();
+        self.clear_buffer();
         let sequence_numbers = self
             .last_stored
             .iter()
@@ -148,7 +117,7 @@ impl<T: LogsStorage + Sync> LogsCollector<T> {
             }))
     }
 
-    fn clear_buffers(&mut self) {
+    fn clear_buffer(&mut self) {
         log::info!("Clearing buffered logs");
         for (worker_id, (seq_no, _)) in self.last_stored.iter() {
             let buffered = match self.buffered_logs.get_mut(worker_id) {
@@ -158,8 +127,5 @@ impl<T: LogsStorage + Sync> LogsCollector<T> {
             log::debug!("Removing logs up to {seq_no} for worker {worker_id}");
             *buffered = buffered.split_off(&(seq_no + 1)); // +1 because split_off is inclusive
         }
-        log::info!("Clearing buffered pings");
-        self.buffered_pings.clear();
-        self.buffered_pings.shrink_to_fit();
     }
 }

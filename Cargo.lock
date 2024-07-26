@@ -1658,6 +1658,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "collector-utils"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "clickhouse",
+ "contract-client",
+ "lazy_static",
+ "log",
+ "serde",
+ "serde_bytes",
+ "serde_repr",
+ "subsquid-messages",
+ "subsquid-network-transport",
+ "test-with",
+ "tokio",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1700,7 +1720,7 @@ checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 [[package]]
 name = "contract-client"
 version = "1.0.3"
-source = "git+https://github.com/subsquid/subsquid-network.git#225f01c7911d8b4e04834138127a57b0a7168078"
+source = "git+https://github.com/subsquid/subsquid-network.git?rev=8df33fe#8df33fea80bab5116fc93a9d463040e0dc3cf766"
 dependencies = [
  "async-trait",
  "clap",
@@ -4222,21 +4242,15 @@ name = "logs-collector"
 version = "1.0.5"
 dependencies = [
  "anyhow",
- "async-trait",
  "clap",
- "clickhouse",
+ "collector-utils",
  "contract-client",
  "env_logger",
  "futures",
- "lazy_static",
  "log",
- "serde",
- "serde_bytes",
  "serde_json",
- "serde_repr",
  "subsquid-messages",
  "subsquid-network-transport",
- "test-with",
  "tikv-jemallocator",
  "tokio",
 ]
@@ -5029,6 +5043,31 @@ dependencies = [
  "rand 0.8.5",
  "socket2 0.4.10",
  "thiserror",
+]
+
+[[package]]
+name = "pings-collector"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "clickhouse",
+ "collector-utils",
+ "contract-client",
+ "env_logger",
+ "futures",
+ "lazy_static",
+ "log",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "serde_repr",
+ "subsquid-messages",
+ "subsquid-network-transport",
+ "test-with",
+ "tikv-jemallocator",
+ "tokio",
 ]
 
 [[package]]
@@ -6629,7 +6668,7 @@ dependencies = [
 [[package]]
 name = "subsquid-messages"
 version = "1.0.1"
-source = "git+https://github.com/subsquid/subsquid-network.git#225f01c7911d8b4e04834138127a57b0a7168078"
+source = "git+https://github.com/subsquid/subsquid-network.git?rev=8df33fe#8df33fea80bab5116fc93a9d463040e0dc3cf766"
 dependencies = [
  "anyhow",
  "hex",
@@ -6643,8 +6682,8 @@ dependencies = [
 
 [[package]]
 name = "subsquid-network-transport"
-version = "1.0.5"
-source = "git+https://github.com/subsquid/subsquid-network.git#225f01c7911d8b4e04834138127a57b0a7168078"
+version = "1.0.6"
+source = "git+https://github.com/subsquid/subsquid-network.git?rev=8df33fe#8df33fea80bab5116fc93a9d463040e0dc3cf766"
 dependencies = [
  "anyhow",
  "async-trait",

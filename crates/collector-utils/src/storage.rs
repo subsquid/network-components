@@ -5,9 +5,12 @@ use clickhouse::{Client, Row};
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+
 use subsquid_messages::{query_executed, InputAndOutput, Ping, Query, QueryExecuted, SizeAndHash};
 
 use crate::cli::ClickhouseArgs;
+use crate::timestamp_now_ms;
+
 lazy_static! {
     static ref LOGS_TABLE: String =
         std::env::var("LOGS_TABLE").unwrap_or("worker_query_logs".to_string());
@@ -60,10 +63,8 @@ lazy_static! {
     );
 }
 
-use crate::utils::timestamp_now_ms;
-
 #[async_trait]
-pub trait LogsStorage {
+pub trait Storage {
     async fn store_logs<'a, T: Iterator<Item = QueryExecutedRow> + Sized + Send>(
         &self,
         query_logs: T,
@@ -252,7 +253,7 @@ impl ClickhouseStorage {
 }
 
 #[async_trait]
-impl LogsStorage for ClickhouseStorage {
+impl Storage for ClickhouseStorage {
     async fn store_logs<'a, T: Iterator<Item = QueryExecutedRow> + Sized + Send>(
         &self,
         query_logs: T,

@@ -8,7 +8,7 @@ use subsquid_network_transport::P2PTransportBuilder;
 use collector_utils::ClickhouseStorage;
 
 use crate::cli::Cli;
-use crate::collector::LogsCollector;
+use crate::collector::PingsCollector;
 use crate::server::Server;
 
 mod cli;
@@ -35,15 +35,14 @@ async fn main() -> anyhow::Result<()> {
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
     let contract_client: Arc<dyn contract_client::Client> =
         transport_builder.contract_client().into();
-    let (incoming_messages, transport_handle) =
-        transport_builder.build_logs_collector(Default::default())?;
+    let (incoming_pings, transport_handle) =
+        transport_builder.build_pings_collector(Default::default())?;
 
     let storage = ClickhouseStorage::new(args.clickhouse).await?;
-    let epoch_seal_timeout = Duration::from_secs(args.epoch_seal_timeout_sec as u64);
-    let logs_collector = LogsCollector::new(storage, contract_client.clone(), epoch_seal_timeout);
+    let pings_collector = PingsCollector::new(storage);
     let storage_sync_interval = Duration::from_secs(args.storage_sync_interval_sec as u64);
     let worker_update_interval = Duration::from_secs(args.worker_update_interval_sec as u64);
-    Server::new(incoming_messages, transport_handle, logs_collector)
+    Server::new(incoming_pings, transport_handle, pings_collector)
         .run(
             contract_client,
             storage_sync_interval,

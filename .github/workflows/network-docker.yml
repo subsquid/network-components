@@ -17,11 +17,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Load ssh key to fetch private dependencies
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.NETWORK_SSH_KEY }}
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -40,7 +35,6 @@ jobs:
           tags: subsquid/network-scheduler:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          ssh: default=${{ env.SSH_AUTH_SOCK }}
 
       - name: Get scheduler version
         run: echo "SCHEDULER_VERSION=$(docker run --rm subsquid/network-scheduler:test network-scheduler --version | cut -d ' ' -f2)" >> $GITHUB_ENV
@@ -57,7 +51,6 @@ jobs:
             subsquid/network-scheduler:${{ inputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          ssh: default=${{ env.SSH_AUTH_SOCK }}
 
       - name: Build logs collector
         uses: docker/build-push-action@v5
@@ -68,10 +61,9 @@ jobs:
           tags: subsquid/logs-collector:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          ssh: default=${{ env.SSH_AUTH_SOCK }}
 
       - name: Get logs collector version
-        run: echo "COLLECTOR_VERSION=$(docker run --rm subsquid/logs-collector:test logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
+        run: echo "LOGS_COLLECTOR_VERSION=$(docker run --rm subsquid/logs-collector:test logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
 
       - name: Build & publish logs collector
         uses: docker/build-push-action@v5
@@ -81,8 +73,33 @@ jobs:
           target: logs-collector
           push: true
           tags: |
-            subsquid/logs-collector:${{ env.COLLECTOR_VERSION }}
+            subsquid/logs-collector:${{ env.LOGS_COLLECTOR_VERSION }}
             subsquid/logs-collector:${{ inputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          ssh: default=${{ env.SSH_AUTH_SOCK }}
+
+      - name: Build pings collector
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: pings-collector
+          load: true
+          tags: subsquid/pings-collector:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Get pings collector version
+        run: echo "PINGS_COLLECTOR_VERSION=$(docker run --rm subsquid/pings-collector:test pings-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
+
+      - name: Build & publish pings collector
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
+          target: pings-collector
+          push: true
+          tags: |
+            subsquid/pings-collector:${{ env.PINGS_COLLECTOR_VERSION }}
+            subsquid/pings-collector:${{ inputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

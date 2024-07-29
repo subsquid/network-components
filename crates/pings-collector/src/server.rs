@@ -1,46 +1,44 @@
 use std::collections::HashSet;
+use std::future::Future;
+use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::{Stream, StreamExt, TryFutureExt};
+use futures::{Stream, StreamExt};
+use lazy_static::lazy_static;
+use parking_lot::RwLock;
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::RwLock;
 
+use collector_utils::{PingRow, Storage};
 use contract_client::Client as ContractClient;
-use subsquid_network_transport::util::TaskManager;
+use subsquid_network_transport::util::{CancellationToken, TaskManager};
 use subsquid_network_transport::{PeerId, Ping, PingsCollectorTransportHandle};
 
-use collector_utils::Storage;
+lazy_static! {
+    static ref BINCODE_CONFIG: bincode::config::Configuration = Default::default();
+}
 
-use crate::collector::PingsCollector;
+const PINGS_BATCH_SIZE: usize = 10000;
 
-pub struct Server<T, S>
+pub struct Server<S>
 where
-    T: Storage + Send + Sync + 'static,
     S: Stream<Item = Ping> + Send + Unpin + 'static,
 {
     incoming_pings: S,
     _transport_handle: PingsCollectorTransportHandle,
-    pings_collector: Arc<RwLock<PingsCollector<T>>>, // FIXME: make it lock-less if possible
     registered_workers: Arc<RwLock<HashSet<PeerId>>>,
     task_manager: TaskManager,
 }
 
-impl<T, S> Server<T, S>
+impl<S> Server<S>
 where
-    T: Storage + Send + Sync + 'static,
     S: Stream<Item = Ping> + Send + Unpin + 'static,
 {
-    pub fn new(
-        incoming_pings: S,
-        transport_handle: PingsCollectorTransportHandle,
-        pings_collector: PingsCollector<T>,
-    ) -> Self {
-        let pings_collector = Arc::new(RwLock::new(pings_collector));
+    pub fn new(incoming_pings: S, transport_handle: PingsCollectorTransportHandle) -> Self {
         Self {
             incoming_pings,
             _transport_handle: transport_handle,
-            pings_collector,
             registered_workers: Default::default(),
             task_manager: Default::default(),
         }
@@ -51,61 +49,40 @@ where
         contract_client: Arc<dyn ContractClient>,
         storage_sync_interval: Duration,
         worker_update_interval: Duration,
+        buffer_path: impl AsRef<Path>,
+        storage: impl Storage + Send + Sync + 'static,
     ) -> anyhow::Result<()> {
         log::info!("Starting pings collector server");
 
         // Get registered workers from chain
-        *self.registered_workers.write().await = contract_client
+        *self.registered_workers.write() = contract_client
             .active_workers()
             .await?
             .into_iter()
             .map(|w| w.peer_id)
             .collect();
 
-        self.spawn_saving_task(storage_sync_interval);
+        let (buffer_writer, buffer_reader) = yaque::channel(buffer_path)?;
+        let mut collector = Collector::new(buffer_writer, self.registered_workers.clone());
+        let writer = StorageWriter::new(buffer_reader, storage, storage_sync_interval);
+        self.task_manager.spawn(writer.start());
         self.spawn_worker_update_task(contract_client, worker_update_interval);
 
         let mut sigint = signal(SignalKind::interrupt())?;
         let mut sigterm = signal(SignalKind::terminate())?;
         loop {
             tokio::select! {
-                Some(Ping { peer_id, ping }) = self.incoming_pings.next() => self.collect_ping(peer_id, ping).await, // FIXME: blocking event loop
+                Some(ping) = self.incoming_pings.next() => {
+                    _ = collector.collect_ping(ping).map_err(|e| log::error!("Error collecting ping: {e:?}"));
+                }
                 _ = sigint.recv() => break,
                 _ = sigterm.recv() => break,
                 else => break
             }
         }
         log::info!("Server shutting down");
-        self.pings_collector.write().await.storage_sync().await?;
         self.task_manager.await_stop().await;
         Ok(())
-    }
-
-    async fn collect_ping(&self, worker_id: PeerId, ping: subsquid_messages::Ping) {
-        if !self.registered_workers.read().await.contains(&worker_id) {
-            log::warn!("Worker not registered: {worker_id:?}");
-            return;
-        }
-        self.pings_collector
-            .write()
-            .await
-            .collect_ping(worker_id, ping);
-    }
-
-    fn spawn_saving_task(&mut self, interval: Duration) {
-        log::info!("Starting logs saving task");
-        let collector = self.pings_collector.clone();
-        let task = move |_| {
-            let collector = collector.clone();
-            async move {
-                let _ = collector
-                    .write()
-                    .await
-                    .storage_sync()
-                    .map_err(|e| log::error!("Error saving pings: {e:?}"));
-            }
-        };
-        self.task_manager.spawn_periodic(task, interval);
     }
 
     fn spawn_worker_update_task(
@@ -113,6 +90,7 @@ where
         contract_client: Arc<dyn ContractClient>,
         interval: Duration,
     ) {
+        // TODO: There's exact same code in logs collector. Move out to collector-utils
         log::info!("Starting worker update task");
         let registered_workers = self.registered_workers.clone();
         let contract_client: Arc<dyn ContractClient> = contract_client;
@@ -124,12 +102,102 @@ where
                     Ok(workers) => workers,
                     Err(e) => return log::error!("Error getting registered workers: {e:?}"),
                 };
-                *registered_workers.write().await = workers
+                *registered_workers.write() = workers
                     .into_iter()
                     .map(|w| w.peer_id)
                     .collect::<HashSet<PeerId>>();
             }
         };
         self.task_manager.spawn_periodic(task, interval);
+    }
+}
+
+struct Collector {
+    buffer_writer: yaque::Sender,
+    registered_workers: Arc<RwLock<HashSet<PeerId>>>,
+}
+
+impl Collector {
+    pub fn new(
+        buffer_writer: yaque::Sender,
+        registered_workers: Arc<RwLock<HashSet<PeerId>>>,
+    ) -> Self {
+        Self {
+            buffer_writer,
+            registered_workers,
+        }
+    }
+    pub fn collect_ping(&mut self, Ping { peer_id, ping }: Ping) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.registered_workers.read().contains(&peer_id),
+            "Worker not registered: {peer_id}"
+        );
+        log::debug!("Collecting ping from {peer_id}");
+        log::trace!("Ping collected: {ping:?}");
+        let ping_row: PingRow = ping.try_into().map_err(|e: &str| anyhow::format_err!(e))?;
+        let bytes = bincode::serde::encode_to_vec(ping_row, *BINCODE_CONFIG)?;
+        self.buffer_writer
+            .try_send(bytes)
+            .map_err(|e| anyhow::format_err!(e))?;
+        Ok(())
+    }
+}
+
+struct StorageWriter<S: Storage + Send + Sync + 'static> {
+    buffer_reader: yaque::Receiver,
+    storage: S,
+    interval: Duration,
+}
+
+impl<S: Storage + Send + Sync + 'static> StorageWriter<S> {
+    pub fn new(buffer_reader: yaque::Receiver, storage: S, interval: Duration) -> Self {
+        Self {
+            buffer_reader,
+            storage,
+            interval,
+        }
+    }
+
+    pub fn start(
+        self,
+    ) -> impl FnOnce(CancellationToken) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
+        move |cancel_token| Box::pin(self.run(cancel_token))
+    }
+
+    async fn run(mut self, cancel_token: CancellationToken) {
+        log::info!("Starting logs saving task");
+        loop {
+            let timeout = Box::pin(tokio::time::sleep(self.interval));
+            let recv_guard = tokio::select! {
+                _ = cancel_token.cancelled() => break,
+                res = self.buffer_reader.recv_batch_timeout(PINGS_BATCH_SIZE, timeout) => match res {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        log::error!("Error reading buffer: {e:?}");
+                        continue
+                    }
+                }
+            };
+            log::debug!("Read {} ping rows from buffer", recv_guard.len());
+            let ping_rows =
+                recv_guard.iter().filter_map(|b| {
+                    match bincode::serde::decode_from_slice(b, *BINCODE_CONFIG) {
+                        Ok((row, _)) => Some(row),
+                        Err(e) => {
+                            log::error!("Corrupt ping row in buffer: {e:}");
+                            None
+                        }
+                    }
+                });
+            match self.storage.store_pings(ping_rows).await {
+                Ok(()) => {
+                    _ = recv_guard.commit().map_err(|e| log::error!("{e:?}"));
+                }
+                Err(e) => {
+                    log::error!("Error storing pings: {e:?}");
+                    _ = recv_guard.rollback().map_err(|e| log::error!("{e:?}"));
+                }
+            }
+        }
     }
 }

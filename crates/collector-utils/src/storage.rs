@@ -275,7 +275,7 @@ impl Storage for ClickhouseStorage {
         log::debug!("Storing pings in clickhouse");
         let mut insert = self.0.insert(&PINGS_TABLE)?;
         for row in pings {
-            println!("Storing ping {:?}", row);
+            log::trace!("Storing ping {:?}", row);
             insert.write(&row).await?;
         }
         insert.end().await?;

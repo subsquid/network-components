@@ -178,7 +178,7 @@ impl<S: Storage + Send + Sync + 'static> StorageWriter<S> {
                     }
                 }
             };
-            log::debug!("Read {} ping rows from buffer", recv_guard.len());
+            log::info!("Read {} ping rows from buffer", recv_guard.len());
             let ping_rows =
                 recv_guard.iter().filter_map(|b| {
                     match bincode::serde::decode_from_slice(b, *BINCODE_CONFIG) {
@@ -191,6 +191,7 @@ impl<S: Storage + Send + Sync + 'static> StorageWriter<S> {
                 });
             match self.storage.store_pings(ping_rows).await {
                 Ok(()) => {
+                    log::info!("Pings stored successfully");
                     _ = recv_guard.commit().map_err(|e| log::error!("{e:?}"));
                 }
                 Err(e) => {

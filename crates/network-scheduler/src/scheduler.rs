@@ -98,27 +98,27 @@ impl Scheduler {
     }
 
     /// Register ping msg from a worker. Returns worker status if ping was accepted, otherwise None
-    pub fn ping(&self, worker_id: PeerId, msg: Ping) -> WorkerStatus {
+    pub fn ping(&self, worker_id: PeerId, msg: Ping) -> Option<WorkerStatus> {
         let version = msg.sem_version();
         if !Config::get().supported_worker_versions.matches(&version) {
             log::debug!("Worker {worker_id} version not supported: {}", version);
-            return WorkerStatus::UnsupportedVersion(());
+            return Some(WorkerStatus::UnsupportedVersion(()));
         }
         let mut worker_state = match self.worker_states.get_mut(&worker_id) {
             None => {
                 log::debug!("Worker {worker_id} not registered");
-                return WorkerStatus::NotRegistered(());
+                return None;
             }
             Some(worker_state) => worker_state,
         };
         worker_state.ping(msg);
         if worker_state.jailed {
-            return WorkerStatus::Jailed(worker_state.jail_reason_str());
+            return Some(WorkerStatus::Jailed(worker_state.jail_reason_str()));
         }
         let assigned_chunks = worker_state.assigned_chunks(&self.known_units);
         let mut assignment = chunks_to_assignment(assigned_chunks);
         add_signature_headers(&mut assignment, &worker_id, worker_state.value());
-        WorkerStatus::Active(assignment)
+        Some(WorkerStatus::Active(assignment))
     }
 
     pub fn workers_to_dial(&self) -> Vec<PeerId> {
@@ -270,6 +270,7 @@ impl Scheduler {
             .into_iter()
             .filter(|w| !current_workers.contains(&w.0))
             .for_each(|(peer_id, address)| {
+                log::info!("New worker registered: {peer_id} {address}");
                 self.worker_states
                     .insert(peer_id, WorkerState::new(peer_id, address));
             });

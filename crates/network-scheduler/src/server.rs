@@ -121,13 +121,12 @@ impl Server {
                         let start = Instant::now();
                         let ping_hash = msg_hash(&ping);
                         let status = scheduler.ping(peer_id, ping.clone());
-                        let pong = Pong {
-                            ping_hash,
-                            status: Some(status),
-                        };
-                        transport_handle
-                            .send_pong(peer_id, pong)
-                            .unwrap_or_else(|_| log::error!("Error sending pong: queue full"));
+                        if status.is_some() {
+                            let pong = Pong { ping_hash, status };
+                            transport_handle
+                                .send_pong(peer_id, pong)
+                                .unwrap_or_else(|_| log::error!("Error sending pong: queue full"));
+                        }
                         prometheus_metrics::exec_time("ping", start.elapsed());
                     }
                 })

@@ -128,10 +128,10 @@ impl Collector {
         }
     }
     pub fn collect_ping(&mut self, Ping { peer_id, ping }: Ping) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            self.registered_workers.read().contains(&peer_id),
-            "Worker not registered: {peer_id}"
-        );
+        if !self.registered_workers.read().contains(&peer_id) {
+            log::warn!("Ping from unregistered worker {peer_id}: {ping:?}");
+            return Ok(());
+        }
         log::debug!("Collecting ping from {peer_id}");
         log::trace!("Ping collected: {ping:?}");
         let ping_row: PingRow = ping.try_into().map_err(|e: &str| anyhow::format_err!(e))?;

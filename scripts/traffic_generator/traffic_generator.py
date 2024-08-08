@@ -16,6 +16,7 @@ NUM_THREADS = int(os.environ.get('NUM_THREADS', 10))
 QUERY_TIMEOUT_SEC = int(os.environ.get('QUERY_TIMEOUT_SEC', 60))
 MIN_INTERVAL_SEC = float(os.environ.get('MIN_INTERVAL_SEC', 60))
 SKIP_GREYLISTED = os.environ.get('SKIP_GREYLISTED', '').lower() in ('1', 't', 'true', 'y', 'yes')
+MAX_BLOCK_RANGE = int(os.environ.get('MAX_BLOCK_RANGE', 1_000_000))
 
 GATEWAY_URL = os.environ.get('GATEWAY_URL', "https://public-gateway.testnet.subsquid.io")
 
@@ -167,7 +168,7 @@ class TrafficGenerator:
 def random_range(ranges: List[BlockRange]) -> Tuple[int, int]:
     r = random.choice(ranges)
     from_block = random.randint(r.begin, r.end)
-    to_block = random.randint(from_block, r.end)
+    to_block = min(random.randint(from_block, r.end), from_block + MAX_BLOCK_RANGE)
     return from_block, to_block
 
 

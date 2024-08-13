@@ -39,7 +39,7 @@ impl<T: Storage + Sync> LogsCollector<T> {
             .into_iter()
             .filter_map(|log| {
                 log.try_into()
-                    .map_err(|e| log::error!("Invalid log message: {e}"))
+                    .map_err(|e| log::warn!("Invalid log message from {worker_id}: {e}"))
                     .ok()
             })
             .collect();

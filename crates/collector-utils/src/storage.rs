@@ -65,12 +65,12 @@ lazy_static! {
 
 #[async_trait]
 pub trait Storage {
-    async fn store_logs<'a, T: Iterator<Item=QueryExecutedRow> + Sized + Send>(
+    async fn store_logs<'a, T: Iterator<Item = QueryExecutedRow> + Sized + Send>(
         &self,
         query_logs: T,
     ) -> anyhow::Result<()>;
 
-    async fn store_pings<'a, T: Iterator<Item=PingRow> + Sized + Send>(
+    async fn store_pings<'a, T: Iterator<Item = PingRow> + Sized + Send>(
         &self,
         pings: T,
     ) -> anyhow::Result<()>;
@@ -255,7 +255,7 @@ impl ClickhouseStorage {
 
 #[async_trait]
 impl Storage for ClickhouseStorage {
-    async fn store_logs<'a, T: Iterator<Item=QueryExecutedRow> + Sized + Send>(
+    async fn store_logs<'a, T: Iterator<Item = QueryExecutedRow> + Sized + Send>(
         &self,
         query_logs: T,
     ) -> anyhow::Result<()> {
@@ -269,7 +269,7 @@ impl Storage for ClickhouseStorage {
         Ok(())
     }
 
-    async fn store_pings<'a, T: Iterator<Item=PingRow> + Sized + Send>(
+    async fn store_pings<'a, T: Iterator<Item = PingRow> + Sized + Send>(
         &self,
         pings: T,
     ) -> anyhow::Result<()> {
@@ -328,8 +328,8 @@ mod tests {
             clickhouse_user: "user".to_string(),
             clickhouse_password: "password".to_string(),
         })
-            .await
-            .expect("Cannot connect to clickhouse");
+        .await
+        .expect("Cannot connect to clickhouse");
 
         // Clean up database
         storage
@@ -351,14 +351,14 @@ mod tests {
             199, 39, 192, 209, 175, 147, 85, 150, 22, 192, 22, 89, 173, 61, 11, 207, 219, 48, 43,
             48, 151, 232, 105, 234, 80, 19, 205, 172, 92,
         ])
-            .unwrap();
+        .unwrap();
         let worker_keypair = Keypair::from_protobuf_encoding(&[
             8, 1, 18, 64, 212, 50, 184, 182, 239, 153, 10, 166, 254, 122, 105, 16, 51, 223, 126,
             105, 10, 134, 204, 224, 42, 135, 92, 76, 32, 60, 197, 56, 128, 22, 131, 84, 233, 166,
             242, 11, 16, 14, 160, 254, 4, 185, 170, 32, 157, 3, 144, 53, 230, 39, 150, 221, 142, 2,
             37, 101, 100, 63, 24, 116, 110, 6, 156, 78,
         ])
-            .unwrap();
+        .unwrap();
 
         let client_id = PeerId::from_public_key(&client_keypair.public());
         let worker_id = PeerId::from_public_key(&worker_keypair.public());

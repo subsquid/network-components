@@ -99,9 +99,11 @@ impl Scheduler {
 
     /// Register ping msg from a worker. Returns worker status if ping was accepted, otherwise None
     pub fn ping(&self, worker_id: PeerId, msg: Ping) -> Option<WorkerStatus> {
-        let version = msg.sem_version();
-        if !Config::get().supported_worker_versions.matches(&version) {
-            log::debug!("Worker {worker_id} version not supported: {}", version);
+        if !msg.version_matches(&Config::get().supported_worker_versions) {
+            log::debug!(
+                "Worker {worker_id} version not supported: {:?}",
+                msg.version
+            );
             return Some(WorkerStatus::UnsupportedVersion(()));
         }
         let mut worker_state = match self.worker_states.get_mut(&worker_id) {

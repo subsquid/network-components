@@ -1,0 +1,19 @@
+[package]
+name = "subsquid-datasets"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1"
+hex = "0.4"
+itertools = "0.12"
+log = "0.4"
+nonempty = { version = "0.10", features = ["serde", "serialize"] }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_with = { version = "3", features = ["hex"] }
+sha3 = "0.10"
+tokio = { version = "1", features = ["full"] }
+
+subsquid-messages = { workspace = true, features = ["semver"] }

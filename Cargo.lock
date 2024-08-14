@@ -6784,6 +6784,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "subsquid-datasets"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "aws-config 1.5.2",
+ "aws-sdk-s3 1.37.0",
+ "hex",
+ "itertools 0.12.1",
+ "log",
+ "nonempty",
+ "serde",
+ "serde_with",
+ "sha3",
+ "subsquid-messages",
+ "tokio",
+]
+
+[[package]]
 name = "subsquid-messages"
 version = "1.1.0"
 source = "git+https://github.com/subsquid/subsquid-network.git#7906af9805553b868a8d617a9bcdac83af5c98df"

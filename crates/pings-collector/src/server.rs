@@ -12,18 +12,24 @@ use tokio::signal::unix::{signal, SignalKind};
 
 use collector_utils::{PingRow, Storage};
 use contract_client::Client as ContractClient;
+use semver::VersionReq;
 use subsquid_network_transport::util::{CancellationToken, TaskManager};
 use subsquid_network_transport::{PeerId, Ping, PingsCollectorTransportHandle};
 
 lazy_static! {
     static ref BINCODE_CONFIG: bincode::config::Configuration = Default::default();
+    pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq =
+        std::env::var("SUPPORTED_WORKER_VERSIONS")
+            .unwrap_or(">=1.1.0-rc3".to_string())
+            .parse()
+            .expect("Invalid SUPPORTED_WORKER_VERSIONS");
 }
 
 const PINGS_BATCH_SIZE: usize = 10000;
 
 pub struct Server<S>
 where
-    S: Stream<Item = Ping> + Send + Unpin + 'static,
+    S: Stream<Item=Ping> + Send + Unpin + 'static,
 {
     incoming_pings: S,
     _transport_handle: PingsCollectorTransportHandle,
@@ -33,7 +39,7 @@ where
 
 impl<S> Server<S>
 where
-    S: Stream<Item = Ping> + Send + Unpin + 'static,
+    S: Stream<Item=Ping> + Send + Unpin + 'static,
 {
     pub fn new(incoming_pings: S, transport_handle: PingsCollectorTransportHandle) -> Self {
         Self {
@@ -132,6 +138,10 @@ impl Collector {
             log::warn!("Ping from unregistered worker {peer_id}: {ping:?}");
             return Ok(());
         }
+        if !ping.version_matches(&SUPPORTED_WORKER_VERSIONS) {
+            log::debug!("Unsupported worker version {peer_id}: {:?}", ping.version);
+            return Ok(());
+        }
         log::debug!("Collecting ping from {peer_id}");
         log::trace!("Ping collected: {ping:?}");
         let ping_row: PingRow = ping.try_into().map_err(|e: &str| anyhow::format_err!(e))?;
@@ -160,7 +170,7 @@ impl<S: Storage + Send + Sync + 'static> StorageWriter<S> {
 
     pub fn start(
         self,
-    ) -> impl FnOnce(CancellationToken) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
+    ) -> impl FnOnce(CancellationToken) -> Pin<Box<dyn Future<Output=()> + Send + 'static>> {
         move |cancel_token| Box::pin(self.run(cancel_token))
     }
 

@@ -5154,7 +5154,7 @@ dependencies = [
 
 [[package]]
 name = "pings-collector"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5168,6 +5168,7 @@ dependencies = [
  "lazy_static",
  "log",
  "parking_lot",
+ "semver",
  "serde",
  "serde_bytes",
  "serde_json",

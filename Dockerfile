@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM rust:1.78.0 AS archive-router-builder
+FROM --platform=$BUILDPLATFORM rust:1.80.1 AS archive-router-builder
 RUN apt-get update && apt-get install protobuf-compiler -y
 WORKDIR /archive-router
 COPY ./ .
@@ -13,7 +13,7 @@ COPY --from=archive-router-builder /archive-router/target/release/router ./route
 ENTRYPOINT ["/archive-router/router"]
 EXPOSE 3000
 
-FROM --platform=$BUILDPLATFORM lukemathwalker/cargo-chef:0.1.66-rust-1.78-slim-bookworm AS chef
+FROM --platform=$BUILDPLATFORM lukemathwalker/cargo-chef:0.1.67-rust-1.80.1-slim-bookworm AS chef
 WORKDIR /app
 
 FROM --platform=$BUILDPLATFORM chef AS network-planner

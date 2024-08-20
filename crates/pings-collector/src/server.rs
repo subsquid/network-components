@@ -29,7 +29,7 @@ const PINGS_BATCH_SIZE: usize = 10000;
 
 pub struct Server<S>
 where
-    S: Stream<Item=Ping> + Send + Unpin + 'static,
+    S: Stream<Item = Ping> + Send + Unpin + 'static,
 {
     incoming_pings: S,
     _transport_handle: PingsCollectorTransportHandle,
@@ -39,7 +39,7 @@ where
 
 impl<S> Server<S>
 where
-    S: Stream<Item=Ping> + Send + Unpin + 'static,
+    S: Stream<Item = Ping> + Send + Unpin + 'static,
 {
     pub fn new(incoming_pings: S, transport_handle: PingsCollectorTransportHandle) -> Self {
         Self {
@@ -170,7 +170,7 @@ impl<S: Storage + Send + Sync + 'static> StorageWriter<S> {
 
     pub fn start(
         self,
-    ) -> impl FnOnce(CancellationToken) -> Pin<Box<dyn Future<Output=()> + Send + 'static>> {
+    ) -> impl FnOnce(CancellationToken) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
         move |cancel_token| Box::pin(self.run(cancel_token))
     }
 

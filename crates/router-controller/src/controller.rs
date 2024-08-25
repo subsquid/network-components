@@ -100,8 +100,10 @@ impl Controller {
             if info.suspended {
                 return None
             }
-            if now.duration_since(info.last_ping).unwrap() > Duration::from_secs(30) {
-                return None
+            if let Ok(duration) = now.duration_since(info.last_ping) {
+                if duration > Duration::from_secs(30) {
+                    return None
+                }
             }
             if info.state.get(dataset).map_or(false, |ranges| ranges.has(first_block)) {
                 Some(info)

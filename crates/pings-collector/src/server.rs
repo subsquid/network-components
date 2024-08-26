@@ -68,7 +68,7 @@ where
             .map(|w| w.peer_id)
             .collect();
 
-        let (buffer_writer, buffer_reader) = yaque::channel(buffer_path)?;
+        let (buffer_writer, buffer_reader) = open_buffer(buffer_path)?;
         let mut collector = Collector::new(buffer_writer, self.registered_workers.clone());
         let writer = StorageWriter::new(buffer_reader, storage, storage_sync_interval);
         self.task_manager.spawn(writer.start());
@@ -115,6 +115,18 @@ where
             }
         };
         self.task_manager.spawn_periodic(task, interval);
+    }
+}
+
+fn open_buffer(path: impl AsRef<Path>) -> anyhow::Result<(yaque::Sender, yaque::Receiver)> {
+    match yaque::channel(&path) {
+        Ok(res) => Ok(res),
+        Err(e) => {
+            // Attempt to recover the buffer if it is corrupted
+            log::warn!("Error opening buffer: {e:?}");
+            yaque::recovery::recover(&path)?;
+            Ok(yaque::channel(path)?)
+        }
     }
 }
 

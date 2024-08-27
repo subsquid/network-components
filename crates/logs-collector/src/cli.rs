@@ -26,12 +26,4 @@ pub struct Cli {
         default_value = "300"
     )]
     pub worker_update_interval_sec: u32,
-
-    #[arg(
-        long,
-        env,
-        help = "Time after which logs from previous epoch are no longer accepted (seconds)",
-        default_value = "600"
-    )]
-    pub epoch_seal_timeout_sec: u32,
 }

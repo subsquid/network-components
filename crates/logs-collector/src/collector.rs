@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use subsquid_messages::QueryExecuted;
+use subsquid_network_transport::protocol::EPOCH_SEAL_TIMEOUT;
 use subsquid_network_transport::PeerId;
 
 use collector_utils::{timestamp_now_ms, QueryExecutedRow, Storage};
@@ -12,21 +13,15 @@ type SeqNo = u64;
 pub struct LogsCollector<T: Storage + Sync> {
     storage: T,
     contract_client: Arc<dyn contract_client::Client>,
-    epoch_seal_timeout: Duration,
     last_stored: HashMap<String, (SeqNo, u64)>, // Last sequence number & timestamp saved in storage for each worker
     buffered_logs: HashMap<String, BTreeMap<SeqNo, QueryExecutedRow>>, // Local buffer, persisted periodically
 }
 
 impl<T: Storage + Sync> LogsCollector<T> {
-    pub fn new(
-        storage: T,
-        contract_client: Arc<dyn contract_client::Client>,
-        epoch_seal_timeout: Duration,
-    ) -> Self {
+    pub fn new(storage: T, contract_client: Arc<dyn contract_client::Client>) -> Self {
         Self {
             storage,
             contract_client,
-            epoch_seal_timeout,
             last_stored: HashMap::new(),
             buffered_logs: HashMap::new(),
         }
@@ -84,7 +79,7 @@ impl<T: Storage + Sync> LogsCollector<T> {
         &self,
     ) -> anyhow::Result<impl Iterator<Item = QueryExecutedRow> + '_> {
         let epoch_start = self.contract_client.current_epoch_start().await?;
-        let epoch_sealed = SystemTime::now() > epoch_start + self.epoch_seal_timeout;
+        let epoch_sealed = SystemTime::now() > epoch_start + EPOCH_SEAL_TIMEOUT;
         log::info!("Retrieving logs to store. epoch_sealed={epoch_sealed}");
 
         Ok(self

@@ -39,8 +39,7 @@ async fn main() -> anyhow::Result<()> {
         transport_builder.build_logs_collector(Default::default())?;
 
     let storage = ClickhouseStorage::new(args.clickhouse).await?;
-    let epoch_seal_timeout = Duration::from_secs(args.epoch_seal_timeout_sec as u64);
-    let logs_collector = LogsCollector::new(storage, contract_client.clone(), epoch_seal_timeout);
+    let logs_collector = LogsCollector::new(storage, contract_client.clone());
     let storage_sync_interval = Duration::from_secs(args.storage_sync_interval_sec as u64);
     let worker_update_interval = Duration::from_secs(args.worker_update_interval_sec as u64);
     Server::new(incoming_messages, transport_handle, logs_collector)

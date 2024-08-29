@@ -82,6 +82,7 @@ unsafe impl Sync for Controller {}
 
 
 impl Controller {
+    #[tracing::instrument(level="debug", skip(self))]
     pub fn get_worker(&self, dataset_name: &str, first_block: u32) -> Result<Option<Url>, String> {
         let dataset = match self.managed_datasets.get(dataset_name) {
             Some(ds) => ds,
@@ -98,16 +99,19 @@ impl Controller {
             }
             let info = w.info.get();
             if info.suspended {
+                tracing::debug!(worker=w.id, "Worker is suspended");
                 return None
             }
             if let Ok(duration) = now.duration_since(info.last_ping) {
                 if duration > Duration::from_secs(30) {
+                    tracing::debug!(worker=w.id, "Worker is inactive");
                     return None
                 }
             }
             if info.state.get(dataset).map_or(false, |ranges| ranges.has(first_block)) {
                 Some(info)
             } else {
+                tracing::debug!(worker=w.id, "Worker hasn't downloaded the chunk yet");
                 None
             }
         };
@@ -373,7 +377,7 @@ impl Controller {
 
             {
                 let mut order: Vec<Wi> = (0..goal.len()).collect();
-                let lst = goal.len() - 1;
+                let lst = goal.len() - 1;  // TODO: fix "attempt to subtract with overflow"
                 let target_size = goal.iter().map(|a| a.len()).sum::<usize>() / goal.len();
                 loop {
                     order.sort_by_key(|i| goal[*i].len());

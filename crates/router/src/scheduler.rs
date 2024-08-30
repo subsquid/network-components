@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tracing::{error, info};
+use tracing::{error, info, debug};
 
 use router_controller::controller::Controller;
 
@@ -19,20 +19,35 @@ async fn update_datasets(controller: &Arc<Controller>, datasets: &Vec<Dataset>) 
                 .and_then(|height| u32::try_from(height).ok().map(|height| height + 1))
                 .unwrap_or(dataset.start_block().unwrap_or(0));
 
-            let chunks = match dataset.storage().get_chunks(next_block).await {
-                Ok(chunks) => {
-                    info!("found new chunks in {}: {:?}", dataset.url(), chunks);
-                    if let Some(chunk) = chunks.last() {
-                        DATASET_HEIGHT
-                            .with_label_values(&[&dataset.url()])
-                            .set(chunk.last_block().into())
+            debug!("getting new chunks for {}", dataset.url());
+            let mut attempt = 0;
+            let chunks = loop {
+                let future = dataset.storage().get_chunks(next_block);
+                let duration = Duration::from_secs(300 + attempt * 60);
+                match tokio::time::timeout(duration, future).await {
+                    Ok(Ok(chunks)) => {
+                        info!("found new chunks in {}: {:?}", dataset.url(), chunks);
+                        if let Some(chunk) = chunks.last() {
+                            DATASET_HEIGHT
+                                .with_label_values(&[&dataset.url()])
+                                .set(chunk.last_block().into())
+                        }
+                        break chunks
+                    },
+                    Ok(Err(err)) => {
+                        error!("failed to download new chunks for {}: {:?}", dataset.url(), err);
+                        DATASET_SYNC_ERRORS.with_label_values(&[dataset.url()]).inc();
+                        return
+                    },
+                    Err(_) => {
+                        if attempt == 5 {
+                            error!("failed to download new chunks for {} within {:?}", dataset.url(), duration);
+                            DATASET_SYNC_ERRORS.with_label_values(&[dataset.url()]).inc();
+                            return
+                        }
+                        attempt += 1;
+                        info!("{}/5 retry to download {}", attempt, dataset.url());
                     }
-                    chunks
-                },
-                Err(err) => {
-                    error!("failed to download new chunks for {}: {:?}", dataset.url(), err);
-                    DATASET_SYNC_ERRORS.with_label_values(&[dataset.url()]).inc();
-                    return
                 }
             };
 
@@ -60,6 +75,7 @@ pub fn start(
 
         let now = Instant::now();
         if let Some(duration) = schedule_time.checked_duration_since(now) {
+            debug!("waiting {} seconds before scheduling", duration.as_secs());
             tokio::time::sleep(duration).await;
         }
         controller.schedule();

@@ -258,6 +258,11 @@ impl Controller {
 
         let managed_workers: Vec<_> = workers.iter().filter(|w| w.is_managed).cloned().collect();
         if managed_workers.len() < self.managed_workers.len() {
+            log::warn!(
+                "{} out of {} workers available. Skipping scheduling",
+                managed_workers.len(),
+                self.managed_workers.len()
+            );
             self.workers.set(Arc::new(workers));
             return;
         }

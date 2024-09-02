@@ -69,9 +69,9 @@ impl Server {
         self.spawn_metrics_server_task(metrics_listen_addr, metrics_registry);
         self.spawn_jail_inactive_workers_task(storage_client.clone());
         self.spawn_jail_stale_workers_task(storage_client.clone());
-        self.spawn_jail_unreachable_workers_task(storage_client);
+        self.spawn_jail_unreachable_workers_task(storage_client.clone());
         self.spawn_regenerate_signatures_task();
-        self.spawn_chunks_summary_task();
+        self.spawn_chunks_summary_task(storage_client);
         self.spawn_event_processing_task(incoming_events);
 
         let mut sigint = signal(SignalKind::interrupt())?;
@@ -275,16 +275,19 @@ impl Server {
         self.task_manager.spawn_periodic(task, interval);
     }
 
-    fn spawn_chunks_summary_task(&mut self) {
+    fn spawn_chunks_summary_task(&mut self, storage_client: S3Storage) {
         let scheduler = self.scheduler.clone();
         let task = move |_| {
             let scheduler = scheduler.clone();
+            let storage_client = storage_client.clone();
             async move {
                 log::info!("Updating chunks summary");
                 let workers = scheduler.all_workers();
                 let units = scheduler.known_units();
                 let summary = build_chunks_summary(workers, units);
+                let save_fut = storage_client.save_chunks_list(&summary);
                 scheduler.update_chunks_summary(summary);
+                save_fut.await;
             }
         };
         self.task_manager

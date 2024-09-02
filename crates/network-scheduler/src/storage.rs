@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,7 +16,7 @@ use subsquid_network_transport::util::{CancellationToken, TaskManager};
 use crate::cli::Config;
 use crate::data_chunk::DataChunk;
 use crate::prometheus_metrics;
-use crate::scheduler::Scheduler;
+use crate::scheduler::{ChunksSummary, Scheduler};
 use crate::scheduling_unit::{bundle_chunks, SchedulingUnit};
 
 #[derive(Clone)]
@@ -216,6 +217,7 @@ pub struct S3Storage {
     client: s3::Client,
     config: &'static Config,
     scheduler_state_key: String,
+    chunks_list_key: String,
     task_manager: Arc<Mutex<TaskManager>>,
 }
 
@@ -228,10 +230,12 @@ impl S3Storage {
             .await;
         let client = s3::Client::new(&s3_config);
         let scheduler_state_key = format!("scheduler_{scheduler_id}.json");
+        let chunks_list_key = format!("datasets_{}.json", config.network);
         Self {
             client,
             config,
             scheduler_state_key,
+            chunks_list_key,
             task_manager: Default::default(),
         }
     }
@@ -293,5 +297,30 @@ impl S3Storage {
             .await
             .map_err(|e| log::error!("Error saving scheduler state: {e:?}"));
         prometheus_metrics::s3_request();
+    }
+
+    pub fn save_chunks_list(&self, chunks_summary: &ChunksSummary) -> impl Future<Output = ()> {
+        log::debug!("Saving chunks list");
+        let future = match serde_json::to_vec(&chunks_summary) {
+            Ok(bytes) => Some(
+                self.client
+                    .put_object()
+                    .bucket(&self.config.scheduler_state_bucket)
+                    .key(&self.chunks_list_key)
+                    .body(bytes.into())
+                    .send(),
+            ),
+            Err(e) => {
+                log::error!("Error serializing chunks list: {e:?}");
+                None
+            }
+        };
+        return async move {
+            let Some(future) = future else { return };
+            if let Err(e) = future.await {
+                log::error!("Error saving chunks list: {e:?}");
+            }
+            prometheus_metrics::s3_request();
+        };
     }
 }

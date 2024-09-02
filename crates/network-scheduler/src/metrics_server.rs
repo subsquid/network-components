@@ -12,7 +12,7 @@ use subsquid_network_transport::util::CancellationToken;
 use tokio::sync::RwLock;
 
 use crate::cli::Config;
-use crate::scheduler::{ChunkStatus, Scheduler};
+use crate::scheduler::{ChunksSummary, Scheduler};
 use crate::worker_state::WorkerState;
 
 const JAIL_INFO_FIELDS: [Field<'static, WorkerState>; 3] = [
@@ -34,9 +34,7 @@ async fn workers_jail_info(Extension(scheduler): Extension<Scheduler>) -> Respon
     Json(jail_info).into_response()
 }
 
-async fn chunks(
-    Extension(scheduler): Extension<Scheduler>,
-) -> Json<HashMap<String, Vec<ChunkStatus>>> {
+async fn chunks(Extension(scheduler): Extension<Scheduler>) -> Json<ChunksSummary> {
     let chunks_summary = scheduler.get_chunks_summary();
     Json(chunks_summary)
 }

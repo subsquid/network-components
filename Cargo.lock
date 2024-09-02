@@ -4627,7 +4627,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "1.0.20"
+version = "1.0.21"
 dependencies = [
  "anyhow",
  "async-trait",

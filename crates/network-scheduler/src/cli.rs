@@ -63,6 +63,8 @@ pub struct Config {
     pub jail_unreachable: bool,
     #[serde(default = "num_cpus::get")]
     pub ping_processing_threads: usize,
+    #[serde(skip_serializing, skip_deserializing, default)]
+    pub network: String,
 }
 
 impl Config {
@@ -103,7 +105,11 @@ pub struct Cli {
 impl Cli {
     pub async fn read_config(&self) -> anyhow::Result<()> {
         let file_contents = tokio::fs::read(&self.config).await?;
-        let config = serde_yaml::from_slice(file_contents.as_slice())?;
+        let mut config: Config = serde_yaml::from_slice(file_contents.as_slice())?;
+        config.network = match self.transport.rpc.network {
+            contract_client::Network::Tethys => "tethys".to_string(),
+            contract_client::Network::Mainnet => "mainnet".to_string(),
+        };
         CONFIG.set(config)?;
         Ok(())
     }

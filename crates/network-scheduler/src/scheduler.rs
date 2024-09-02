@@ -38,12 +38,14 @@ pub struct ChunkStatus {
     pub downloaded_by: Vec<Arc<str>>, // Will deserialize duplicated, but it's short-lived
 }
 
+pub type ChunksSummary = HashMap<String, Vec<ChunkStatus>>; // dataset -> chunks statuses
+
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Scheduler {
     known_units: Arc<DashMap<UnitId, SchedulingUnit>>,
     units_assignments: Arc<DashMap<UnitId, Vec<PeerId>>>,
     worker_states: Arc<DashMap<PeerId, WorkerState>>,
-    chunks_summary: Arc<RwLock<HashMap<String, Vec<ChunkStatus>>>>, // dataset -> chunks statuses
+    chunks_summary: Arc<RwLock<ChunksSummary>>,
     last_schedule_epoch: Arc<AtomicU32>,
 }
 
@@ -527,11 +529,11 @@ impl Scheduler {
         prometheus_metrics::exec_time("assign_units", start.elapsed());
     }
 
-    pub fn get_chunks_summary(&self) -> HashMap<String, Vec<ChunkStatus>> {
+    pub fn get_chunks_summary(&self) -> ChunksSummary {
         self.chunks_summary.read().clone()
     }
 
-    pub fn update_chunks_summary(&self, summary: HashMap<String, Vec<ChunkStatus>>) {
+    pub fn update_chunks_summary(&self, summary: ChunksSummary) {
         *self.chunks_summary.write() = summary;
     }
 }

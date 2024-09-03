@@ -4,6 +4,10 @@ use prometheus::{
 };
 
 lazy_static! {
+    pub static ref NETWORK_ERRORS: IntCounterVec = register_int_counter_vec!(
+        opts!("sqd_network_errors", "Dataset HTTP errors"),
+        &["network", "type", "status"]
+    ).expect("Can't create a metric");
     pub static ref DATASET_SYNC_ERRORS: IntCounterVec = register_int_counter_vec!(
         opts!("sqd_dataset_sync_errors", "Dataset syncronization errors"),
         &["dataset"]

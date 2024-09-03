@@ -16,6 +16,7 @@ use tracing::info;
 use router_controller::controller::{Controller, PingMessage, WorkerState};
 
 use crate::middleware::logging;
+use crate::metrics::NETWORK_ERRORS;
 
 #[axum_macros::debug_handler]
 async fn ping(
@@ -42,14 +43,12 @@ async fn get_worker(
 ) -> Response {
     match controller.get_worker(&dataset, start_block) {
         Ok(Some(url)) => url.into_response(),
-        Ok(None) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!(
-                "not ready to serve block {} of dataset {}",
-                start_block, dataset
-            ),
-        )
-            .into_response(),
+        Ok(None) => {
+            let status = StatusCode::SERVICE_UNAVAILABLE;
+            let msg = format!("not ready to serve block {} of dataset {}", start_block, dataset);
+            NETWORK_ERRORS.with_label_values(&[&dataset, "get_worker", status.as_str()]).inc();
+            (status, msg).into_response()
+        },
         Err(err) => (StatusCode::NOT_FOUND, err).into_response()
     }
 }
@@ -61,11 +60,12 @@ async fn get_height(
 ) -> Response {
     match controller.get_height(&dataset) {
         Ok(Some(height)) => height.to_string().into_response(),
-        Ok(None) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("height for dataset {} is unknown", dataset),
-        )
-            .into_response(),
+        Ok(None) => {
+            let status = StatusCode::SERVICE_UNAVAILABLE;
+            let msg = format!("height for dataset {} is unknown", dataset);
+            NETWORK_ERRORS.with_label_values(&[&dataset, "get_height", status.as_str()]).inc();
+            (status, msg).into_response()
+        },
         Err(err) => (StatusCode::NOT_FOUND, err).into_response()
     }
 }

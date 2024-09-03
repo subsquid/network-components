@@ -10,7 +10,7 @@ use nonempty::NonEmpty;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
 
-use subsquid_network_transport::util::{CancellationToken, TaskManager};
+use sqd_network_transport::util::{CancellationToken, TaskManager};
 
 use crate::cli::Config;
 use crate::data_chunk::DataChunk;

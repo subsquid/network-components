@@ -2,7 +2,7 @@ use clap::Parser;
 use env_logger::Env;
 use prometheus_client::registry::Registry;
 
-use subsquid_network_transport::P2PTransportBuilder;
+use sqd_network_transport::P2PTransportBuilder;
 
 use crate::cli::Cli;
 use crate::server::Server;
@@ -38,12 +38,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Open file for writing metrics
     let mut metrics_registry = Registry::default();
-    subsquid_network_transport::metrics::register_metrics(&mut metrics_registry);
+    sqd_network_transport::metrics::register_metrics(&mut metrics_registry);
     prometheus_metrics::register_metrics(&mut metrics_registry);
 
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
-    let contract_client: Box<dyn contract_client::Client> = transport_builder.contract_client();
+    let contract_client: Box<dyn sqd_contract_client::Client> = transport_builder.contract_client();
     let local_peer_id = transport_builder.local_peer_id();
     let (incoming_messages, transport_handle) =
         transport_builder.build_scheduler(Default::default())?;

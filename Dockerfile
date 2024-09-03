@@ -95,3 +95,16 @@ CMD ["pings-collector"]
 COPY crates/logs-collector/healthcheck.sh .
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
+
+FROM --platform=$BUILDPLATFORM network-base AS peer-checker
+
+COPY --from=network-builder /app/target/release/peer-checker /usr/local/bin/peer-checker
+
+ENV P2P_LISTEN_ADDRS="/ip4/0.0.0.0/udp/12345/quic-v1"
+ENV BUFFER_DIR="/run"
+
+CMD ["peer-checker"]
+
+COPY crates/logs-collector/healthcheck.sh .
+RUN chmod +x ./healthcheck.sh
+HEALTHCHECK --interval=5s CMD ./healthcheck.sh

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use subsquid_network_transport::TransportArgs;
+use sqd_network_transport::TransportArgs;
 
 use collector_utils::ClickhouseArgs;
 

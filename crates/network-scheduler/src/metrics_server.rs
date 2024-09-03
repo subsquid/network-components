@@ -8,7 +8,7 @@ use axum::routing::get;
 use axum::{Extension, Json, Router};
 use prometheus_client::registry::Registry;
 use serde_partial::{Field, SerializePartial};
-use subsquid_network_transport::util::CancellationToken;
+use sqd_network_transport::util::CancellationToken;
 use tokio::sync::RwLock;
 
 use crate::cli::Config;

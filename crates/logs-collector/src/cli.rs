@@ -1,6 +1,6 @@
 use clap::Parser;
 use collector_utils::ClickhouseArgs;
-use subsquid_network_transport::TransportArgs;
+use sqd_network_transport::TransportArgs;
 
 #[derive(Parser)]
 #[command(version)]

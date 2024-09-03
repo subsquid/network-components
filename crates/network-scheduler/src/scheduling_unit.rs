@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use nonempty::NonEmpty;
 use serde::{Deserialize, Serialize};
-use subsquid_network_transport::util::CancellationToken;
+use sqd_network_transport::util::CancellationToken;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::data_chunk::{ChunkId, DataChunk};

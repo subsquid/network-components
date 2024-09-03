@@ -22,9 +22,9 @@ serde_repr = "0.1"
 tokio = { version = "1", features = ["full"] }
 yaque = "0.6"
 
-contract-client = { workspace = true }
-subsquid-messages = { workspace = true }
-subsquid-network-transport = { workspace = true, features = ["pings-collector"] }
+sqd-contract-client = { workspace = true }
+sqd-messages = { workspace = true }
+sqd-network-transport = { workspace = true, features = ["pings-collector"] }
 
 collector-utils = { path = "../collector-utils" }
 

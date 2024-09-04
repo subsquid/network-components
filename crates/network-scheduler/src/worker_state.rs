@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_partial::SerializePartial;
 use serde_with::{serde_as, TimestampMilliSeconds};
 
-use contract_client::Address;
 use dashmap::DashMap;
-use subsquid_messages::{Ping, RangeSet};
-use subsquid_network_transport::PeerId;
+use sqd_contract_client::Address;
+use sqd_messages::{Ping, RangeSet};
+use sqd_network_transport::PeerId;
 
 use crate::cli::Config;
 use crate::data_chunk::DataChunk;

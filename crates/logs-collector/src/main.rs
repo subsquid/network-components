@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use env_logger::Env;
-use subsquid_network_transport::P2PTransportBuilder;
+use sqd_network_transport::P2PTransportBuilder;
 
 use collector_utils::ClickhouseStorage;
 
@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Build P2P transport
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
-    let contract_client: Arc<dyn contract_client::Client> =
+    let contract_client: Arc<dyn sqd_contract_client::Client> =
         transport_builder.contract_client().into();
     let (incoming_messages, transport_handle) =
         transport_builder.build_logs_collector(Default::default())?;

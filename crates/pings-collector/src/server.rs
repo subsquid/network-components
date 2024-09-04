@@ -11,10 +11,10 @@ use parking_lot::RwLock;
 use tokio::signal::unix::{signal, SignalKind};
 
 use collector_utils::{PingRow, Storage};
-use contract_client::Client as ContractClient;
 use semver::VersionReq;
-use subsquid_network_transport::util::{CancellationToken, TaskManager};
-use subsquid_network_transport::{PeerId, Ping, PingsCollectorTransportHandle};
+use sqd_contract_client::Client as ContractClient;
+use sqd_network_transport::util::{CancellationToken, TaskManager};
+use sqd_network_transport::{PeerId, Ping, PingsCollectorTransportHandle};
 
 lazy_static! {
     static ref BINCODE_CONFIG: bincode::config::Configuration = Default::default();

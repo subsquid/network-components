@@ -14,9 +14,9 @@ serde = { version = "1.0.188", features = ["derive"] }
 serde_bytes = "0.11"
 serde_repr = "0.1"
 
-subsquid-messages = { workspace = true }
+sqd-messages = { workspace = true }
 
 [dev-dependencies]
 test-with = "0.13"
-subsquid-network-transport = { workspace = true }
+sqd-network-transport = { workspace = true }
 tokio = { version = "1", features = ["full"] }

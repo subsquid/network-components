@@ -12,10 +12,10 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc::Receiver;
 use tokio::time::Instant;
 
-use subsquid_messages::signatures::msg_hash;
-use subsquid_messages::{Pong, RangeSet};
-use subsquid_network_transport::util::{CancellationToken, TaskManager};
-use subsquid_network_transport::{SchedulerEvent, SchedulerTransportHandle};
+use sqd_messages::signatures::msg_hash;
+use sqd_messages::{Pong, RangeSet};
+use sqd_network_transport::util::{CancellationToken, TaskManager};
+use sqd_network_transport::{SchedulerEvent, SchedulerTransportHandle};
 
 use crate::cli::Config;
 use crate::data_chunk::{chunks_to_worker_state, DataChunk};
@@ -51,7 +51,7 @@ impl Server {
 
     pub async fn run<S: Stream<Item = SchedulerEvent> + Send + Unpin + 'static>(
         mut self,
-        contract_client: Box<dyn contract_client::Client>,
+        contract_client: Box<dyn sqd_contract_client::Client>,
         storage_client: S3Storage,
         metrics_listen_addr: SocketAddr,
         metrics_registry: Registry,
@@ -136,13 +136,13 @@ impl Server {
 
     async fn spawn_scheduling_task(
         &mut self,
-        contract_client: Box<dyn contract_client::Client>,
+        contract_client: Box<dyn sqd_contract_client::Client>,
         storage_client: S3Storage,
     ) -> anyhow::Result<()> {
         log::info!("Starting scheduling task");
         let scheduler = self.scheduler.clone();
         let last_epoch = Arc::new(Mutex::new(contract_client.current_epoch().await?));
-        let contract_client: Arc<dyn contract_client::Client> = contract_client.into();
+        let contract_client: Arc<dyn sqd_contract_client::Client> = contract_client.into();
         let schedule_interval = Config::get().schedule_interval_epochs;
 
         let task = move |_| {

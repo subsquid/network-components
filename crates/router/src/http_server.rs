@@ -14,7 +14,7 @@ use prometheus::{gather, Encoder, TextEncoder};
 use tracing::info;
 
 use router_controller::controller::{Controller, Ping};
-use subsquid_messages::WorkerState;
+use sqd_messages::WorkerState;
 
 mod middleware;
 

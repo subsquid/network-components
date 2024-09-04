@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use subsquid_messages::QueryExecuted;
-use subsquid_network_transport::protocol::EPOCH_SEAL_TIMEOUT;
-use subsquid_network_transport::PeerId;
+use sqd_messages::QueryExecuted;
+use sqd_network_transport::protocol::EPOCH_SEAL_TIMEOUT;
+use sqd_network_transport::PeerId;
 
 use collector_utils::{timestamp_now_ms, QueryExecutedRow, Storage};
 
@@ -12,13 +12,13 @@ type SeqNo = u64;
 
 pub struct LogsCollector<T: Storage + Sync> {
     storage: T,
-    contract_client: Arc<dyn contract_client::Client>,
+    contract_client: Arc<dyn sqd_contract_client::Client>,
     last_stored: HashMap<String, (SeqNo, u64)>, // Last sequence number & timestamp saved in storage for each worker
     buffered_logs: HashMap<String, BTreeMap<SeqNo, QueryExecutedRow>>, // Local buffer, persisted periodically
 }
 
 impl<T: Storage + Sync> LogsCollector<T> {
-    pub fn new(storage: T, contract_client: Arc<dyn contract_client::Client>) -> Self {
+    pub fn new(storage: T, contract_client: Arc<dyn sqd_contract_client::Client>) -> Self {
         Self {
             storage,
             contract_client,

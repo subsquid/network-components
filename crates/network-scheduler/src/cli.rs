@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationSeconds};
 use tokio::sync::OnceCell;
 
-use subsquid_network_transport::TransportArgs;
+use sqd_network_transport::TransportArgs;
 
 static CONFIG: OnceCell<Config> = OnceCell::const_new();
 

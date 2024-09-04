@@ -10,7 +10,7 @@ use base64::Engine;
 use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
 
-use subsquid_messages::{data_chunk::DataChunk, Range, RangeSet, WorkerState};
+use sqd_messages::{data_chunk::DataChunk, Range, RangeSet, WorkerState};
 
 use crate::atom::Atom;
 
@@ -516,7 +516,7 @@ mod tests {
     use super::Ping;
 
     use crate::controller::ControllerBuilder;
-    use subsquid_messages::data_chunk::DataChunk;
+    use sqd_messages::data_chunk::DataChunk;
 
     #[test]
     fn basic() {

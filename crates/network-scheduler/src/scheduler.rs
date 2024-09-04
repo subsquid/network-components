@@ -15,10 +15,10 @@ use random_choice::random_choice;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
-use contract_client::Worker;
-use subsquid_messages::HttpHeader;
-use subsquid_messages::{pong::Status as WorkerStatus, Ping};
-use subsquid_network_transport::PeerId;
+use sqd_contract_client::Worker;
+use sqd_messages::HttpHeader;
+use sqd_messages::{pong::Status as WorkerStatus, Ping};
+use sqd_network_transport::PeerId;
 
 use crate::cli::Config;
 use crate::data_chunk::chunks_to_assignment;
@@ -539,7 +539,7 @@ impl Scheduler {
 }
 
 fn add_signature_headers(
-    assignment: &mut subsquid_messages::WorkerAssignment,
+    assignment: &mut sqd_messages::WorkerAssignment,
     worker_id: &PeerId,
     worker_state: &WorkerState,
 ) {

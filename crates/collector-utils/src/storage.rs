@@ -6,7 +6,7 @@ use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use subsquid_messages::{query_executed, InputAndOutput, Ping, Query, QueryExecuted, SizeAndHash};
+use sqd_messages::{query_executed, InputAndOutput, Ping, Query, QueryExecuted, SizeAndHash};
 
 use crate::cli::ClickhouseArgs;
 use crate::timestamp_now_ms;
@@ -303,9 +303,9 @@ impl Storage for ClickhouseStorage {
 
 #[cfg(test)]
 mod tests {
-    use subsquid_messages::signatures::SignedMessage;
-    use subsquid_messages::{InputAndOutput, Query, SizeAndHash};
-    use subsquid_network_transport::{Keypair, PeerId};
+    use sqd_messages::signatures::SignedMessage;
+    use sqd_messages::{InputAndOutput, Query, SizeAndHash};
+    use sqd_network_transport::{Keypair, PeerId};
 
     use super::*;
 

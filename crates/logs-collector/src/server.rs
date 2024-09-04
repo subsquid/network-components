@@ -6,11 +6,11 @@ use futures::{Stream, StreamExt};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::RwLock;
 
-use contract_client::Client as ContractClient;
-use subsquid_messages::{LogsCollected, QueryExecuted};
-use subsquid_network_transport::util::TaskManager;
-use subsquid_network_transport::PeerId;
-use subsquid_network_transport::{LogsCollectorEvent, LogsCollectorTransportHandle};
+use sqd_contract_client::Client as ContractClient;
+use sqd_messages::{LogsCollected, QueryExecuted};
+use sqd_network_transport::util::TaskManager;
+use sqd_network_transport::PeerId;
+use sqd_network_transport::{LogsCollectorEvent, LogsCollectorTransportHandle};
 
 use collector_utils::Storage;
 

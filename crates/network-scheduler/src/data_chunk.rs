@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use sha3::{Digest, Sha3_256};
 
-use subsquid_messages::{AssignedChunk, DatasetChunks, Range, WorkerAssignment, WorkerState};
+use sqd_messages::{AssignedChunk, DatasetChunks, Range, WorkerAssignment, WorkerState};
 
 use crate::cli::Config;
 
@@ -54,7 +54,7 @@ impl DataChunk {
         size_bytes: u64,
         filenames: Vec<String>,
     ) -> anyhow::Result<Self> {
-        let chunk = subsquid_messages::data_chunk::DataChunk::from_str(chunk_str)
+        let chunk = sqd_messages::data_chunk::DataChunk::from_str(chunk_str)
             .map_err(|_| anyhow::anyhow!("Invalid chunk: {chunk_str}"))?;
         Ok(Self {
             dataset_id: format!("s3://{bucket}"),
@@ -127,7 +127,7 @@ pub fn chunks_to_assignment(chunks: impl Iterator<Item = DataChunk>) -> WorkerAs
 
 #[cfg(test)]
 mod tests {
-    use subsquid_messages::range::RangeSet;
+    use sqd_messages::range::RangeSet;
 
     use super::*;
 

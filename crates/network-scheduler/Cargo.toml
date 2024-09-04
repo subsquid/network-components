@@ -39,9 +39,9 @@ sha3 = "0.10"
 tokio = { version = "1", features = ["full"] }
 url = "2.5.0"
 
-contract-client = { workspace = true }
-subsquid-messages = { workspace = true, features = ["semver"] }
-subsquid-network-transport = { workspace = true, features = ["scheduler", "metrics"] }
+sqd-contract-client = { workspace = true }
+sqd-messages = { workspace = true, features = ["semver"] }
+sqd-network-transport = { workspace = true, features = ["scheduler", "metrics"] }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"

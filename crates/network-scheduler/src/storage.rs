@@ -136,7 +136,7 @@ impl DatasetStorage {
 
     fn objects_to_chunk(
         &self,
-        objs: impl IntoIterator<Item = S3Object>,
+        objs: impl IntoIterator<Item=S3Object>,
     ) -> anyhow::Result<DataChunk> {
         let mut last_key = None;
         let mut blocks_file_present = false;
@@ -299,7 +299,7 @@ impl S3Storage {
         prometheus_metrics::s3_request();
     }
 
-    pub fn save_chunks_list(&self, chunks_summary: &ChunksSummary) -> impl Future<Output = ()> {
+    pub fn save_chunks_list(&self, chunks_summary: &ChunksSummary) -> impl Future<Output=()> {
         log::debug!("Saving chunks list");
         let future = match serde_json::to_vec(&chunks_summary) {
             Ok(bytes) => Some(
@@ -315,12 +315,12 @@ impl S3Storage {
                 None
             }
         };
-        return async move {
+        async move {
             let Some(future) = future else { return };
             if let Err(e) = future.await {
                 log::error!("Error saving chunks list: {e:?}");
             }
             prometheus_metrics::s3_request();
-        };
+        }
     }
 }

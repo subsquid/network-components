@@ -107,8 +107,8 @@ impl Cli {
         let file_contents = tokio::fs::read(&self.config).await?;
         let mut config: Config = serde_yaml::from_slice(file_contents.as_slice())?;
         config.network = match self.transport.rpc.network {
-            contract_client::Network::Tethys => "tethys".to_string(),
-            contract_client::Network::Mainnet => "mainnet".to_string(),
+            sqd_contract_client::Network::Tethys => "tethys".to_string(),
+            sqd_contract_client::Network::Mainnet => "mainnet".to_string(),
         };
         CONFIG.set(config)?;
         Ok(())

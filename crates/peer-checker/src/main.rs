@@ -7,6 +7,7 @@ use axum::routing::post;
 use axum::{Extension, Json, Router};
 use clap::Parser;
 use env_logger::Env;
+use tokio::signal::unix::{signal, SignalKind};
 
 use sqd_network_transport::{
     P2PTransportBuilder, PeerCheckerConfig, PeerCheckerTransportHandle, ProbeRequest, ProbeResult,
@@ -15,7 +16,6 @@ use sqd_network_transport::{
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
-use tokio::signal::unix::{signal, SignalKind};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -98,8 +98,10 @@ async fn main() -> anyhow::Result<()> {
             config.probe_timeout = Duration::from_secs(args.probe_timeout_sec);
             config
         });
-    let mut config = PeerCheckerConfig::default();
-    config.probe_queue_size = args.probe_queue_size;
+    let config = PeerCheckerConfig {
+        probe_queue_size: args.probe_queue_size,
+        ..Default::default()
+    };
     let transport_handle = transport_builder.build_peer_checker(config)?;
 
     // Start HTTP server

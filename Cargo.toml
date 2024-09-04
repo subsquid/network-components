@@ -3,6 +3,6 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.dependencies]
-sqd-contract-client = { git = "https://github.com/subsquid/subsquid-network.git", rev = "cb00752" } # FIXME: change to ver
-sqd-messages = { git = "https://github.com/subsquid/subsquid-network.git", rev = "cb00752" } # FIXME: change to ver
-sqd-network-transport = { git = "https://github.com/subsquid/subsquid-network.git", rev = "cb00752" } # FIXME: change to ver
+sqd-contract-client = { git = "https://github.com/subsquid/subsquid-network.git", version = "1.0.7" }
+sqd-messages = { git = "https://github.com/subsquid/subsquid-network.git", version = "1.0.3" }
+sqd-network-transport = { git = "https://github.com/subsquid/subsquid-network.git", version = "1.0.20" }

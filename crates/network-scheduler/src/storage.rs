@@ -102,6 +102,8 @@ impl DatasetStorage {
         Ok(result)
     }
 
+    // TODO: consider accepting `&self` instead.
+    // The async operation is blocking the entire object only to quickly mutate the state at the end.
     async fn list_all_new_chunks(&mut self) -> anyhow::Result<Vec<DataChunk>> {
         let objects = match NonEmpty::from_vec(self.list_all_new_objects().await?) {
             None => return Ok(Vec::new()),

@@ -191,7 +191,7 @@ impl WorkerState {
         self.assigned_units.iter().flat_map(|unit_id| {
             units_map
                 .get(unit_id)
-                .expect("Unknown scheduling unit")
+                .unwrap_or_else(|| panic!("Unknown scheduling unit {unit_id}"))
                 .clone()
         })
     }

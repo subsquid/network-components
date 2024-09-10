@@ -74,7 +74,10 @@ impl Scheduler {
             .filter_map(|unit| (!dataset_urls.contains(unit.dataset_url())).then_some(*unit.key()))
             .collect_vec();
         for unit_id in deprecated_unit_ids.iter() {
-            let (_, unit) = self.known_units.remove(unit_id).expect("unknown unit");
+            let (_, unit) = self
+                .known_units
+                .remove(unit_id)
+                .unwrap_or_else(|| panic!("unknown unit {unit_id}"));
             log::info!("Removing deprecated scheduling unit {unit}");
             let unit_size = unit.size_bytes();
             self.units_assignments
@@ -85,7 +88,7 @@ impl Scheduler {
                 .for_each(|worker_id| {
                     self.worker_states
                         .get_mut(&worker_id)
-                        .expect("unknown worker")
+                        .unwrap_or_else(|| panic!("unknown worker {worker_id}"))
                         .remove_unit(unit_id, unit_size)
                 });
         }
@@ -188,20 +191,20 @@ impl Scheduler {
         let mut holders = self
             .units_assignments
             .get(&unit_id)
-            .expect("No assignment entry for unit")
+            .unwrap_or_else(|| panic!("No assignment entry for unit {unit_id}"))
             .clone();
         holders.retain(|worker_id| {
             let mut worker = self
                 .worker_states
                 .get_mut(worker_id)
-                .expect("Unknown worker");
+                .unwrap_or_else(|| panic!("Unknown worker {worker_id}"));
             let retained = worker.try_expand_unit(&unit_id, old_size, unit_size);
             worker.reset_download_progress(&self.known_units);
             retained
         });
         self.units_assignments
             .get_mut(&unit_id)
-            .expect("No assignment entry for unit")
+            .unwrap_or_else(|| panic!("No assignment entry for unit {unit_id}"))
             .retain(|worker_id| holders.contains(worker_id));
         prometheus_metrics::exec_time("new_unit", start.elapsed());
     }
@@ -221,7 +224,7 @@ impl Scheduler {
     fn get_worker(&self, worker_id: &PeerId) -> RefMut<PeerId, WorkerState> {
         self.worker_states
             .get_mut(worker_id)
-            .expect("Unknown worker")
+            .unwrap_or_else(|| panic!("Unknown worker {worker_id}"))
     }
 
     fn num_replicas(&self, unit_id: &UnitId) -> usize {
@@ -264,7 +267,7 @@ impl Scheduler {
                 for unit_id in worker.assigned_units {
                     self.units_assignments
                         .get_mut(&unit_id)
-                        .expect("unknown unit")
+                        .unwrap_or_else(|| panic!("unknown unit {unit_id}"))
                         .retain(|id| *id != worker.peer_id);
                 }
             });
@@ -346,7 +349,7 @@ impl Scheduler {
             for unit_id in units {
                 self.units_assignments
                     .get_mut(unit_id)
-                    .expect("unknown unit")
+                    .unwrap_or_else(|| panic!("unknown unit {unit_id}"))
                     .retain(|id| id != worker_id)
             }
         }
@@ -398,18 +401,18 @@ impl Scheduler {
             let mut holder_ids = self
                 .units_assignments
                 .get_mut(unit_id)
-                .expect("cannot remove replica: no assignees");
+                .unwrap_or_else(|| panic!("cannot remove replica: no assignees for {unit_id}"));
             let random_idx = thread_rng().gen_range(0..holder_ids.len());
             holder_ids.remove(random_idx)
         };
         let unit_size = self
             .known_units
             .get(unit_id)
-            .expect("Unknown unit")
+            .unwrap_or_else(|| panic!("unknown unit {unit_id}"))
             .size_bytes();
         self.worker_states
             .get_mut(&holder_id)
-            .expect("Unknown worker")
+            .unwrap_or_else(|| panic!("unknown worker {holder_id}"))
             .remove_unit(unit_id, unit_size);
     }
 
@@ -491,7 +494,7 @@ impl Scheduler {
                     workers.push((remaining_capacity - unit_size, worker_id));
                     self.units_assignments
                         .get_mut(&unit_id)
-                        .expect("No unit assignment")
+                        .unwrap_or_else(|| panic!("No unit assignment for {unit_id}"))
                         .push(worker_id);
                     break;
                 } else {
@@ -553,7 +556,7 @@ fn add_signature_headers(
             value: worker_state
                 .signature
                 .clone()
-                .expect("Worker signature not initialized"),
+                .unwrap_or_else(|| panic!("Worker {worker_id} signature not initialized")),
         },
     ]);
 }

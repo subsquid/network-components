@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{Stream, StreamExt};
+use rand::seq::IteratorRandom;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::RwLock;
 
@@ -130,6 +131,12 @@ where
                     Ok(seq_nums) => seq_nums,
                     Err(e) => return log::error!("Error saving logs to storage: {e:?}"),
                 };
+                // The pubsub message limit size prevents us from sending all sequence numbers
+                let sequence_numbers = sequence_numbers
+                    .into_iter()
+                    .choose_multiple(&mut rand::thread_rng(), 900)
+                    .into_iter()
+                    .collect();
                 let logs_collected = LogsCollected { sequence_numbers };
                 if transport_handle.logs_collected(logs_collected).is_err() {
                     log::error!("Error broadcasting logs collected: queue full");

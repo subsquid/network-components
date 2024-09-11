@@ -61,6 +61,8 @@ pub struct Config {
     pub recommended_worker_versions: VersionReq,
     #[serde(default)]
     pub jail_unreachable: bool,
+    #[serde(default)]
+    pub ignore_existing_conns: bool,
     #[serde(default = "num_cpus::get")]
     pub ping_processing_threads: usize,
     #[serde(skip_serializing, skip_deserializing, default)]

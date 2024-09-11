@@ -2,9 +2,9 @@ use clap::Parser;
 use env_logger::Env;
 use prometheus_client::registry::Registry;
 
-use sqd_network_transport::P2PTransportBuilder;
+use sqd_network_transport::{P2PTransportBuilder, SchedulerConfig};
 
-use crate::cli::Cli;
+use crate::cli::{Cli, Config};
 use crate::server::Server;
 use crate::storage::S3Storage;
 
@@ -45,8 +45,12 @@ async fn main() -> anyhow::Result<()> {
     let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
     let contract_client: Box<dyn sqd_contract_client::Client> = transport_builder.contract_client();
     let local_peer_id = transport_builder.local_peer_id();
+    let scheduler_config = SchedulerConfig {
+        ignore_existing_conns: Config::get().ignore_existing_conns,
+        ..Default::default()
+    };
     let (incoming_messages, transport_handle) =
-        transport_builder.build_scheduler(Default::default())?;
+        transport_builder.build_scheduler(scheduler_config)?;
 
     // Get scheduling units
     let storage = S3Storage::new(local_peer_id).await;

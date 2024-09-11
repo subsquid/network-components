@@ -38,4 +38,5 @@ scheduler_state_bucket: network-scheduler-state-test
 supported_worker_versions: ">=1.0.0-rc3"
 recommended_worker_versions: ">=1.0.0"
 jail_unreachable: false
+ignore_existing_conns: false
 ping_processing_threads: 16

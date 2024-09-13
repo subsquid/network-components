@@ -93,7 +93,7 @@ impl Controller {
 
         if let Some(start_block) = start_block {
             if first_block < *start_block {
-                return Err(format!("{} dataset starts from {}", dataset_name, first_block))
+                return Err(format!("{} dataset starts from {} block", dataset_name, start_block))
             }
         }
 

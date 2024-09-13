@@ -70,7 +70,7 @@ pub struct Controller {
     workers_rate: WorkersRate,
     request_cache: RequestCache,
     datasets_height: HashMap<Dataset, AtomicI64>,
-    managed_datasets: HashMap<String, Dataset>,
+    managed_datasets: HashMap<String, (Dataset, Option<u32>)>,
     managed_workers: HashSet<WorkerId>,
     data_replication: usize,
     data_management_unit: usize
@@ -84,12 +84,18 @@ unsafe impl Sync for Controller {}
 impl Controller {
     #[tracing::instrument(level="debug", skip(self))]
     pub fn get_worker(&self, dataset_name: &str, first_block: u32) -> Result<Option<Url>, String> {
-        let dataset = match self.managed_datasets.get(dataset_name) {
+        let (dataset, start_block) = match self.managed_datasets.get(dataset_name) {
             Some(ds) => ds,
             None => {
                 return Err("unknown dataset".to_string())
             }
         };
+
+        if let Some(start_block) = start_block {
+            if first_block < *start_block {
+                return Err(format!("{} dataset starts from {}", dataset_name, first_block))
+            }
+        }
 
         let now = SystemTime::now();
 
@@ -176,7 +182,7 @@ impl Controller {
     }
 
     pub fn get_height(&self, dataset_name: &str) -> Result<Option<i32>, String> {
-        let dataset = match self.managed_datasets.get(dataset_name) {
+        let (dataset, _) = match self.managed_datasets.get(dataset_name) {
             Some(ds) => ds,
             None => return Err("unknown dataset".to_string())
         };
@@ -468,7 +474,7 @@ impl Controller {
 
 
 pub struct ControllerBuilder {
-    managed_datasets: HashMap<String, Dataset>,
+    managed_datasets: HashMap<String, (Dataset, Option<u32>)>,
     managed_workers: HashSet<WorkerId>,
     replication: usize,
     data_management_unit: usize,
@@ -508,13 +514,13 @@ impl ControllerBuilder {
         self
     }
 
-    pub fn add_dataset(&mut self, name: String, dataset: Dataset) -> &mut Self {
+    pub fn add_dataset(&mut self, name: String, dataset: (Dataset, Option<u32>)) -> &mut Self {
         self.managed_datasets.insert(name, dataset);
         self
     }
 
     pub fn set_datasets<I>(&mut self, datasets: I) -> &mut Self
-        where I: IntoIterator<Item = (String, Dataset)>
+        where I: IntoIterator<Item = (String, (Dataset, Option<u32>))>
     {
         self.managed_datasets.clear();
         self.managed_datasets.extend(datasets);
@@ -525,12 +531,12 @@ impl ControllerBuilder {
         Controller {
             schedule: parking_lot::Mutex::new(Schedule {
                 datasets: self.managed_datasets.iter()
-                    .map(|(_name, ds)| (ds.clone(), Vec::new()))
+                    .map(|(_name, (ds, _))| (ds.clone(), Vec::new()))
                     .collect(),
                 assignment: HashMap::new()
             }),
             datasets_height: self.managed_datasets.values()
-                .map(|name| (name.clone(), AtomicI64::new(INITIAL_VALUE)))
+                .map(|(name, _)| (name.clone(), AtomicI64::new(INITIAL_VALUE)))
                 .collect(),
             workers: Atom::new(Arc::new(Vec::new())),
             workers_rate: WorkersRate::new(),
@@ -558,7 +564,7 @@ mod tests {
             .set_data_management_unit(1)
             .set_data_replication(2)
             .set_workers((0..8).map(|i| i.to_string()))
-            .set_datasets((0..2).map(|i| (i.to_string(), i.to_string())))
+            .set_datasets((0..2).map(|i| (i.to_string(), (i.to_string(), None))))
             .build();
 
         let chunks = vec![

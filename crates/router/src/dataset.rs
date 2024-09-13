@@ -41,8 +41,8 @@ impl Dataset {
     }
 }
 
-impl From<&Dataset> for (String, String) {
+impl From<&Dataset> for (String, (String, Option<u32>)) {
     fn from(value: &Dataset) -> Self {
-        (value.name.clone(), value.url.clone())
+        (value.name.clone(), (value.url.clone(), value.start_block))
     }
 }

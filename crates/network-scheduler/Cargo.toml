@@ -1,6 +1,6 @@
 [package]
 name = "network-scheduler"
-version = "1.0.23"
+version = "1.0.24"
 edition = "2021"
 
 [dependencies]
@@ -14,6 +14,7 @@ clap = { version = "4", features = ["derive", "env"] }
 dashmap = { version = "6", features = ["serde"] }
 derive-enum-from-into = "0.1"
 env_logger = "0.11"
+flate2 = "1.0"
 futures = "0.3"
 hex = "0.4"
 hmac = "0.12.1"

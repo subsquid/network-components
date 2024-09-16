@@ -4611,7 +4611,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "1.0.23"
+version = "1.0.24"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4623,6 +4623,7 @@ dependencies = [
  "dashmap",
  "derive-enum-from-into",
  "env_logger",
+ "flate2",
  "futures",
  "hex",
  "hmac",

@@ -232,7 +232,7 @@ impl S3Storage {
             .await;
         let client = s3::Client::new(&s3_config);
         let scheduler_state_key = format!("scheduler_{scheduler_id}.json");
-        let chunks_list_key = format!("datasets_{}.json", config.network);
+        let chunks_list_key = format!("datasets_{}.json.gz", config.network);
         Self {
             client,
             config,
@@ -324,13 +324,16 @@ impl S3Storage {
         let json = serde_json::json!({
             "chunks": chunks
         });
-        let future = match serde_json::to_vec(&json) {
-            Ok(bytes) => Some(
+        let future = match serde_json::to_vec(&json)
+            .map_err(anyhow::Error::from)
+            .and_then(gzip)
+        {
+            Ok(compressed) => Some(
                 self.client
                     .put_object()
                     .bucket(&self.config.scheduler_state_bucket)
                     .key(&self.chunks_list_key)
-                    .body(bytes.into())
+                    .body(compressed.into())
                     .send(),
             ),
             Err(e) => {
@@ -346,4 +349,12 @@ impl S3Storage {
             prometheus_metrics::s3_request();
         }
     }
+}
+
+fn gzip(data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+    use flate2::write::GzEncoder;
+    use std::io::Write;
+    let mut encoder = GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(&data)?;
+    Ok(encoder.finish()?)
 }

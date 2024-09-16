@@ -303,7 +303,28 @@ impl S3Storage {
 
     pub fn save_chunks_list(&self, chunks_summary: &ChunksSummary) -> impl Future<Output = ()> {
         log::debug!("Saving chunks list");
-        let future = match serde_json::to_vec(&chunks_summary) {
+        let chunks = chunks_summary
+            .iter()
+            .map(|(ds, chunks)| {
+                (
+                    ds.clone(),
+                    chunks
+                        .iter()
+                        .map(|c| {
+                            serde_json::json!({
+                                "begin": c.begin,
+                                "end": c.end,
+                                "size_bytes": c.size_bytes,
+                            })
+                        })
+                        .collect(),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>();
+        let json = serde_json::json!({
+            "chunks": chunks
+        });
+        let future = match serde_json::to_vec(&json) {
             Ok(bytes) => Some(
                 self.client
                     .put_object()

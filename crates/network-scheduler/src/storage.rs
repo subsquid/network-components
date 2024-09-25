@@ -118,17 +118,17 @@ impl DatasetStorage {
             .collect::<anyhow::Result<Vec<DataChunk>>>()?;
 
         // Verify if chunks are continuous
-        let mut next_block = self.last_block.map(|x| x + 1).unwrap_or_default();
+        let mut next_block = self.last_block.map(|x| x + 1);
         for chunk in chunks.iter() {
-            if chunk.block_range.begin != next_block {
+            if next_block.is_some_and(|next_block| chunk.block_range.begin != next_block) {
                 anyhow::bail!(
                     "Blocks {} to {} missing from {}",
-                    next_block,
+                    next_block.unwrap(),
                     chunk.block_range.begin - 1,
                     self.bucket
                 );
             }
-            next_block = chunk.block_range.end + 1;
+            next_block = Some(chunk.block_range.end + 1);
         }
 
         self.last_key = Some(last_key);

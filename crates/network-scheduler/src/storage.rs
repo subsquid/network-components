@@ -303,6 +303,7 @@ impl S3Storage {
 
     pub fn save_chunks_list(&self, chunks_summary: &ChunksSummary) -> impl Future<Output = ()> {
         log::debug!("Saving chunks list");
+        let start = tokio::time::Instant::now();
         let chunks = chunks_summary
             .iter()
             .map(|(ds, chunks)| {
@@ -347,6 +348,7 @@ impl S3Storage {
                 log::error!("Error saving chunks list: {e:?}");
             }
             prometheus_metrics::s3_request();
+            prometheus_metrics::exec_time("save_chunks", start.elapsed());
         }
     }
 }

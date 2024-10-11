@@ -64,12 +64,18 @@ struct Schedule {
 }
 
 
+struct DatasetHeight {
+    confirmed: AtomicI64,
+    pending: AtomicI64,
+}
+
+
 pub struct Controller {
     schedule: parking_lot::Mutex<Schedule>,
     workers: Atom<Vec<Worker>>,
     workers_rate: WorkersRate,
     request_cache: RequestCache,
-    datasets_height: HashMap<Dataset, AtomicI64>,
+    datasets_height: HashMap<Dataset, DatasetHeight>,
     managed_datasets: HashMap<String, (Dataset, Option<u32>)>,
     managed_workers: HashSet<WorkerId>,
     data_replication: usize,
@@ -189,10 +195,42 @@ impl Controller {
 
         match self.datasets_height
             .get(dataset)
-            .map(|height| height.load(Ordering::Relaxed)) {
+            .map(|height| height.pending.load(Ordering::Relaxed)) {
                 Some(INITIAL_VALUE) | None => Ok(None),
                 Some(value) => Ok(value.try_into().ok()),
             }
+    }
+
+    pub fn get_confirmed_height(&self, dataset_name: &str) -> Result<Option<i32>, String> {
+        let (dataset, _) = match self.managed_datasets.get(dataset_name) {
+            Some(ds) => ds,
+            None => return Err("unknown dataset".to_string())
+        };
+
+        match self.datasets_height.get(dataset) {
+            Some(height) => {
+                let confirmed = height.confirmed.load(Ordering::Relaxed);
+                let pending = height.pending.load(Ordering::Relaxed);
+
+                if confirmed == INITIAL_VALUE {
+                    return Ok(None)
+                }
+
+                if confirmed == pending {
+                    return Ok(confirmed.try_into().ok())
+                }
+
+                let block_num = pending.try_into().unwrap();
+                let worker = self.get_worker(dataset_name, block_num)?;
+                if worker.is_some() {
+                    height.confirmed.store(pending, Ordering::Relaxed);
+                    Ok(pending.try_into().ok())
+                } else {
+                    Ok(confirmed.try_into().ok())
+                }
+            }
+            None => Ok(None)
+        }
     }
 
     fn format_worker_url(base: &Url, dataset: &Dataset) -> String {
@@ -243,11 +281,18 @@ impl Controller {
             let height = self.datasets_height.get(dataset).unwrap();
             if let Some(chunk) = chunks.last() {
                 let last_block = chunk.last_block();
-                height.store(last_block.into(), Ordering::Relaxed);
-            } else {
-                let value = height.load(Ordering::Relaxed);
+                let value = height.confirmed.load(Ordering::Relaxed);
                 if value == INITIAL_VALUE {
-                    height.store(EMPTY_VALUE, Ordering::Relaxed);
+                    height.confirmed.store(last_block.into(), Ordering::Relaxed);
+                    height.pending.store(last_block.into(), Ordering::Relaxed);
+                } else {
+                    height.pending.store(last_block.into(), Ordering::Relaxed);
+                }
+            } else {
+                let value = height.confirmed.load(Ordering::Relaxed);
+                if value == INITIAL_VALUE {
+                    height.confirmed.store(EMPTY_VALUE, Ordering::Relaxed);
+                    height.pending.store(EMPTY_VALUE, Ordering::Relaxed);
                 }
             }
         }
@@ -536,7 +581,13 @@ impl ControllerBuilder {
                 assignment: HashMap::new()
             }),
             datasets_height: self.managed_datasets.values()
-                .map(|(name, _)| (name.clone(), AtomicI64::new(INITIAL_VALUE)))
+                .map(|(name, _)| {
+                    let height = DatasetHeight {
+                        confirmed: AtomicI64::new(INITIAL_VALUE),
+                        pending: AtomicI64::new(INITIAL_VALUE),
+                    };
+                    (name.clone(), height)
+                })
                 .collect(),
             workers: Atom::new(Arc::new(Vec::new())),
             workers_rate: WorkersRate::new(),

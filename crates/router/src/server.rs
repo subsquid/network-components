@@ -58,7 +58,7 @@ async fn get_height(
     Path(dataset): Path<String>,
     Extension(controller): Extension<Arc<Controller>>,
 ) -> Response {
-    match controller.get_height(&dataset) {
+    match controller.get_confirmed_height(&dataset) {
         Ok(Some(height)) => height.to_string().into_response(),
         Ok(None) => {
             let status = StatusCode::SERVICE_UNAVAILABLE;

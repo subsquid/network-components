@@ -18,6 +18,7 @@ mod server;
 mod signature;
 mod storage;
 mod worker_state;
+mod assignment;
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;

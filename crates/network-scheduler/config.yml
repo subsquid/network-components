@@ -34,6 +34,7 @@ dataset_buckets:
   - bsc-mainnet-1
   - base-1
   - moonbeam-evm-1
+network_state_name: network-state.json
 scheduler_state_bucket: network-scheduler-state-test
 supported_worker_versions: ">=1.0.0-rc3"
 recommended_worker_versions: ">=1.0.0"

@@ -1,18 +1,25 @@
 use std::fmt::Display;
 use std::future::Future;
+use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 
 use aws_sdk_s3 as s3;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::types::Object;
+use chrono::Utc;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use itertools::Itertools;
 use nonempty::NonEmpty;
+use serde_json::Value;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
+use sha2::{Sha256, Digest};
 
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 
+use crate::assignment::{Assignment, NetworkAssignment, NetworkState};
 use crate::cli::Config;
 use crate::data_chunk::DataChunk;
 use crate::prometheus_metrics;
@@ -298,6 +305,53 @@ impl S3Storage {
             .send()
             .await
             .map_err(|e| log::error!("Error saving scheduler state: {e:?}"));
+        prometheus_metrics::s3_request();
+    }
+
+    pub async fn save_assignment(&self, scheduler_state: &Vec<u8>) {
+        log::debug!("Encoding assignment");
+        let json: Value = serde_json::from_slice(scheduler_state).unwrap();
+        let assignment = Assignment::new(&json, Config::get().cloudflare_storage_secret.clone());
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+        let _ = encoder.write_all(serde_json::to_vec(&assignment).unwrap().as_slice());
+        let compressed_bytes = encoder.finish().unwrap();
+        log::debug!("Saving assignment");
+        let mut hasher = Sha256::new();
+        hasher.update(compressed_bytes.as_slice());
+        let hash = hasher.finalize();
+        let network = Config::get().network.clone();
+        let dt = Utc::now();
+        let ts = dt.format("%Y%m%dT%H%M%S");
+        let filename: String =  format!("assignments/{network}_{ts}_{hash:X}.json.gz");
+        
+        let _ = self
+            .client
+            .put_object()
+            .bucket(&self.config.scheduler_state_bucket)
+            .key(&filename)
+            .body(compressed_bytes.into())
+            .send()
+            .await
+            .map_err(|e| log::error!("Error saving assignment: {e:?}"));
+        prometheus_metrics::s3_request();
+
+        let network_state = NetworkState {
+            network: Config::get().network.clone(),
+            assignment: NetworkAssignment { 
+                url: format!("https://metadata.sqd-datasets.io/{filename}"), 
+                id: format!("{ts}_{hash:X}")
+            }
+        };
+        let contents = serde_json::to_vec(&network_state).unwrap();
+        let _ = self
+            .client
+            .put_object()
+            .bucket(&self.config.scheduler_state_bucket)
+            .key(Config::get().network_state_name.clone())
+            .body(contents.into())
+            .send()
+            .await
+            .map_err(|e| log::error!("Error saving assignment: {e:?}"));
         prometheus_metrics::s3_request();
     }
 

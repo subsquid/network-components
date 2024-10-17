@@ -8,6 +8,7 @@ use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus_client::registry::Registry;
+use tokio::join;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc::Receiver;
 use tokio::time::Instant;
@@ -171,7 +172,11 @@ impl Server {
                 if current_epoch >= last_schedule_epoch + schedule_interval {
                     scheduler.schedule(current_epoch);
                     match scheduler.to_json() {
-                        Ok(state) => storage_client.save_scheduler(state).await,
+                        Ok(state) => {
+                            let assignment_fut = storage_client.save_assignment(&state);
+                            let scheduler_fut = storage_client.save_scheduler(state.clone());
+                            join!(scheduler_fut, assignment_fut).1
+                        },
                         Err(e) => log::error!("Error serializing scheduler: {e:?}"),
                     }
                 }

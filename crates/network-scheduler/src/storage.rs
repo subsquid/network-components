@@ -308,7 +308,7 @@ impl S3Storage {
         prometheus_metrics::s3_request();
     }
 
-    pub async fn save_assignment(&self, scheduler_state: &Vec<u8>) {
+    pub async fn save_assignment(&self, scheduler_state: &[u8]) {
         log::debug!("Encoding assignment");
         let json: Value = serde_json::from_slice(scheduler_state).unwrap();
         let assignment = Assignment::new(&json, Config::get().cloudflare_storage_secret.clone());
@@ -320,26 +320,33 @@ impl S3Storage {
         hasher.update(compressed_bytes.as_slice());
         let hash = hasher.finalize();
         let network = Config::get().network.clone();
-        let dt = Utc::now();
-        let ts = dt.format("%Y%m%dT%H%M%S");
-        let filename: String =  format!("assignments/{network}_{ts}_{hash:X}.json.gz");
+        let current_time = Utc::now();
+        let timestamp = current_time.format("%FT%T");
+        let filename: String =  format!("assignments/{network}/{timestamp}_{hash:X}.json.gz");
         
-        let _ = self
+        let saving_result = self
             .client
             .put_object()
             .bucket(&self.config.scheduler_state_bucket)
+            //.bucket("network-scheduler-state")
             .key(&filename)
             .body(compressed_bytes.into())
             .send()
-            .await
-            .map_err(|e| log::error!("Error saving assignment: {e:?}"));
+            .await;
         prometheus_metrics::s3_request();
+        match saving_result {
+            Ok(_) => {},
+            Err(e) => {
+                log::error!("Error saving assignment: {e:?}");
+                return;
+            }
+        }
 
         let network_state = NetworkState {
             network: Config::get().network.clone(),
             assignment: NetworkAssignment { 
                 url: format!("https://metadata.sqd-datasets.io/{filename}"), 
-                id: format!("{ts}_{hash:X}")
+                id: format!("{timestamp}_{hash:X}")
             }
         };
         let contents = serde_json::to_vec(&network_state).unwrap();
@@ -347,11 +354,12 @@ impl S3Storage {
             .client
             .put_object()
             .bucket(&self.config.scheduler_state_bucket)
+            //.bucket("network-scheduler-state")
             .key(Config::get().network_state_name.clone())
             .body(contents.into())
             .send()
             .await
-            .map_err(|e| log::error!("Error saving assignment: {e:?}"));
+            .map_err(|e| log::error!("Error saving link to assignment: {e:?}"));
         prometheus_metrics::s3_request();
     }
 

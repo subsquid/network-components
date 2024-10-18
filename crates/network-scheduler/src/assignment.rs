@@ -13,7 +13,7 @@ pub struct Chunk {
     pub id: String,
     pub base_url: String,
     pub files: HashMap<String, String>,
-    size: u64,
+    size_bytes: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -141,7 +141,7 @@ impl Assignment {
     }
 
     pub fn chunk_index(&mut self, chunk_id: String) -> Option<u64> {
-        if self.chunk_map == None {
+        if self.chunk_map.is_none() {
             let mut chunk_map: HashMap<String, u64> = Default::default();
             let mut idx = 0;
             for dataset in &self.datasets {
@@ -152,16 +152,13 @@ impl Assignment {
             };
             self.chunk_map = Some(chunk_map);
         };
-        match self.chunk_map.as_ref().unwrap().get(&chunk_id) {
-            Some(idx) =>Some(idx.clone()),
-            None => None
-        }
+        self.chunk_map.as_ref().unwrap().get(&chunk_id).cloned()
     }
 
     pub fn regenerate_headers(&mut self, cloudflare_storage_secret: String) {
         for (worker_id, worker_assignment) in &mut self.worker_assignments {
             let worker_signature = timed_hmac_now(
-                &worker_id,
+                worker_id,
                 &cloudflare_storage_secret,
             );
             worker_assignment.encrypted_headers = EncryptedHeaders { 
@@ -187,12 +184,12 @@ impl Assignment {
                 }
                 let dataset_str = chunk.get("dataset_id").unwrap().as_str().unwrap().to_string();
                 let dataset_id = base64.encode(dataset_str);
-                let size = chunk.get("size_bytes").unwrap().as_u64().unwrap();
+                let size_bytes = chunk.get("size_bytes").unwrap().as_u64().unwrap();
                 let chunk = Chunk {
                     id: chunk_str.clone(),
                     base_url: format!("{download_url}/{chunk_str}"),
                     files,
-                    size,
+                    size_bytes,
                 };
     
                 assignment.add_chunk(chunk, dataset_id, download_url);
@@ -218,7 +215,7 @@ impl Assignment {
             }
             chunks_idxs.sort();
             for i in (1..chunks_idxs.len()).rev() {
-                chunks_idxs[i] = chunks_idxs[i] - chunks_idxs[i - 1];
+                chunks_idxs[i] -= chunks_idxs[i - 1];
             };
 
             assignment.worker_assignments.insert(peer_id.clone(), WorkerAssignment { 

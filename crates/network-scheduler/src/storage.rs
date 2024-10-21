@@ -12,7 +12,6 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use itertools::Itertools;
 use nonempty::NonEmpty;
-use serde_json::Value;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
 use sha2::{Sha256, Digest};
@@ -308,10 +307,8 @@ impl S3Storage {
         prometheus_metrics::s3_request();
     }
 
-    pub async fn save_assignment(&self, scheduler_state: &[u8]) {
+    pub async fn save_assignment(&self, assignment: Assignment) {
         log::debug!("Encoding assignment");
-        let json: Value = serde_json::from_slice(scheduler_state).unwrap();
-        let assignment = Assignment::new(&json, Config::get().cloudflare_storage_secret.clone());
         let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
         let _ = encoder.write_all(serde_json::to_vec(&assignment).unwrap().as_slice());
         let compressed_bytes = encoder.finish().unwrap();

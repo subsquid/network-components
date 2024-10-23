@@ -289,9 +289,6 @@ impl Server {
                 log::info!("Updating chunks summary");
                 let workers = scheduler.all_workers();
                 let units = scheduler.known_units();
-                let _ = units.iter().take(10).map(|entry| {
-                    log::info!("key: {}, val: {:?}", entry.key(), entry.value().chunks);
-                }).collect::<Vec<()>>();
                 let assignment = build_assignment(&workers, &units);
                 let assignment_fut = storage_client.save_assignment(assignment);
                 let summary = build_chunks_summary(workers, units);

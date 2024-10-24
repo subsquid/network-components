@@ -116,12 +116,15 @@ impl Server {
                             SchedulerEvent::Ping { peer_id, ping } => (peer_id, ping),
                             SchedulerEvent::PeerProbed { peer_id, reachable } => {
                                 return scheduler.worker_dialed(peer_id, reachable)
+                            },
+                            SchedulerEvent::Heartbeat { peer_id, .. } => {
+                                return log::debug!("Got heartbeat from {peer_id}");
                             }
                         };
 
                         log::debug!("Got ping from {peer_id}");
                         let start = Instant::now();
-                        let ping_hash = msg_hash(&ping);
+                        let ping_hash = msg_hash(&ping).to_vec();
                         let status = scheduler.ping(peer_id, ping.clone());
                         if status.is_some() {
                             let pong = Pong { ping_hash, status };

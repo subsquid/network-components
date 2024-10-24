@@ -30,7 +30,7 @@ struct DatasetStorage {
     bucket: String,
     client: s3::Client,
     last_key: Option<String>,
-    last_block: Option<u32>,
+    last_block: Option<u64>,
 }
 
 #[derive(Debug, Clone)]

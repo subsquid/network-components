@@ -7,7 +7,7 @@ use sqd_messages::data_chunk::DataChunk;
 
 pub trait Storage {
     /// Get data chunks in the dataset.
-    fn get_chunks(&mut self, next_block: u32) -> Result<Vec<DataChunk>, String>;
+    fn get_chunks(&mut self, next_block: u64) -> Result<Vec<DataChunk>, String>;
 }
 
 fn invalid_object_key(key: &str) -> String {
@@ -26,7 +26,7 @@ pub struct S3Storage {
 }
 
 impl Storage for S3Storage {
-    fn get_chunks(&mut self, next_block: u32) -> Result<Vec<DataChunk>, String> {
+    fn get_chunks(&mut self, next_block: u64) -> Result<Vec<DataChunk>, String> {
         let mut objects = vec![];
         let handle = Handle::current();
 
@@ -34,7 +34,7 @@ impl Storage for S3Storage {
         let tops = self.ls(prefix)?;
 
         let top = tops.iter().rev().find(|top| {
-            let top: u32 = top.parse().unwrap();
+            let top: u64 = top.parse().unwrap();
             top <= next_block
         });
 

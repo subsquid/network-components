@@ -1,7 +1,7 @@
 use std::cmp::{max, min};
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
@@ -55,7 +55,7 @@ struct Schedule {
 pub struct Controller {
     schedule: parking_lot::Mutex<Schedule>,
     workers: Atom<Vec<Worker>>,
-    datasets_height: HashMap<String, AtomicU32>,
+    datasets_height: HashMap<String, AtomicU64>,
     managed_datasets: HashMap<String, Dataset>,
     managed_workers: parking_lot::RwLock<HashSet<WorkerId>>,
     data_replication: usize,
@@ -70,7 +70,7 @@ impl Controller {
     pub fn get_worker(
         &self,
         dataset_name: &str,
-        first_block: u32,
+        first_block: u64,
     ) -> Option<(WorkerId, Url, String)> {
         let dataset = match self.managed_datasets.get(dataset_name) {
             Some(ds) => ds,
@@ -133,7 +133,7 @@ impl Controller {
         })
     }
 
-    pub fn get_height(&self, dataset_name: &str) -> Option<u32> {
+    pub fn get_height(&self, dataset_name: &str) -> Option<u64> {
         let dataset = match self.managed_datasets.get(dataset_name) {
             Some(ds) => ds,
             None => return None,
@@ -188,7 +188,7 @@ impl Controller {
 
     pub fn schedule<F>(&self, mut f: F)
     where
-        F: FnMut(&Dataset, u32) -> Result<Vec<DataChunk>, ()>,
+        F: FnMut(&Dataset, u64) -> Result<Vec<DataChunk>, ()>,
     {
         let mut schedule_lock = self.schedule.lock();
         let schedule = schedule_lock.deref_mut();
@@ -255,7 +255,7 @@ impl Controller {
 
     fn import_new_chunks<F>(chunks: &mut Vec<DataChunk>, f: F) -> bool
     where
-        F: FnOnce(u32) -> Result<Vec<DataChunk>, ()>,
+        F: FnOnce(u64) -> Result<Vec<DataChunk>, ()>,
     {
         let mut next_block = chunks.last().map_or(0, |c| c.last_block() + 1);
         match f(next_block) {
@@ -498,7 +498,7 @@ impl ControllerBuilder {
             datasets_height: self
                 .managed_datasets
                 .values()
-                .map(|name| (name.clone(), AtomicU32::new(0)))
+                .map(|name| (name.clone(), AtomicU64::new(0)))
                 .collect(),
             workers: Atom::new(Arc::new(Vec::new())),
             managed_datasets: self.managed_datasets.clone(),

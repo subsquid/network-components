@@ -8,7 +8,7 @@ use serde_with::{serde_as, TimestampMilliSeconds};
 
 use dashmap::DashMap;
 use sqd_contract_client::Address;
-use sqd_messages::{Ping, RangeSet};
+use sqd_messages::{OldPing, RangeSet};
 use sqd_network_transport::PeerId;
 
 use crate::cli::Config;
@@ -107,7 +107,7 @@ impl WorkerState {
     }
 
     /// Register ping msg from a worker.
-    pub fn ping(&mut self, msg: Ping) {
+    pub fn ping(&mut self, msg: OldPing) {
         self.last_ping = Some(SystemTime::now());
         self.version = msg.version;
         self.stored_ranges = msg

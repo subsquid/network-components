@@ -38,7 +38,7 @@ async fn ping(
 
 #[axum_macros::debug_handler]
 async fn get_worker(
-    Path((dataset, start_block)): Path<(String, u32)>,
+    Path((dataset, start_block)): Path<(String, u64)>,
     Extension(controller): Extension<Arc<Controller>>,
 ) -> Response {
     match controller.get_worker(&dataset, start_block) {

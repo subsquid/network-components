@@ -119,15 +119,11 @@ where
 }
 
 fn open_buffer(path: impl AsRef<Path>) -> anyhow::Result<(yaque::Sender, yaque::Receiver)> {
-    match yaque::channel(&path) {
-        Ok(res) => Ok(res),
-        Err(e) => {
-            // Attempt to recover the buffer if it is corrupted
-            log::warn!("Error opening buffer: {e:?}");
-            yaque::recovery::recover_with_loss(&path)?;
-            Ok(yaque::channel(path)?)
-        }
-    }
+    yaque::recovery::recover_with_loss(&path)?;
+    Ok(yaque::channel(&path).map_err(|e| {
+        log::warn!("Error opening buffer: {e:?}");
+        e
+    })?)
 }
 
 struct Collector {

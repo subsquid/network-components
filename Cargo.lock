@@ -1523,8 +1523,10 @@ checksum = "a21f936df1771bf62b77f047b726c4625ff2e8aa607c01ec06e5a05bd8463401"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-targets 0.52.5",
 ]
 
@@ -4611,7 +4613,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "1.0.26"
+version = "1.0.27"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4619,6 +4621,7 @@ dependencies = [
  "aws-sdk-s3 1.37.0",
  "axum 0.7.5",
  "base64 0.22.1",
+ "chrono",
  "clap",
  "dashmap",
  "derive-enum-from-into",
@@ -6791,7 +6794,7 @@ dependencies = [
 [[package]]
 name = "sqd-contract-client"
 version = "1.0.7"
-source = "git+https://github.com/subsquid/subsquid-network.git#7b7a09bfa9a6177f4ef168dfe12eaceaac05dad9"
+source = "git+https://github.com/subsquid/subsquid-network.git?branch=new_pings#cad25a16bace9e401a0fb10ec6a130791a30b81d"
 dependencies = [
  "async-trait",
  "clap",
@@ -6808,7 +6811,7 @@ dependencies = [
 [[package]]
 name = "sqd-messages"
 version = "1.1.4"
-source = "git+https://github.com/subsquid/subsquid-network.git#7b7a09bfa9a6177f4ef168dfe12eaceaac05dad9"
+source = "git+https://github.com/subsquid/subsquid-network.git?branch=new_pings#cad25a16bace9e401a0fb10ec6a130791a30b81d"
 dependencies = [
  "anyhow",
  "hex",
@@ -6822,8 +6825,8 @@ dependencies = [
 
 [[package]]
 name = "sqd-network-transport"
-version = "1.0.23"
-source = "git+https://github.com/subsquid/subsquid-network.git#7b7a09bfa9a6177f4ef168dfe12eaceaac05dad9"
+version = "1.0.25"
+source = "git+https://github.com/subsquid/subsquid-network.git?branch=new_pings#cad25a16bace9e401a0fb10ec6a130791a30b81d"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -3,7 +3,7 @@ RUN apt-get update && apt-get install protobuf-compiler -y
 WORKDIR /archive-router
 COPY ./ .
 RUN rm -r crates/network-scheduler
-RUN rm -r crates/logs-collector
+RUN rm -rf crates/logs-collector
 RUN --mount=type=ssh cargo build --release
 
 FROM --platform=$BUILDPLATFORM debian:bullseye-slim AS archive-router
@@ -71,18 +71,6 @@ COPY crates/network-scheduler/healthcheck.sh .
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
 
-FROM --platform=$BUILDPLATFORM network-base AS logs-collector
-
-COPY --from=network-builder /app/target/release/logs-collector /usr/local/bin/logs-collector
-
-ENV P2P_LISTEN_ADDRS="/ip4/0.0.0.0/udp/12345/quic-v1"
-
-CMD ["logs-collector"]
-
-COPY crates/logs-collector/healthcheck.sh .
-RUN chmod +x ./healthcheck.sh
-HEALTHCHECK --interval=5s CMD ./healthcheck.sh
-
 FROM --platform=$BUILDPLATFORM network-base AS pings-collector
 
 COPY --from=network-builder /app/target/release/pings-collector /usr/local/bin/pings-collector
@@ -92,7 +80,7 @@ ENV BUFFER_DIR="/run"
 
 CMD ["pings-collector"]
 
-COPY crates/logs-collector/healthcheck.sh .
+COPY healthcheck.sh .
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh
 
@@ -105,6 +93,6 @@ ENV BUFFER_DIR="/run"
 
 CMD ["peer-checker"]
 
-COPY crates/logs-collector/healthcheck.sh .
+COPY healthcheck.sh .
 RUN chmod +x ./healthcheck.sh
 HEALTHCHECK --interval=5s CMD ./healthcheck.sh

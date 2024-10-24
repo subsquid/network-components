@@ -124,7 +124,7 @@ fn open_buffer(path: impl AsRef<Path>) -> anyhow::Result<(yaque::Sender, yaque::
         Err(e) => {
             // Attempt to recover the buffer if it is corrupted
             log::warn!("Error opening buffer: {e:?}");
-            yaque::recovery::recover(&path)?;
+            yaque::recovery::recover_with_loss(&path)?;
             Ok(yaque::channel(path)?)
         }
     }

@@ -44,6 +44,8 @@ sqd-contract-client = { workspace = true }
 sqd-messages = { workspace = true, features = ["semver"] }
 sqd-network-transport = { workspace = true, features = ["scheduler", "metrics"] }
 chrono = "0.4.38"
+bs58 = "0.5.1"
+crypto_box = "0.9.1"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"

@@ -4340,25 +4340,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
-name = "logs-collector"
-version = "1.0.13"
-dependencies = [
- "anyhow",
- "clap",
- "collector-utils",
- "env_logger",
- "futures",
- "log",
- "rand 0.8.5",
- "serde_json",
- "sqd-contract-client",
- "sqd-messages",
- "sqd-network-transport",
- "tikv-jemallocator",
- "tokio",
-]
-
-[[package]]
 name = "lru"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

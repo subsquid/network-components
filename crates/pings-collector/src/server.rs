@@ -14,7 +14,7 @@ use collector_utils::{PingRow, Storage};
 use semver::VersionReq;
 use sqd_contract_client::Client as ContractClient;
 use sqd_network_transport::util::{CancellationToken, TaskManager};
-use sqd_network_transport::{PeerId, Ping, PingsCollectorTransportHandle};
+use sqd_network_transport::{Heartbeat, PeerId, PingsCollectorTransportHandle};
 
 lazy_static! {
     static ref BINCODE_CONFIG: bincode::config::Configuration = Default::default();
@@ -29,7 +29,7 @@ const PINGS_BATCH_SIZE: usize = 10000;
 
 pub struct Server<S>
 where
-    S: Stream<Item = Ping> + Send + Unpin + 'static,
+    S: Stream<Item = Heartbeat> + Send + Unpin + 'static,
 {
     incoming_pings: S,
     _transport_handle: PingsCollectorTransportHandle,
@@ -39,7 +39,7 @@ where
 
 impl<S> Server<S>
 where
-    S: Stream<Item = Ping> + Send + Unpin + 'static,
+    S: Stream<Item = Heartbeat> + Send + Unpin + 'static,
 {
     pub fn new(incoming_pings: S, transport_handle: PingsCollectorTransportHandle) -> Self {
         Self {
@@ -141,18 +141,25 @@ impl Collector {
             registered_workers,
         }
     }
-    pub fn collect_ping(&mut self, Ping { peer_id, ping }: Ping) -> anyhow::Result<()> {
+    pub fn collect_ping(
+        &mut self,
+        Heartbeat { peer_id, heartbeat }: Heartbeat,
+    ) -> anyhow::Result<()> {
         if !self.registered_workers.read().contains(&peer_id) {
-            log::warn!("Ping from unregistered worker {peer_id}: {ping:?}");
+            log::warn!("Heartbeat from unregistered worker {peer_id}: {heartbeat:?}");
             return Ok(());
         }
-        if !ping.version_matches(&SUPPORTED_WORKER_VERSIONS) {
-            log::debug!("Unsupported worker version {peer_id}: {:?}", ping.version);
+        if !heartbeat.version_matches(&SUPPORTED_WORKER_VERSIONS) {
+            log::debug!(
+                "Unsupported worker version {peer_id}: {:?}",
+                heartbeat.version
+            );
             return Ok(());
         }
-        log::debug!("Collecting ping from {peer_id}");
-        log::trace!("Ping collected: {ping:?}");
-        let ping_row: PingRow = ping.try_into().map_err(|e: &str| anyhow::format_err!(e))?;
+        log::debug!("Collecting heartbeat from {peer_id}");
+        log::trace!("Heartbeat collected: {heartbeat:?}");
+        let ping_row = PingRow::new(heartbeat, peer_id.to_string())
+            .map_err(|e: &str| anyhow::format_err!(e))?;
         let bytes = bincode::serde::encode_to_vec(ping_row, *BINCODE_CONFIG)?;
         self.buffer_writer
             .try_send(bytes)

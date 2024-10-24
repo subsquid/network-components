@@ -38,7 +38,7 @@ impl SchedulingUnit {
         self.chunks.first().dataset_id.as_str()
     }
 
-    pub fn begin(&self) -> u32 {
+    pub fn begin(&self) -> u64 {
         self.chunks.first().block_range.begin
     }
 }

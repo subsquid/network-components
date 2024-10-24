@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
 use sqd_contract_client::Worker;
-use sqd_messages::HttpHeader;
-use sqd_messages::{pong::Status as WorkerStatus, Ping};
+use sqd_messages::pong::Status as WorkerStatus;
+use sqd_messages::{HttpHeader, OldPing};
 use sqd_network_transport::PeerId;
 
 use crate::cli::Config;
@@ -31,8 +31,8 @@ const WORKER_SIGNATURE_HEADER: &str = "worker-signature";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkStatus {
-    pub begin: u32,
-    pub end: u32,
+    pub begin: u64,
+    pub end: u64,
     pub size_bytes: u64,
     pub assigned_to: Vec<Arc<str>>, // Will deserialize duplicated, but it's short-lived
     pub downloaded_by: Vec<Arc<str>>, // Will deserialize duplicated, but it's short-lived
@@ -103,7 +103,7 @@ impl Scheduler {
     }
 
     /// Register ping msg from a worker. Returns worker status if ping was accepted, otherwise None
-    pub fn ping(&self, worker_id: PeerId, msg: Ping) -> Option<WorkerStatus> {
+    pub fn ping(&self, worker_id: PeerId, msg: OldPing) -> Option<WorkerStatus> {
         if !msg.version_matches(&Config::get().supported_worker_versions) {
             log::debug!(
                 "Worker {worker_id} version not supported: {:?}",

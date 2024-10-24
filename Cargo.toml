@@ -3,6 +3,6 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.dependencies]
-sqd-contract-client = { git = "https://github.com/subsquid/subsquid-network.git", branch="new_pings",  version = "1.0.7" }
-sqd-messages = { git = "https://github.com/subsquid/subsquid-network.git", branch="new_pings", version = "1.0.3" }
-sqd-network-transport = { git = "https://github.com/subsquid/subsquid-network.git", branch="new_pings", version = "1.0.23" }
+sqd-contract-client = { git = "https://github.com/subsquid/subsquid-network.git", rev = "8af617e",  version = "1.0.7" }
+sqd-messages = { git = "https://github.com/subsquid/subsquid-network.git", rev = "8af617e", version = "2.0.0" }
+sqd-network-transport = { git = "https://github.com/subsquid/subsquid-network.git", rev = "8af617e", version = "2.0.0" }

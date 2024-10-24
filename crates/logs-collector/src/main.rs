@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use env_logger::Env;
-use sqd_network_transport::P2PTransportBuilder;
+use sqd_network_transport::{get_agent_info, AgentInfo, P2PTransportBuilder};
 
 use collector_utils::ClickhouseStorage;
 
@@ -32,7 +32,8 @@ async fn main() -> anyhow::Result<()> {
     let args: Cli = Cli::parse();
 
     // Build P2P transport
-    let transport_builder = P2PTransportBuilder::from_cli(args.transport).await?;
+    let agent_info = get_agent_info!();
+    let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info).await?;
     let contract_client: Arc<dyn sqd_contract_client::Client> =
         transport_builder.contract_client().into();
     let (incoming_messages, transport_handle) =

@@ -10,8 +10,7 @@ use env_logger::Env;
 use tokio::signal::unix::{signal, SignalKind};
 
 use sqd_network_transport::{
-    P2PTransportBuilder, PeerCheckerConfig, PeerCheckerTransportHandle, ProbeRequest, ProbeResult,
-    TransportArgs,
+    get_agent_info, AgentInfo, P2PTransportBuilder, PeerCheckerConfig, PeerCheckerTransportHandle, ProbeRequest, ProbeResult, TransportArgs
 };
 
 #[cfg(not(target_env = "msvc"))]
@@ -91,7 +90,8 @@ async fn main() -> anyhow::Result<()> {
     let args: Cli = Cli::parse();
 
     // Build P2P transport
-    let transport_builder = P2PTransportBuilder::from_cli(args.transport)
+    let agent_info = get_agent_info!();
+    let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info)
         .await?
         .with_base_config(|mut config| {
             config.max_concurrent_probes = args.max_concurrent_probes;

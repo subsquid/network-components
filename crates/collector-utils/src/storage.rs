@@ -370,6 +370,7 @@ mod tests {
             profiling: Some(false),
             client_state_json: Some("".to_string()),
             signature: vec![],
+            block_range: None
         };
         query.sign(&client_keypair);
 
@@ -422,6 +423,8 @@ mod tests {
             stored_bytes: Some(1024),
             stored_ranges: vec![],
             signature: vec![],
+            assignment_id: Default::default(),
+            missing_chunks: Default::default(),
         };
         let ts = timestamp_now_ms();
         storage

@@ -52,32 +52,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build logs collector
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          target: logs-collector
-          load: true
-          tags: subsquid/logs-collector:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Get logs collector version
-        run: echo "LOGS_COLLECTOR_VERSION=$(docker run --rm subsquid/logs-collector:test logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
-
-      - name: Build & publish logs collector
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
-          target: logs-collector
-          push: true
-          tags: |
-            subsquid/logs-collector:${{ env.LOGS_COLLECTOR_VERSION }}
-            subsquid/logs-collector:${{ inputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
       - name: Build pings collector
         uses: docker/build-push-action@v5
         with:

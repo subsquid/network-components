@@ -8,15 +8,18 @@ use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus_client::registry::Registry;
+use tokio::join;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc::Receiver;
 use tokio::time::Instant;
+use base64::{engine::general_purpose::STANDARD as base64, Engine};
 
 use sqd_messages::signatures::msg_hash;
 use sqd_messages::{Pong, RangeSet};
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 use sqd_network_transport::{SchedulerEvent, SchedulerTransportHandle};
 
+use crate::assignment::{Assignment, Chunk};
 use crate::cli::Config;
 use crate::data_chunk::{chunks_to_worker_state, DataChunk};
 use crate::scheduler::{ChunkStatus, Scheduler};
@@ -171,7 +174,9 @@ impl Server {
                 if current_epoch >= last_schedule_epoch + schedule_interval {
                     scheduler.schedule(current_epoch);
                     match scheduler.to_json() {
-                        Ok(state) => storage_client.save_scheduler(state).await,
+                        Ok(state) => {
+                            storage_client.save_scheduler(state.clone()).await
+                        },
                         Err(e) => log::error!("Error serializing scheduler: {e:?}"),
                     }
                 }
@@ -284,10 +289,13 @@ impl Server {
                 log::info!("Updating chunks summary");
                 let workers = scheduler.all_workers();
                 let units = scheduler.known_units();
+                let assignment = build_assignment(&workers, &units);
+                let assignment_fut = storage_client.save_assignment(assignment);
                 let summary = build_chunks_summary(workers, units);
                 let save_fut = storage_client.save_chunks_list(&summary);
+                
                 scheduler.update_chunks_summary(summary);
-                save_fut.await;
+                join!(save_fut, assignment_fut);
             }
         };
         self.task_manager
@@ -311,6 +319,62 @@ fn find_workers_with_chunk(
                 .then_some(worker_id.clone())
         })
         .collect()
+}
+
+fn build_assignment(
+    workers: &Vec<WorkerState>,
+    units: &DashMap<UnitId, SchedulingUnit>,
+) -> Assignment {
+    let mut assignment: Assignment = Default::default();
+    let mut aux: HashMap<String, Vec<String>> = Default::default();
+    for (k, unit) in units.clone() {
+        let mut local_ids: Vec<String> = Default::default();
+        for chunk in unit.chunks {
+            let chunk_str = chunk.chunk_str;
+            let download_url = chunk.download_url;
+            let mut files: HashMap<String, String> = Default::default();
+            for filename in chunk.filenames {
+                files.insert(filename.clone(), filename);
+            }
+            let dataset_str = chunk.dataset_id;
+            let dataset_id = base64.encode(dataset_str);
+            let size_bytes = chunk.size_bytes;
+            let chunk = Chunk {
+                id: chunk_str.clone(),
+                base_url: format!("{download_url}/{chunk_str}"),
+                files,
+                size_bytes,
+            };
+    
+            assignment.add_chunk(chunk, dataset_id, download_url);
+            local_ids.push(chunk_str);
+        }
+        aux.insert(k.to_string(), local_ids);
+    };
+
+    for worker in workers {
+        let peer_id = worker.peer_id;
+        let status = match worker.jail_reason {
+            Some(str) => str.to_string(),
+            None => "Ok".to_string()
+        };
+        let mut chunks_idxs: Vec<u64> = Default::default();
+        
+        for unit in &worker.assigned_units {
+            let unit_id = unit.to_string();
+            for chunk_id in aux.get(&unit_id).unwrap() {
+                chunks_idxs.push(assignment.chunk_index(chunk_id.clone()).unwrap());
+            }
+        }
+        chunks_idxs.sort();
+        for i in (1..chunks_idxs.len()).rev() {
+            chunks_idxs[i] -= chunks_idxs[i - 1];
+        };
+
+        assignment.insert_assignment(peer_id.to_string(), status, chunks_idxs);
+    };
+    assignment.regenerate_headers(Config::get().cloudflare_storage_secret.clone());
+    assignment
 }
 
 fn build_chunks_summary(

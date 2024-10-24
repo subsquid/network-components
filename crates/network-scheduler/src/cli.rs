@@ -52,6 +52,7 @@ pub struct Config {
     #[serde(default = "default_storage_domain")]
     pub storage_domain: String,
     pub dataset_buckets: Vec<String>,
+    pub network_state_name: String,
     pub scheduler_state_bucket: String,
     #[serde(skip_serializing)]
     pub cloudflare_storage_secret: String,

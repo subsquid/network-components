@@ -1,7 +1,6 @@
 use core::str;
 use std::collections::HashMap;
 
-use aws_config::identity;
 use crypto_box::{
     aead::{Aead, AeadCore, OsRng},
     SalsaBox, PublicKey, SecretKey
@@ -138,9 +137,7 @@ impl Assignment {
     }
 
     pub fn headers_for_peer_id(&self, peer_id: String, secret_key: Vec<u8>) -> Option<HashMap<String, String>> {
-        let Some(local_assignment) = self.worker_assignments.get(&peer_id) else {
-            return None
-        };
+        let local_assignment = self.worker_assignments.get(&peer_id)?;
         let EncryptedHeaders {identity, nonce, ciphertext,} = local_assignment.encrypted_headers.clone();
         let Ok(alice_public_key) = PublicKey::from_slice(identity.as_slice()) else {
             return None
@@ -149,7 +146,6 @@ impl Assignment {
         let Ok(bob_secret_key) = SecretKey::from_slice(&big_slice[00..32]) else {
             return None
         };
-        let bob_public_key_bytes = bob_secret_key.public_key().as_bytes().clone();
         let bob_box = SalsaBox::new(&alice_public_key, &bob_secret_key);
         let generic_nonce = GenericArray::clone_from_slice(&nonce);
         let Ok(decrypted_plaintext) = bob_box.decrypt(&generic_nonce, &ciphertext[..]) else {
@@ -158,7 +154,7 @@ impl Assignment {
         let Ok(plaintext_headers) = std::str::from_utf8(&decrypted_plaintext) else {
             return None;
         };
-        let Ok(headers) = serde_json::from_str::<Value>(&plaintext_headers) else {
+        let Ok(headers) = serde_json::from_str::<Value>(plaintext_headers) else {
             return None;
         };
         let mut result: HashMap<String, String> = Default::default();
@@ -185,7 +181,7 @@ impl Assignment {
 
     pub fn regenerate_headers(&mut self, cloudflare_storage_secret: String) {
         let alice_secret_key = SecretKey::generate(&mut OsRng);
-        let alice_public_key_bytes = alice_secret_key.public_key().as_bytes().clone();
+        let alice_public_key_bytes = *alice_secret_key.public_key().as_bytes();
 
         for (worker_id, worker_assignment) in &mut self.worker_assignments {
             let worker_signature = timed_hmac_now(
@@ -221,8 +217,6 @@ impl Assignment {
 
 #[cfg(test)]
 mod tests {
-    use sha2::Sha512;
-    use sha2::Digest;
     use sqd_network_transport::Keypair;
 
     use super::*;

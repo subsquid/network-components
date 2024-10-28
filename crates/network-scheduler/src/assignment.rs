@@ -7,6 +7,7 @@ use crypto_box::{
     SalsaBox, PublicKey, SecretKey
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha3::digest::generic_array::GenericArray;
 
 use crate::signature::timed_hmac_now;
@@ -151,18 +152,26 @@ impl Assignment {
         println!("Restored PUB: {:02x?}", bob_public_key_bytes);
         let bob_box = SalsaBox::new(&alice_public_key, &bob_secret_key);
         let generic_nonce = GenericArray::clone_from_slice(&nonce);
-        let Ok(decrypted_plaintext) = bob_box.decrypt(&generic_nonce, &ciphertext[..]) else {
-            return None
-        };
+        // let Ok(decrypted_plaintext) = bob_box.decrypt(&generic_nonce, &ciphertext[..]) else {
+        //     return None
+        // };
+        let res =  bob_box.decrypt(&generic_nonce, &ciphertext[..]);
+        match res {
+            Ok(_) => {},
+            Err(e) => {
+                println!("Error: {:?}", e);
+            },
+        }
+        let decrypted_plaintext = res.unwrap();
         println!("Decrypted");
         let Ok(plaintext_headers) = std::str::from_utf8(&decrypted_plaintext) else {
             return None;
         };
-        println!("Converted");
-        let Ok(headers) = serde_json::to_value(&plaintext_headers) else {
+        println!("Converted: {:?}", plaintext_headers);
+        let Ok(headers) = serde_json::from_str::<Value>(&plaintext_headers) else {
             return None;
         };
-        println!("Intrpreted");
+        println!("Intrpreted: {:?}", headers);
         let mut result: HashMap<String, String> = Default::default();
         for (k,v) in headers.as_object().unwrap() {
             result.insert(k.to_string(), v.as_str().unwrap().to_string());
@@ -185,7 +194,7 @@ impl Assignment {
         self.chunk_map.as_ref().unwrap().get(&chunk_id).cloned()
     }
 
-    pub fn regenerate_headers(&mut self, cloudflare_storage_secret: String) {
+    pub fn regenerate_headers(&mut self, cloudflare_storage_secret: String, hint: &[u8]) {
         let alice_secret_key = SecretKey::generate(&mut OsRng);
         let alice_public_key_bytes = alice_secret_key.public_key().as_bytes().clone();
 
@@ -201,12 +210,15 @@ impl Assignment {
             };
             
             let pub_key = &bs58::decode(worker_id).into_vec().unwrap()[6..];
-            let bob_public_key = PublicKey::from_slice(pub_key).unwrap();
+            let bob_public_key = PublicKey::from_slice(hint).unwrap();
+            println!("PK from PeerID: {:02X?}",bob_public_key.as_bytes());
+            //secret_key.scalar * public_key.0
 
             let alice_box = SalsaBox::new(&bob_public_key, &alice_secret_key);
             let nonce = SalsaBox::generate_nonce(&mut OsRng);
             let plaintext = serde_json::to_vec(&headers).unwrap();
             println!("Plaintext: {:?}", str::from_utf8(&plaintext));
+            // println!("Original box: {:?}", alice_box);
             let ciphertext = alice_box.encrypt(&nonce, &plaintext[..]).unwrap();
 
 
@@ -230,10 +242,21 @@ mod tests {
         let mut assignment: Assignment = Default::default();
         let keypair = Keypair::generate_ed25519();
         println!("Pub: {:?}", keypair.public());
+
+        let secret_key = keypair.clone().try_into_ed25519().unwrap().secret().as_ref().to_vec();
+        println!("Priv: {:02X?}", secret_key);
+        let Ok(bob_secret_key) = SecretKey::from_slice(secret_key.as_slice()) else {
+            return ()
+        };
+        println!("Restored private: {:02X?}", bob_secret_key.to_bytes());
+        println!("Restored pub: {:02X?}", bob_secret_key.to_bytes());
+        let bob_public_key_bytes = bob_secret_key.public_key().as_bytes().clone();
+        println!("Restored PUB: {:02x?}", bob_public_key_bytes);
+
         let peer_id = keypair.public().to_peer_id().to_base58();
         let private_key = keypair.try_into_ed25519().unwrap().secret();
         assignment.insert_assignment(peer_id.clone(), "Ok".to_owned(), Default::default());
-        assignment.regenerate_headers("SUPERSECRET".to_owned());
+        assignment.regenerate_headers("SUPERSECRET".to_owned(), &bob_public_key_bytes);
         println!("HI!");
         let headers = assignment.headers_for_peer_id(peer_id, private_key.as_ref().to_vec());
         println!("Headers: {:?}", headers);

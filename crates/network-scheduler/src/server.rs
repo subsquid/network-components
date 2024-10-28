@@ -373,7 +373,7 @@ fn build_assignment(
 
         assignment.insert_assignment(peer_id.to_string(), status, chunks_idxs);
     };
-    assignment.regenerate_headers(Config::get().cloudflare_storage_secret.clone());
+    assignment.regenerate_headers(Config::get().cloudflare_storage_secret.clone(), &[]);
     assignment
 }
 

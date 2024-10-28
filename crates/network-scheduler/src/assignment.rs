@@ -141,41 +141,26 @@ impl Assignment {
         let Some(local_assignment) = self.worker_assignments.get(&peer_id) else {
             return None
         };
-        println!("Got assignment");
         let EncryptedHeaders {identity, nonce, ciphertext,} = local_assignment.encrypted_headers.clone();
         let Ok(alice_public_key) = PublicKey::from_slice(identity.as_slice()) else {
             return None
         };
-        println!("Got A key");
         let big_slice = Sha512::default().chain_update(secret_key).finalize();
         let Ok(bob_secret_key) = SecretKey::from_slice(&big_slice[00..32]) else {
             return None
         };
-        println!("Got B key");
         let bob_public_key_bytes = bob_secret_key.public_key().as_bytes().clone();
-        println!("Restored PUB: {:02x?}", bob_public_key_bytes);
         let bob_box = SalsaBox::new(&alice_public_key, &bob_secret_key);
         let generic_nonce = GenericArray::clone_from_slice(&nonce);
-        // let Ok(decrypted_plaintext) = bob_box.decrypt(&generic_nonce, &ciphertext[..]) else {
-        //     return None
-        // };
-        let res =  bob_box.decrypt(&generic_nonce, &ciphertext[..]);
-        match res {
-            Ok(_) => {},
-            Err(e) => {
-                println!("Error: {:?}", e);
-            },
-        }
-        let decrypted_plaintext = res.unwrap();
-        println!("Decrypted");
+        let Ok(decrypted_plaintext) = bob_box.decrypt(&generic_nonce, &ciphertext[..]) else {
+            return None
+        };
         let Ok(plaintext_headers) = std::str::from_utf8(&decrypted_plaintext) else {
             return None;
         };
-        println!("Converted: {:?}", plaintext_headers);
         let Ok(headers) = serde_json::from_str::<Value>(&plaintext_headers) else {
             return None;
         };
-        println!("Intrpreted: {:?}", headers);
         let mut result: HashMap<String, String> = Default::default();
         for (k,v) in headers.as_object().unwrap() {
             result.insert(k.to_string(), v.as_str().unwrap().to_string());
@@ -218,14 +203,10 @@ impl Assignment {
             let public_edvards = public_edvards_compressed.decompress().unwrap();
             let public_montgomery = public_edvards.to_montgomery();
             let bob_public_key = PublicKey::from(public_montgomery);
-            println!("PK from PeerID: {:02X?}",bob_public_key.as_bytes());
-            //secret_key.scalar * public_key.0
 
             let alice_box = SalsaBox::new(&bob_public_key, &alice_secret_key);
             let nonce = SalsaBox::generate_nonce(&mut OsRng);
             let plaintext = serde_json::to_vec(&headers).unwrap();
-            println!("Plaintext: {:?}", str::from_utf8(&plaintext));
-            // println!("Original box: {:?}", alice_box);
             let ciphertext = alice_box.encrypt(&nonce, &plaintext[..]).unwrap();
 
 
@@ -250,30 +231,13 @@ mod tests {
     fn it_works() {
         let mut assignment: Assignment = Default::default();
         let keypair = Keypair::generate_ed25519();
-
-        println!("Pub: {:?}", keypair.public());
-
-        let secret_key = keypair.clone().try_into_ed25519().unwrap().secret().as_ref().to_vec();
-        let full_state = keypair.clone().try_into_ed25519().unwrap().to_bytes();
-        println!("Priv: {:02X?}", secret_key);
-        println!("Full: {:02X?}", full_state);
-        let big_slice = Sha512::default().chain_update(secret_key).finalize();
-        let Ok(bob_secret_key) = SecretKey::from_slice(&big_slice[00..32]) else {
-            return ()
-        };
-        println!("Restored private: {:02X?}", bob_secret_key.to_scalar());
-
-        let bob_public_key_bytes = bob_secret_key.public_key().as_bytes().clone();
-        println!("Restored PUB: {:02x?}", bob_public_key_bytes);
-
         let peer_id = keypair.public().to_peer_id().to_base58();
         let private_key = keypair.try_into_ed25519().unwrap().secret();
+
         assignment.insert_assignment(peer_id.clone(), "Ok".to_owned(), Default::default());
         assignment.regenerate_headers("SUPERSECRET".to_owned());
-        println!("HI!");
-        let headers = assignment.headers_for_peer_id(peer_id, private_key.as_ref().to_vec());
-        println!("Headers: {:?}", headers);
-
-        assert_eq!(4, 4);
+        let headers = assignment.headers_for_peer_id(peer_id.clone(), private_key.as_ref().to_vec()).unwrap();
+        let decrypted_id = headers.get("worker-id").unwrap();
+        assert_eq!(peer_id, decrypted_id.to_owned());
     }
 }

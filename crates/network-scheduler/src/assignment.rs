@@ -11,6 +11,7 @@ use serde_json::Value;
 use sha2::Sha512;
 use sha2::Digest;
 use sha3::digest::generic_array::GenericArray;
+use curve25519_dalek::edwards::CompressedEdwardsY;
 
 use crate::signature::timed_hmac_now;
 
@@ -197,7 +198,7 @@ impl Assignment {
         self.chunk_map.as_ref().unwrap().get(&chunk_id).cloned()
     }
 
-    pub fn regenerate_headers(&mut self, cloudflare_storage_secret: String, hint: &[u8]) {
+    pub fn regenerate_headers(&mut self, cloudflare_storage_secret: String) {
         let alice_secret_key = SecretKey::generate(&mut OsRng);
         let alice_public_key_bytes = alice_secret_key.public_key().as_bytes().clone();
 
@@ -212,8 +213,11 @@ impl Assignment {
                 worker_signature,
             };
             
-            let pub_key = &bs58::decode(worker_id).into_vec().unwrap()[6..];
-            let bob_public_key = PublicKey::from_slice(hint).unwrap();
+            let pub_key_edvards_bytes = &bs58::decode(worker_id).into_vec().unwrap()[6..];
+            let public_edvards_compressed = CompressedEdwardsY::from_slice(pub_key_edvards_bytes).unwrap();
+            let public_edvards = public_edvards_compressed.decompress().unwrap();
+            let public_montgomery = public_edvards.to_montgomery();
+            let bob_public_key = PublicKey::from(public_montgomery);
             println!("PK from PeerID: {:02X?}",bob_public_key.as_bytes());
             //secret_key.scalar * public_key.0
 
@@ -246,22 +250,26 @@ mod tests {
     fn it_works() {
         let mut assignment: Assignment = Default::default();
         let keypair = Keypair::generate_ed25519();
+
         println!("Pub: {:?}", keypair.public());
 
         let secret_key = keypair.clone().try_into_ed25519().unwrap().secret().as_ref().to_vec();
+        let full_state = keypair.clone().try_into_ed25519().unwrap().to_bytes();
         println!("Priv: {:02X?}", secret_key);
+        println!("Full: {:02X?}", full_state);
         let big_slice = Sha512::default().chain_update(secret_key).finalize();
         let Ok(bob_secret_key) = SecretKey::from_slice(&big_slice[00..32]) else {
             return ()
         };
-        println!("Restored private: {:02X?}", bob_secret_key.to_bytes());
+        println!("Restored private: {:02X?}", bob_secret_key.to_scalar());
+
         let bob_public_key_bytes = bob_secret_key.public_key().as_bytes().clone();
         println!("Restored PUB: {:02x?}", bob_public_key_bytes);
 
         let peer_id = keypair.public().to_peer_id().to_base58();
         let private_key = keypair.try_into_ed25519().unwrap().secret();
         assignment.insert_assignment(peer_id.clone(), "Ok".to_owned(), Default::default());
-        assignment.regenerate_headers("SUPERSECRET".to_owned(), &bob_public_key_bytes);
+        assignment.regenerate_headers("SUPERSECRET".to_owned());
         println!("HI!");
         let headers = assignment.headers_for_peer_id(peer_id, private_key.as_ref().to_vec());
         println!("Headers: {:?}", headers);

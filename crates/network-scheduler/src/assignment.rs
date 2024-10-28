@@ -8,6 +8,8 @@ use crypto_box::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::Sha512;
+use sha2::Digest;
 use sha3::digest::generic_array::GenericArray;
 
 use crate::signature::timed_hmac_now;
@@ -144,7 +146,8 @@ impl Assignment {
             return None
         };
         println!("Got A key");
-        let Ok(bob_secret_key) = SecretKey::from_slice(secret_key.as_slice()) else {
+        let big_slice = Sha512::default().chain_update(secret_key).finalize();
+        let Ok(bob_secret_key) = SecretKey::from_slice(&big_slice[00..32]) else {
             return None
         };
         println!("Got B key");
@@ -233,6 +236,8 @@ impl Assignment {
 
 #[cfg(test)]
 mod tests {
+    use sha2::Sha512;
+    use sha2::Digest;
     use sqd_network_transport::Keypair;
 
     use super::*;
@@ -245,11 +250,11 @@ mod tests {
 
         let secret_key = keypair.clone().try_into_ed25519().unwrap().secret().as_ref().to_vec();
         println!("Priv: {:02X?}", secret_key);
-        let Ok(bob_secret_key) = SecretKey::from_slice(secret_key.as_slice()) else {
+        let big_slice = Sha512::default().chain_update(secret_key).finalize();
+        let Ok(bob_secret_key) = SecretKey::from_slice(&big_slice[00..32]) else {
             return ()
         };
         println!("Restored private: {:02X?}", bob_secret_key.to_bytes());
-        println!("Restored pub: {:02X?}", bob_secret_key.to_bytes());
         let bob_public_key_bytes = bob_secret_key.public_key().as_bytes().clone();
         println!("Restored PUB: {:02x?}", bob_public_key_bytes);
 

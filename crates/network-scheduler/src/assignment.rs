@@ -1,3 +1,4 @@
+use core::str;
 use std::collections::HashMap;
 
 use aws_config::identity;
@@ -136,24 +137,32 @@ impl Assignment {
         let Some(local_assignment) = self.worker_assignments.get(&peer_id) else {
             return None
         };
+        println!("Got assignment");
         let EncryptedHeaders {identity, nonce, ciphertext,} = local_assignment.encrypted_headers.clone();
         let Ok(alice_public_key) = PublicKey::from_slice(identity.as_slice()) else {
             return None
         };
+        println!("Got A key");
         let Ok(bob_secret_key) = SecretKey::from_slice(secret_key.as_slice()) else {
             return None
         };
+        println!("Got B key");
+        let bob_public_key_bytes = bob_secret_key.public_key().as_bytes().clone();
+        println!("Restored PUB: {:02x?}", bob_public_key_bytes);
         let bob_box = SalsaBox::new(&alice_public_key, &bob_secret_key);
         let generic_nonce = GenericArray::clone_from_slice(&nonce);
         let Ok(decrypted_plaintext) = bob_box.decrypt(&generic_nonce, &ciphertext[..]) else {
             return None
         };
+        println!("Decrypted");
         let Ok(plaintext_headers) = std::str::from_utf8(&decrypted_plaintext) else {
             return None;
         };
+        println!("Converted");
         let Ok(headers) = serde_json::to_value(&plaintext_headers) else {
             return None;
         };
+        println!("Intrpreted");
         let mut result: HashMap<String, String> = Default::default();
         for (k,v) in headers.as_object().unwrap() {
             result.insert(k.to_string(), v.as_str().unwrap().to_string());
@@ -197,6 +206,7 @@ impl Assignment {
             let alice_box = SalsaBox::new(&bob_public_key, &alice_secret_key);
             let nonce = SalsaBox::generate_nonce(&mut OsRng);
             let plaintext = serde_json::to_vec(&headers).unwrap();
+            println!("Plaintext: {:?}", str::from_utf8(&plaintext));
             let ciphertext = alice_box.encrypt(&nonce, &plaintext[..]).unwrap();
 
 
@@ -206,5 +216,28 @@ impl Assignment {
                 ciphertext,
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sqd_network_transport::Keypair;
+
+    use super::*;
+
+    #[test]
+    fn it_works() {
+        let mut assignment: Assignment = Default::default();
+        let keypair = Keypair::generate_ed25519();
+        println!("Pub: {:?}", keypair.public());
+        let peer_id = keypair.public().to_peer_id().to_base58();
+        let private_key = keypair.try_into_ed25519().unwrap().secret();
+        assignment.insert_assignment(peer_id.clone(), "Ok".to_owned(), Default::default());
+        assignment.regenerate_headers("SUPERSECRET".to_owned());
+        println!("HI!");
+        let headers = assignment.headers_for_peer_id(peer_id, private_key.as_ref().to_vec());
+        println!("Headers: {:?}", headers);
+
+        assert_eq!(4, 4);
     }
 }

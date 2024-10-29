@@ -7,6 +7,8 @@ use crypto_box::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_with::serde_as;
+use serde_with::base64::Base64;
 use sha2::Sha512;
 use sha2::Digest;
 use sha3::digest::generic_array::GenericArray;
@@ -38,11 +40,15 @@ struct Headers {
     worker_signature: String,
 }
 
+#[serde_as]
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct EncryptedHeaders {
+    #[serde_as(as = "Base64")]
     identity: Vec<u8>,
+    #[serde_as(as = "Base64")]
     nonce: Vec<u8>,
+    #[serde_as(as = "Base64")]
     ciphertext: Vec<u8>,
 }
 
@@ -138,17 +144,17 @@ impl Assignment {
 
     pub fn headers_for_peer_id(&self, peer_id: String, secret_key: Vec<u8>) -> Option<HashMap<String, String>> {
         let local_assignment = self.worker_assignments.get(&peer_id)?;
-        let EncryptedHeaders {identity, nonce, ciphertext,} = local_assignment.encrypted_headers.clone();
-        let Ok(alice_public_key) = PublicKey::from_slice(identity.as_slice()) else {
+        let EncryptedHeaders {identity, nonce, ciphertext,} = &local_assignment.encrypted_headers;
+        let Ok(temporary_public_key) = PublicKey::from_slice(identity.as_slice()) else {
             return None
         };
         let big_slice = Sha512::default().chain_update(secret_key).finalize();
-        let Ok(bob_secret_key) = SecretKey::from_slice(&big_slice[00..32]) else {
+        let Ok(worker_secret_key) = SecretKey::from_slice(&big_slice[00..32]) else {
             return None
         };
-        let bob_box = SalsaBox::new(&alice_public_key, &bob_secret_key);
+        let shared_box = SalsaBox::new(&temporary_public_key, &worker_secret_key);
         let generic_nonce = GenericArray::clone_from_slice(&nonce);
-        let Ok(decrypted_plaintext) = bob_box.decrypt(&generic_nonce, &ciphertext[..]) else {
+        let Ok(decrypted_plaintext) = shared_box.decrypt(&generic_nonce, &ciphertext[..]) else {
             return None
         };
         let Ok(plaintext_headers) = std::str::from_utf8(&decrypted_plaintext) else {
@@ -180,8 +186,8 @@ impl Assignment {
     }
 
     pub fn regenerate_headers(&mut self, cloudflare_storage_secret: String) {
-        let alice_secret_key = SecretKey::generate(&mut OsRng);
-        let alice_public_key_bytes = *alice_secret_key.public_key().as_bytes();
+        let temporary_secret_key = SecretKey::generate(&mut OsRng);
+        let temporary_public_key_bytes = *temporary_secret_key.public_key().as_bytes();
 
         for (worker_id, worker_assignment) in &mut self.worker_assignments {
             let worker_signature = timed_hmac_now(
@@ -198,16 +204,16 @@ impl Assignment {
             let public_edvards_compressed = CompressedEdwardsY::from_slice(pub_key_edvards_bytes).unwrap();
             let public_edvards = public_edvards_compressed.decompress().unwrap();
             let public_montgomery = public_edvards.to_montgomery();
-            let bob_public_key = PublicKey::from(public_montgomery);
+            let worker_public_key = PublicKey::from(public_montgomery);
 
-            let alice_box = SalsaBox::new(&bob_public_key, &alice_secret_key);
+            let shared_box = SalsaBox::new(&worker_public_key, &temporary_secret_key);
             let nonce = SalsaBox::generate_nonce(&mut OsRng);
             let plaintext = serde_json::to_vec(&headers).unwrap();
-            let ciphertext = alice_box.encrypt(&nonce, &plaintext[..]).unwrap();
+            let ciphertext = shared_box.encrypt(&nonce, &plaintext[..]).unwrap();
 
 
             worker_assignment.encrypted_headers = EncryptedHeaders {
-                identity: alice_public_key_bytes.to_vec(),
+                identity: temporary_public_key_bytes.to_vec(),
                 nonce: nonce.to_vec(),
                 ciphertext,
             };

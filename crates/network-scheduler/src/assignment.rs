@@ -153,7 +153,7 @@ impl Assignment {
             return None
         };
         let shared_box = SalsaBox::new(&temporary_public_key, &worker_secret_key);
-        let generic_nonce = GenericArray::clone_from_slice(&nonce);
+        let generic_nonce = GenericArray::clone_from_slice(nonce);
         let Ok(decrypted_plaintext) = shared_box.decrypt(&generic_nonce, &ciphertext[..]) else {
             return None
         };

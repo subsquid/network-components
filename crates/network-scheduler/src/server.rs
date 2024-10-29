@@ -12,7 +12,6 @@ use tokio::join;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc::Receiver;
 use tokio::time::Instant;
-use base64::{engine::general_purpose::STANDARD as base64, Engine};
 
 use sqd_messages::signatures::msg_hash;
 use sqd_messages::{Pong, RangeSet};
@@ -337,7 +336,7 @@ fn build_assignment(
                 files.insert(filename.clone(), filename);
             }
             let dataset_str = chunk.dataset_id;
-            let dataset_id = base64.encode(dataset_str);
+            let dataset_id = dataset_str;
             let size_bytes = chunk.size_bytes;
             let chunk = Chunk {
                 id: chunk_str.clone(),

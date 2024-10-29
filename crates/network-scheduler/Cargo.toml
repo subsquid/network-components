@@ -1,6 +1,6 @@
 [package]
 name = "network-scheduler"
-version = "1.1.27"
+version = "1.1.0"
 edition = "2021"
 
 [dependencies]
@@ -10,7 +10,11 @@ aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-sdk-s3 = "1"
 axum = { version = "0.7", features = ["json"] }
 base64 = "0.22.1"
+bs58 = "0.5.1"
+chrono = "0.4.38"
 clap = { version = "4", features = ["derive", "env"] }
+crypto_box = "0.9.1"
+curve25519-dalek = "4.1.3"
 dashmap = { version = "6", features = ["serde"] }
 derive-enum-from-into = "0.1"
 env_logger = "0.11"
@@ -43,10 +47,7 @@ url = "2.5.0"
 sqd-contract-client = { workspace = true }
 sqd-messages = { workspace = true, features = ["semver"] }
 sqd-network-transport = { workspace = true, features = ["scheduler", "metrics"] }
-chrono = "0.4.38"
-bs58 = "0.5.1"
-crypto_box = "0.9.1"
-curve25519-dalek = "4.1.3"
+
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"

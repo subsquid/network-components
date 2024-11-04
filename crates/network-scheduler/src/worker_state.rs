@@ -1,7 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
+use std::io::Read;
 use std::time::{Duration, SystemTime};
 
+use flate2::bufread::DeflateDecoder;
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use serde_partial::SerializePartial;
 use serde_with::{serde_as, TimestampMilliSeconds};
@@ -30,6 +33,7 @@ pub struct WorkerState {
     pub stored_ranges: HashMap<String, RangeSet>, // dataset -> ranges
     pub stored_bytes: u64,
     pub num_missing_chunks: u32,
+    pub num_missing_chunks_on_heartbeat: Option<u32>,
     #[serde_as(as = "Option<TimestampMilliSeconds>")]
     pub last_assignment: Option<SystemTime>,
     #[serde_as(as = "Option<TimestampMilliSeconds>")]
@@ -82,6 +86,7 @@ impl WorkerState {
             stored_bytes: 0,
             assigned_bytes: 0,
             num_missing_chunks: 0,
+            num_missing_chunks_on_heartbeat: None,
             last_assignment: None,
             last_dial_time: None,
             last_dial_ok: false,
@@ -121,6 +126,16 @@ impl WorkerState {
     pub fn heartbeat(&mut self, msg: Heartbeat) {
         self.last_ping = Some(SystemTime::now());
         self.version = Some(msg.version);
+        if let Some(missing_chunks) = msg.missing_chunks {
+            let mut decoder = DeflateDecoder::new(&missing_chunks.data[..]);
+            let mut unavailability_map = Vec::<u8>::new();
+            _ = decoder.read_to_end(&mut unavailability_map);
+            self.num_missing_chunks_on_heartbeat = Some(unavailability_map.iter().filter(|v| **v > 0).count() as u32);
+            info!("Got {} missing chunks", self.num_missing_chunks_on_heartbeat.unwrap());
+        } else {
+            self.num_missing_chunks_on_heartbeat = None;
+            error!("Got no missing chunks info");
+        }
         self.stored_bytes = match msg.stored_bytes {
             Some(stored_bytes) => stored_bytes,
             None => 0,
@@ -231,7 +246,10 @@ impl WorkerState {
             return true;
         }
 
-        let num_missing_chunks = self.count_missing_chunks(units);
+        let num_missing_chunks = match self.num_missing_chunks_on_heartbeat {
+            Some(num) => num,
+            None => self.count_missing_chunks(units),
+        };
         if num_missing_chunks == 0 {
             log::debug!("Worker {} is fully synced", self.peer_id);
             self.num_missing_chunks = num_missing_chunks;

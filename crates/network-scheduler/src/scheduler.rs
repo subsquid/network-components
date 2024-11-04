@@ -17,7 +17,7 @@ use tokio::time::Instant;
 
 use sqd_contract_client::Worker;
 use sqd_messages::pong::Status as WorkerStatus;
-use sqd_messages::{HttpHeader, OldPing};
+use sqd_messages::{Heartbeat, HttpHeader, OldPing};
 use sqd_network_transport::PeerId;
 
 use crate::cli::Config;
@@ -126,6 +126,17 @@ impl Scheduler {
         let mut assignment = chunks_to_assignment(assigned_chunks);
         add_signature_headers(&mut assignment, &worker_id, worker_state.value());
         Some(WorkerStatus::Active(assignment))
+    }
+
+    pub fn heartbeat(&self, worker_id: &PeerId, msg: Heartbeat) {
+        let mut worker_state = match self.worker_states.get_mut(&worker_id) {
+            None => {
+                log::debug!("Worker {worker_id} not registered");
+                return;
+            }
+            Some(worker_state) => worker_state,
+        };
+        worker_state.heartbeat(msg);
     }
 
     pub fn workers_to_dial(&self) -> Vec<PeerId> {

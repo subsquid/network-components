@@ -8,7 +8,7 @@ use serde_with::{serde_as, TimestampMilliSeconds};
 
 use dashmap::DashMap;
 use sqd_contract_client::Address;
-use sqd_messages::{OldPing, RangeSet};
+use sqd_messages::{Heartbeat, OldPing, RangeSet};
 use sqd_network_transport::PeerId;
 
 use crate::cli::Config;
@@ -116,6 +116,15 @@ impl WorkerState {
             .map(|r| (r.url, r.ranges.into()))
             .collect();
         self.stored_bytes = msg.stored_bytes.unwrap_or_default();
+    }
+
+    pub fn heartbeat(&mut self, msg: Heartbeat) {
+        self.last_ping = Some(SystemTime::now());
+        self.version = Some(msg.version);
+        self.stored_bytes = match msg.stored_bytes {
+            Some(stored_bytes) => stored_bytes,
+            None => 0,
+        };
     }
 
     pub fn dialed(&mut self, reachable: bool) {

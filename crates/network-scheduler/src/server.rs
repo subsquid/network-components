@@ -117,8 +117,10 @@ impl Server {
                             SchedulerEvent::PeerProbed { peer_id, reachable } => {
                                 return scheduler.worker_dialed(peer_id, reachable)
                             },
-                            SchedulerEvent::Heartbeat { peer_id, .. } => {
-                                return log::debug!("Got heartbeat from {peer_id}");
+                            SchedulerEvent::Heartbeat { peer_id, heartbeat} => {
+                                log::debug!("Got heartbeat from {peer_id}");
+                                scheduler.heartbeat(&peer_id, heartbeat);
+                                return;
                             }
                         };
 

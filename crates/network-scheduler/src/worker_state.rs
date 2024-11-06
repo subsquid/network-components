@@ -1,10 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
-use std::io::Read;
 use std::time::{Duration, SystemTime};
 
-use flate2::bufread::DeflateDecoder;
-use log::{debug, error, info};
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_partial::SerializePartial;
 use serde_with::{serde_as, TimestampMilliSeconds};
@@ -127,11 +125,13 @@ impl WorkerState {
         self.last_ping = Some(SystemTime::now());
         self.version = Some(msg.version);
         if let Some(missing_chunks) = msg.missing_chunks {
-            let mut decoder = DeflateDecoder::new(&missing_chunks.data[..]);
-            let mut unavailability_map = Vec::<u8>::new();
-            _ = decoder.read_to_end(&mut unavailability_map);
-            self.num_missing_chunks_on_heartbeat = Some(unavailability_map.iter().filter(|v| **v > 0).count() as u32);
-            debug!("Got {} missing chunks for {}", self.num_missing_chunks_on_heartbeat.unwrap(), self.peer_id);
+            self.num_missing_chunks_on_heartbeat =
+                Some(missing_chunks.to_bytes().iter().filter(|v| **v > 0).count() as u32);
+            debug!(
+                "Got {} missing chunks for {}",
+                self.num_missing_chunks_on_heartbeat.unwrap(),
+                self.peer_id
+            );
         } else {
             self.num_missing_chunks_on_heartbeat = None;
             error!("Got no missing chunks info");

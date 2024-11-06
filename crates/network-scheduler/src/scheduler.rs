@@ -129,7 +129,7 @@ impl Scheduler {
     }
 
     pub fn heartbeat(&self, worker_id: &PeerId, msg: Heartbeat) {
-        let mut worker_state = match self.worker_states.get_mut(&worker_id) {
+        let mut worker_state = match self.worker_states.get_mut(worker_id) {
             None => {
                 log::debug!("Worker {worker_id} not registered");
                 return;

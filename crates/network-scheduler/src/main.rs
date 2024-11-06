@@ -8,6 +8,7 @@ use crate::cli::{Cli, Config};
 use crate::server::Server;
 use crate::storage::S3Storage;
 
+mod assignment;
 mod cli;
 mod data_chunk;
 mod metrics_server;
@@ -18,7 +19,6 @@ mod server;
 mod signature;
 mod storage;
 mod worker_state;
-mod assignment;
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;

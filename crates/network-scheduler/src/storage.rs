@@ -12,9 +12,9 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use itertools::Itertools;
 use nonempty::NonEmpty;
+use sha2::{Digest, Sha256};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
-use sha2::{Sha256, Digest};
 
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 
@@ -319,8 +319,8 @@ impl S3Storage {
         let network = Config::get().network.clone();
         let current_time = Utc::now();
         let timestamp = current_time.format("%FT%T");
-        let filename: String =  format!("assignments/{network}/{timestamp}_{hash:X}.json.gz");
-        
+        let filename: String = format!("assignments/{network}/{timestamp}_{hash:X}.json.gz");
+
         let saving_result = self
             .client
             .put_object()
@@ -332,7 +332,7 @@ impl S3Storage {
             .await;
         prometheus_metrics::s3_request();
         match saving_result {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(e) => {
                 log::error!("Error saving assignment: {e:?}");
                 return;
@@ -341,10 +341,10 @@ impl S3Storage {
 
         let network_state = NetworkState {
             network: Config::get().network.clone(),
-            assignment: NetworkAssignment { 
-                url: format!("https://metadata.sqd-datasets.io/{filename}"), 
-                id: format!("{timestamp}_{hash:X}")
-            }
+            assignment: NetworkAssignment {
+                url: format!("https://metadata.sqd-datasets.io/{filename}"),
+                id: format!("{timestamp}_{hash:X}"),
+            },
         };
         let contents = serde_json::to_vec(&network_state).unwrap();
         let _ = self

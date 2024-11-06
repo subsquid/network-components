@@ -2,13 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::time::{Duration, SystemTime};
 
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use serde_partial::SerializePartial;
 use serde_with::{serde_as, TimestampMilliSeconds};
 
 use dashmap::DashMap;
 use sqd_contract_client::Address;
-use sqd_messages::{OldPing, RangeSet};
+use sqd_messages::{Heartbeat, OldPing, RangeSet};
 use sqd_network_transport::PeerId;
 
 use crate::cli::Config;
@@ -30,6 +31,7 @@ pub struct WorkerState {
     pub stored_ranges: HashMap<String, RangeSet>, // dataset -> ranges
     pub stored_bytes: u64,
     pub num_missing_chunks: u32,
+    pub num_missing_chunks_on_heartbeat: Option<u32>,
     #[serde_as(as = "Option<TimestampMilliSeconds>")]
     pub last_assignment: Option<SystemTime>,
     #[serde_as(as = "Option<TimestampMilliSeconds>")]
@@ -82,6 +84,7 @@ impl WorkerState {
             stored_bytes: 0,
             assigned_bytes: 0,
             num_missing_chunks: 0,
+            num_missing_chunks_on_heartbeat: None,
             last_assignment: None,
             last_dial_time: None,
             last_dial_ok: false,
@@ -116,6 +119,24 @@ impl WorkerState {
             .map(|r| (r.url, r.ranges.into()))
             .collect();
         self.stored_bytes = msg.stored_bytes.unwrap_or_default();
+    }
+
+    pub fn heartbeat(&mut self, msg: Heartbeat) {
+        self.last_ping = Some(SystemTime::now());
+        self.version = Some(msg.version);
+        if let Some(missing_chunks) = msg.missing_chunks {
+            self.num_missing_chunks_on_heartbeat =
+                Some(missing_chunks.to_bytes().iter().filter(|v| **v > 0).count() as u32);
+            debug!(
+                "Got {} missing chunks for {}",
+                self.num_missing_chunks_on_heartbeat.unwrap(),
+                self.peer_id
+            );
+        } else {
+            self.num_missing_chunks_on_heartbeat = None;
+            error!("Got no missing chunks info");
+        }
+        self.stored_bytes = msg.stored_bytes.unwrap_or(0);
     }
 
     pub fn dialed(&mut self, reachable: bool) {
@@ -222,7 +243,10 @@ impl WorkerState {
             return true;
         }
 
-        let num_missing_chunks = self.count_missing_chunks(units);
+        let num_missing_chunks = match self.num_missing_chunks_on_heartbeat {
+            Some(num) => num,
+            None => self.count_missing_chunks(units),
+        };
         if num_missing_chunks == 0 {
             log::debug!("Worker {} is fully synced", self.peer_id);
             self.num_missing_chunks = num_missing_chunks;

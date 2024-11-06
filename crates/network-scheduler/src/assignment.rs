@@ -3,16 +3,16 @@ use std::collections::HashMap;
 
 use crypto_box::{
     aead::{Aead, AeadCore, OsRng},
-    SalsaBox, PublicKey, SecretKey
+    PublicKey, SalsaBox, SecretKey,
 };
+use curve25519_dalek::edwards::CompressedEdwardsY;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serde_with::serde_as;
 use serde_with::base64::Base64;
-use sha2::Sha512;
+use serde_with::serde_as;
 use sha2::Digest;
+use sha2::Sha512;
 use sha3::digest::generic_array::GenericArray;
-use curve25519_dalek::edwards::CompressedEdwardsY;
 
 use crate::signature::timed_hmac_now;
 
@@ -78,32 +78,41 @@ pub struct NetworkAssignment {
 #[derive(Serialize, Deserialize)]
 pub struct NetworkState {
     pub(crate) network: String,
-    pub(crate) assignment: NetworkAssignment
+    pub(crate) assignment: NetworkAssignment,
 }
 
 impl Assignment {
     pub fn add_chunk(&mut self, chunk: Chunk, dataset_id: String, dataset_url: String) {
-        match self.datasets.iter_mut().find(|dataset| dataset.id == dataset_id) {
+        match self
+            .datasets
+            .iter_mut()
+            .find(|dataset| dataset.id == dataset_id)
+        {
             Some(dataset) => dataset.chunks.push(chunk),
-            None => self.datasets.push(Dataset { id: dataset_id, base_url: dataset_url, chunks: vec![chunk] }),
+            None => self.datasets.push(Dataset {
+                id: dataset_id,
+                base_url: dataset_url,
+                chunks: vec![chunk],
+            }),
         }
         self.chunk_map = None
     }
-    
+
     pub fn insert_assignment(&mut self, peer_id: String, status: String, chunks_deltas: Vec<u64>) {
-        self.worker_assignments.insert(peer_id.clone(), WorkerAssignment { 
-            status, 
-            chunks_deltas,
-            encrypted_headers: Default::default()
-        });
+        self.worker_assignments.insert(
+            peer_id.clone(),
+            WorkerAssignment {
+                status,
+                chunks_deltas,
+                encrypted_headers: Default::default(),
+            },
+        );
     }
 
     pub fn dataset_chunks_for_peer_id(&self, peer_id: String) -> Option<Vec<Dataset>> {
         let local_assignment = match self.worker_assignments.get(&peer_id) {
             Some(worker_assignment) => worker_assignment,
-            None => {
-                return None
-            }
+            None => return None,
         };
         let mut result: Vec<Dataset> = Default::default();
         let mut idxs: Vec<u64> = Default::default();
@@ -135,27 +144,35 @@ impl Assignment {
                 result.push(Dataset {
                     id: u.id.clone(),
                     base_url: u.base_url.clone(),
-                    chunks: filtered_chunks
+                    chunks: filtered_chunks,
                 });
             }
         }
         Some(result)
     }
 
-    pub fn headers_for_peer_id(&self, peer_id: String, secret_key: Vec<u8>) -> Option<HashMap<String, String>> {
+    pub fn headers_for_peer_id(
+        &self,
+        peer_id: String,
+        secret_key: Vec<u8>,
+    ) -> Option<HashMap<String, String>> {
         let local_assignment = self.worker_assignments.get(&peer_id)?;
-        let EncryptedHeaders {identity, nonce, ciphertext,} = &local_assignment.encrypted_headers;
+        let EncryptedHeaders {
+            identity,
+            nonce,
+            ciphertext,
+        } = &local_assignment.encrypted_headers;
         let Ok(temporary_public_key) = PublicKey::from_slice(identity.as_slice()) else {
-            return None
+            return None;
         };
         let big_slice = Sha512::default().chain_update(secret_key).finalize();
         let Ok(worker_secret_key) = SecretKey::from_slice(&big_slice[00..32]) else {
-            return None
+            return None;
         };
         let shared_box = SalsaBox::new(&temporary_public_key, &worker_secret_key);
         let generic_nonce = GenericArray::clone_from_slice(nonce);
         let Ok(decrypted_plaintext) = shared_box.decrypt(&generic_nonce, &ciphertext[..]) else {
-            return None
+            return None;
         };
         let Ok(plaintext_headers) = std::str::from_utf8(&decrypted_plaintext) else {
             return None;
@@ -164,7 +181,7 @@ impl Assignment {
             return None;
         };
         let mut result: HashMap<String, String> = Default::default();
-        for (k,v) in headers.as_object().unwrap() {
+        for (k, v) in headers.as_object().unwrap() {
             result.insert(k.to_string(), v.as_str().unwrap().to_string());
         }
         Some(result)
@@ -179,7 +196,7 @@ impl Assignment {
                     chunk_map.insert(chunk.id.clone(), idx);
                     idx += 1;
                 }
-            };
+            }
             self.chunk_map = Some(chunk_map);
         };
         self.chunk_map.as_ref().unwrap().get(&chunk_id).cloned()
@@ -190,18 +207,16 @@ impl Assignment {
         let temporary_public_key_bytes = *temporary_secret_key.public_key().as_bytes();
 
         for (worker_id, worker_assignment) in &mut self.worker_assignments {
-            let worker_signature = timed_hmac_now(
-                worker_id,
-                &cloudflare_storage_secret,
-            );
+            let worker_signature = timed_hmac_now(worker_id, &cloudflare_storage_secret);
 
-            let headers = Headers { 
-                worker_id: worker_id.to_string(), 
+            let headers = Headers {
+                worker_id: worker_id.to_string(),
                 worker_signature,
             };
-            
+
             let pub_key_edvards_bytes = &bs58::decode(worker_id).into_vec().unwrap()[6..];
-            let public_edvards_compressed = CompressedEdwardsY::from_slice(pub_key_edvards_bytes).unwrap();
+            let public_edvards_compressed =
+                CompressedEdwardsY::from_slice(pub_key_edvards_bytes).unwrap();
             let public_edvards = public_edvards_compressed.decompress().unwrap();
             let public_montgomery = public_edvards.to_montgomery();
             let worker_public_key = PublicKey::from(public_montgomery);
@@ -210,7 +225,6 @@ impl Assignment {
             let nonce = SalsaBox::generate_nonce(&mut OsRng);
             let plaintext = serde_json::to_vec(&headers).unwrap();
             let ciphertext = shared_box.encrypt(&nonce, &plaintext[..]).unwrap();
-
 
             worker_assignment.encrypted_headers = EncryptedHeaders {
                 identity: temporary_public_key_bytes.to_vec(),
@@ -236,7 +250,9 @@ mod tests {
 
         assignment.insert_assignment(peer_id.clone(), "Ok".to_owned(), Default::default());
         assignment.regenerate_headers("SUPERSECRET".to_owned());
-        let headers = assignment.headers_for_peer_id(peer_id.clone(), private_key.as_ref().to_vec()).unwrap();
+        let headers = assignment
+            .headers_for_peer_id(peer_id.clone(), private_key.as_ref().to_vec())
+            .unwrap();
         let decrypted_id = headers.get("worker-id").unwrap();
         assert_eq!(peer_id, decrypted_id.to_owned());
     }

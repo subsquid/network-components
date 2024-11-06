@@ -116,9 +116,11 @@ impl Server {
                             SchedulerEvent::Ping { peer_id, ping } => (peer_id, ping),
                             SchedulerEvent::PeerProbed { peer_id, reachable } => {
                                 return scheduler.worker_dialed(peer_id, reachable)
-                            },
-                            SchedulerEvent::Heartbeat { peer_id, .. } => {
-                                return log::debug!("Got heartbeat from {peer_id}");
+                            }
+                            SchedulerEvent::Heartbeat { peer_id, heartbeat } => {
+                                log::debug!("Got heartbeat from {peer_id}");
+                                scheduler.heartbeat(&peer_id, heartbeat);
+                                return;
                             }
                         };
 
@@ -176,9 +178,7 @@ impl Server {
                 if current_epoch >= last_schedule_epoch + schedule_interval {
                     scheduler.schedule(current_epoch);
                     match scheduler.to_json() {
-                        Ok(state) => {
-                            storage_client.save_scheduler(state.clone()).await
-                        },
+                        Ok(state) => storage_client.save_scheduler(state.clone()).await,
                         Err(e) => log::error!("Error serializing scheduler: {e:?}"),
                     }
                 }
@@ -295,7 +295,7 @@ impl Server {
                 let assignment_fut = storage_client.save_assignment(assignment);
                 let summary = build_chunks_summary(workers, units);
                 let save_fut = storage_client.save_chunks_list(&summary);
-                
+
                 scheduler.update_chunks_summary(summary);
                 join!(save_fut, assignment_fut);
             }
@@ -347,21 +347,21 @@ fn build_assignment(
                 files,
                 size_bytes,
             };
-    
+
             assignment.add_chunk(chunk, dataset_id, download_url);
             local_ids.push(chunk_str);
         }
         aux.insert(k.to_string(), local_ids);
-    };
+    }
 
     for worker in workers {
         let peer_id = worker.peer_id;
         let status = match worker.jail_reason {
             Some(str) => str.to_string(),
-            None => "Ok".to_string()
+            None => "Ok".to_string(),
         };
         let mut chunks_idxs: Vec<u64> = Default::default();
-        
+
         for unit in &worker.assigned_units {
             let unit_id = unit.to_string();
             for chunk_id in aux.get(&unit_id).unwrap() {
@@ -371,10 +371,10 @@ fn build_assignment(
         chunks_idxs.sort();
         for i in (1..chunks_idxs.len()).rev() {
             chunks_idxs[i] -= chunks_idxs[i - 1];
-        };
+        }
 
         assignment.insert_assignment(peer_id.to_string(), status, chunks_idxs);
-    };
+    }
     assignment.regenerate_headers(Config::get().cloudflare_storage_secret.clone());
     assignment
 }

@@ -4,7 +4,7 @@ use std::io::Read;
 use std::time::{Duration, SystemTime};
 
 use flate2::bufread::DeflateDecoder;
-use log::{error, info};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_partial::SerializePartial;
 use serde_with::{serde_as, TimestampMilliSeconds};
@@ -131,15 +131,12 @@ impl WorkerState {
             let mut unavailability_map = Vec::<u8>::new();
             _ = decoder.read_to_end(&mut unavailability_map);
             self.num_missing_chunks_on_heartbeat = Some(unavailability_map.iter().filter(|v| **v > 0).count() as u32);
-            info!("Got {} missing chunks", self.num_missing_chunks_on_heartbeat.unwrap());
+            debug!("Got {} missing chunks for {}", self.num_missing_chunks_on_heartbeat.unwrap(), self.peer_id);
         } else {
             self.num_missing_chunks_on_heartbeat = None;
             error!("Got no missing chunks info");
         }
-        self.stored_bytes = match msg.stored_bytes {
-            Some(stored_bytes) => stored_bytes,
-            None => 0,
-        };
+        self.stored_bytes = msg.stored_bytes.unwrap_or(0);
     }
 
     pub fn dialed(&mut self, reachable: bool) {

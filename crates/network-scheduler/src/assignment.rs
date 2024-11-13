@@ -1,11 +1,13 @@
 use core::str;
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 use crypto_box::{
     aead::{Aead, AeadCore, OsRng},
     PublicKey, SalsaBox, SecretKey,
 };
 use curve25519_dalek::edwards::CompressedEdwardsY;
+use log::error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::base64::Base64;
@@ -202,6 +204,24 @@ impl Assignment {
         self.chunk_map.as_ref().unwrap().get(&chunk_id).cloned()
     }
 
+    fn encrypt(worker_id: &String, secret_key: &SecretKey, plaintext: &Vec<u8>) -> Result<(Vec<u8>, Vec<u8>), anyhow::Error> {
+        let peer_id_decoded = bs58::decode(worker_id).into_vec()?;
+        if peer_id_decoded.len() != 38 {
+            return Err(anyhow!("WorkerID parsing failed"));
+        }
+        let pub_key_edvards_bytes = &peer_id_decoded[6..];
+        let public_edvards_compressed =
+            CompressedEdwardsY::from_slice(pub_key_edvards_bytes)?;
+        let public_edvards = public_edvards_compressed.decompress().ok_or(anyhow!("Failed to decompress Edwards point"))?;
+        let public_montgomery = public_edvards.to_montgomery();
+        let worker_public_key = PublicKey::from(public_montgomery);
+
+        let shared_box = SalsaBox::new(&worker_public_key, secret_key);
+        let nonce = SalsaBox::generate_nonce(&mut OsRng);
+        let ciphertext = shared_box.encrypt(&nonce, &plaintext[..]).map_err(|err| anyhow!("Error {err:?}"))?;
+        Ok((ciphertext, nonce.to_vec()))
+    }
+
     pub fn regenerate_headers(&mut self, cloudflare_storage_secret: String) {
         let temporary_secret_key = SecretKey::generate(&mut OsRng);
         let temporary_public_key_bytes = *temporary_secret_key.public_key().as_bytes();
@@ -213,22 +233,18 @@ impl Assignment {
                 worker_id: worker_id.to_string(),
                 worker_signature,
             };
-
-            let pub_key_edvards_bytes = &bs58::decode(worker_id).into_vec().unwrap()[6..];
-            let public_edvards_compressed =
-                CompressedEdwardsY::from_slice(pub_key_edvards_bytes).unwrap();
-            let public_edvards = public_edvards_compressed.decompress().unwrap();
-            let public_montgomery = public_edvards.to_montgomery();
-            let worker_public_key = PublicKey::from(public_montgomery);
-
-            let shared_box = SalsaBox::new(&worker_public_key, &temporary_secret_key);
-            let nonce = SalsaBox::generate_nonce(&mut OsRng);
             let plaintext = serde_json::to_vec(&headers).unwrap();
-            let ciphertext = shared_box.encrypt(&nonce, &plaintext[..]).unwrap();
+            let (ciphertext, nonce) = match Self::encrypt(worker_id, &temporary_secret_key, &plaintext) {
+                Ok(val) => val,
+                Err(err) => {
+                    error!("Error while processing headers for {worker_id}: {err:?}");
+                    continue;
+                }
+            };
 
             worker_assignment.encrypted_headers = EncryptedHeaders {
                 identity: temporary_public_key_bytes.to_vec(),
-                nonce: nonce.to_vec(),
+                nonce: nonce,
                 ciphertext,
             };
         }
@@ -252,7 +268,7 @@ mod tests {
         assignment.regenerate_headers("SUPERSECRET".to_owned());
         let headers = assignment
             .headers_for_peer_id(peer_id.clone(), private_key.as_ref().to_vec())
-            .unwrap();
+            .unwrap_or_default();
         let decrypted_id = headers.get("worker-id").unwrap();
         assert_eq!(peer_id, decrypted_id.to_owned());
     }

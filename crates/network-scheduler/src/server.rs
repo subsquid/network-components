@@ -18,7 +18,7 @@ use sqd_messages::{Pong, RangeSet};
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 use sqd_network_transport::{SchedulerEvent, SchedulerTransportHandle};
 
-use crate::assignment::{Assignment, Chunk};
+use sqd_messages::assignments::{Assignment, Chunk};
 use crate::cli::Config;
 use crate::data_chunk::{chunks_to_worker_state, DataChunk};
 use crate::scheduler::{ChunkStatus, Scheduler};
@@ -365,7 +365,7 @@ fn build_assignment(
         for unit in &worker.assigned_units {
             let unit_id = unit.to_string();
             for chunk_id in aux.get(&unit_id).unwrap() {
-                chunks_idxs.push(assignment.chunk_index(chunk_id.clone()).unwrap());
+                chunks_idxs.push(assignment.chunk_index(chunk_id.to_string()).unwrap());
             }
         }
         chunks_idxs.sort();
@@ -373,9 +373,9 @@ fn build_assignment(
             chunks_idxs[i] -= chunks_idxs[i - 1];
         }
 
-        assignment.insert_assignment(peer_id.to_string(), status, chunks_idxs);
+        assignment.insert_assignment(&peer_id.to_string(), status, chunks_idxs);
     }
-    assignment.regenerate_headers(Config::get().cloudflare_storage_secret.clone());
+    assignment.regenerate_headers(&Config::get().cloudflare_storage_secret);
     assignment
 }
 

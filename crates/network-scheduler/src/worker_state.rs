@@ -15,7 +15,7 @@ use sqd_network_transport::PeerId;
 use crate::cli::Config;
 use crate::data_chunk::DataChunk;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
-use crate::signature::timed_hmac_now;
+use sqd_messages::assignments::timed_hmac_now;
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, SerializePartial)]

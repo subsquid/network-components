@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 
-use crate::assignment::{Assignment, NetworkAssignment, NetworkState};
+use sqd_messages::assignments::{Assignment, NetworkAssignment, NetworkState};
 use crate::cli::Config;
 use crate::data_chunk::DataChunk;
 use crate::prometheus_metrics;

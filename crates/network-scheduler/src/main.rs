@@ -8,7 +8,6 @@ use crate::cli::{Cli, Config};
 use crate::server::Server;
 use crate::storage::S3Storage;
 
-mod assignment;
 mod cli;
 mod data_chunk;
 mod metrics_server;
@@ -16,7 +15,6 @@ mod prometheus_metrics;
 mod scheduler;
 mod scheduling_unit;
 mod server;
-mod signature;
 mod storage;
 mod worker_state;
 

@@ -45,7 +45,7 @@ tokio = { version = "1", features = ["full"] }
 url = "2.5.0"
 
 sqd-contract-client = { workspace = true }
-sqd-messages = { workspace = true, features = ["semver"] }
+sqd-messages = { workspace = true, features = ["semver", "assignment_writer"] }
 sqd-network-transport = { workspace = true, features = ["scheduler", "metrics"] }
 
 

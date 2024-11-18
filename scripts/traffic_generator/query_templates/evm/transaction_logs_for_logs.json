@@ -1,6 +1,7 @@
 {
     "fromBlock": 17881390,
     "toBlock": 17882786,
+    "type": "evm",
     "logs": [{
         "address": ["0xffdbe829d5a9afcd50482c23eb387b9050f1f825"],
         "transactionLogs": true

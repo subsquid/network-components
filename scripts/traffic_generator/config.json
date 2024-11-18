@@ -1,34 +1,29 @@
 {
   "datasets": [
     {
-      "url": "s3://arbitrum-one",
+      "name": "arbitrum-one",
       "template_dir": "evm",
       "id": "czM6Ly9hcmJpdHJ1bS1vbmU"
     },
     {
-      "url": "s3://ethereum-mainnet",
+      "name": "ethereum-mainnet",
       "template_dir": "evm",
       "id": "czM6Ly9ldGhlcmV1bS1tYWlubmV0"
     },
     {
-      "url": "s3://binance-mainnet",
+      "name": "binance-mainnet",
       "template_dir": "evm",
       "id": "czM6Ly9iaW5hbmNlLW1haW5uZXQ"
     },
     {
-      "url": "s3://polygon-mainnet-1",
+      "name": "polygon-mainnet",
       "template_dir": "evm",
       "id": "czM6Ly9wb2x5Z29uLW1haW5uZXQtMQ"
     },
     {
-      "url": "s3://zksync-mainnet-1",
+      "name": "zksync-mainnet",
       "template_dir": "evm",
       "id": "czM6Ly96a3N5bmMtbWFpbm5ldC0x"
-    },
-    {
-      "url": "s3://chainflip-4",
-      "template_dir": "substrate",
-      "id": "czM6Ly9jaGFpbmZsaXAtNA"
     }
   ]
 }

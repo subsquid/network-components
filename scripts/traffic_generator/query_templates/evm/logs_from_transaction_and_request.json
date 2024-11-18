@@ -1,6 +1,7 @@
 {
   "fromBlock": 17881390,
   "toBlock": 17881391,
+  "type": "evm",
   "logs": [
     {
       "topic0": ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"]

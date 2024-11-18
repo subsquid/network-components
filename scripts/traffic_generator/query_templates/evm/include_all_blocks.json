@@ -1,6 +1,7 @@
 {
     "fromBlock": 17881390,
     "toBlock": 17882786,
+    "type": "evm",
     "includeAllBlocks": true,
     "fields": {
         "block": {

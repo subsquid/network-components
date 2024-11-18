@@ -15,10 +15,9 @@ from typing import List, Dict, Annotated, Tuple, Any, Optional, NewType
 NUM_THREADS = int(os.environ.get('NUM_THREADS', 10))
 QUERY_TIMEOUT_SEC = int(os.environ.get('QUERY_TIMEOUT_SEC', 60))
 MIN_INTERVAL_SEC = float(os.environ.get('MIN_INTERVAL_SEC', 60))
-SKIP_GREYLISTED = os.environ.get('SKIP_GREYLISTED', '').lower() in ('1', 't', 'true', 'y', 'yes')
 MAX_BLOCK_RANGE = int(os.environ.get('MAX_BLOCK_RANGE', 1_000_000))
 
-GATEWAY_URL = os.environ.get('GATEWAY_URL', "https://public-gateway.testnet.subsquid.io")
+PORTAL_URL = os.environ.get('PORTAL_URL', "https://portal.sqd.dev")
 
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
 
@@ -30,14 +29,13 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S',
 )
 
-S3Url = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["s3"])]
 DatasetId = NewType('DatasetId', str)
 WorkerId = NewType('WorkerId', str)
 
 
 class Dataset(BaseModel):
     id: DatasetId
-    url: S3Url
+    name: str
     template_dir: str
 
 
@@ -60,9 +58,14 @@ class DatasetState(BaseModel):
     worker_ranges: Dict[WorkerId, DatasetRanges]
 
 
-NetworkState = TypeAdapter(Dict[DatasetId, DatasetState])
 WorkerState = Dict[DatasetId, List[BlockRange]]
 WorkersDict = Dict[WorkerId, WorkerState]
+
+
+def strip_prefix(s: str, prefix: str) -> str:
+    if s.startswith(prefix):
+        return s[len(prefix):]
+    return s
 
 
 class TrafficGenerator:
@@ -111,26 +114,22 @@ class TrafficGenerator:
     def _get_workers(self) -> WorkersDict:
         try:
             logging.info("Getting active workers")
-            response = requests.get(f'{GATEWAY_URL}/network/state')
-            response.raise_for_status()
-            network_state = NetworkState.validate_json(response.content)
             workers: WorkersDict = {}
-            for dataset_id, dataset_state in network_state.items():
-                for worker_id, ranges in dataset_state.worker_ranges.items():
-                    if ranges.ranges:
-                        workers.setdefault(worker_id, {})[dataset_id] = ranges.ranges
+            for dataset in self._config.datasets:
+                response = requests.get(f'{PORTAL_URL}/datasets/{dataset.name}/state')
+                if response.ok:
+                    dataset_state = DatasetState.model_validate_json(response.content)
+                    for worker_id, ranges in dataset_state.worker_ranges.items():
+                        if ranges.ranges:
+                            workers.setdefault(worker_id, {})[dataset.id] = ranges.ranges
+                else:
+                    logging.warning(f"Couldn't get chunks of {dataset.name}, skipping")
             return self._filter_workers(workers)
         except (requests.HTTPError, ValidationError) as e:
             logging.error(f"Error getting workers: {e}")
             return {}
 
     def _filter_workers(self, workers: WorkersDict) -> WorkersDict:
-        if SKIP_GREYLISTED:
-            response = requests.get(f'{GATEWAY_URL}/workers/greylisted')
-            response.raise_for_status()
-            greylisted = set(response.json())
-            logging.info(f"Omitting {len(greylisted)} grey-listed workers")
-            workers = {w: s for w, s in workers.items() if w not in greylisted}
         if self._config.worker_whitelist is not None:
             workers = {w: s for w, s in workers.items() if w in self._config.worker_whitelist}
         elif self._config.worker_blacklist is not None:
@@ -139,15 +138,15 @@ class TrafficGenerator:
 
     def _query_worker(self, worker_id: WorkerId, state: WorkerState) -> Optional[int]:
         stored_datasets = [
-            (dataset.template_dir, dataset.id, dataset.url) for dataset in self._config.datasets
+            (dataset.template_dir, dataset.id, dataset.name) for dataset in self._config.datasets
             if dataset.id in state
         ]
         if not stored_datasets:
             logging.warning(f"Worker {worker_id} has no datasets to query")
             return None
 
-        template, dataset_id, dataset_url = random.choice(stored_datasets)
-        query_url = f'{GATEWAY_URL}/query/{dataset_id}/{worker_id}?timeout={QUERY_TIMEOUT_SEC}s'
+        template, dataset_id, dataset_name = random.choice(stored_datasets)
+        query_url = f'{PORTAL_URL}/query/{dataset_id}/{worker_id}?timeout={QUERY_TIMEOUT_SEC}s'
         query = random.choice(self._query_templates[template])
         query['fromBlock'], query['toBlock'] = random_range(state[dataset_id])
 
@@ -193,7 +192,7 @@ def main(config_path: str = 'config.json'):
         config_json = Path(config_path).read_text()
         config = Config.model_validate_json(config_json)
         logging.info(
-            f"Config loaded datasets={[str(dataset.url) for dataset in config.datasets]}")
+            f"Config loaded datasets={[str(dataset.name) for dataset in config.datasets]}")
     except (IOError, ValidationError) as e:
         logging.error(f"Error reading config: {e}")
         exit(1)

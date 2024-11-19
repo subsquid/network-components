@@ -6,11 +6,12 @@ use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
+use sqd_messages::signatures::sha3_256;
 use sqd_messages::{query_error, query_executed, Heartbeat, QueryExecuted};
 use sqd_network_transport::{protocol, PeerId};
 
 use crate::cli::ClickhouseArgs;
-use crate::timestamp_now_ms;
+use crate::{base64, timestamp_now_ms};
 
 lazy_static! {
     static ref LOGS_TABLE: String =
@@ -31,6 +32,7 @@ lazy_static! {
             chunk_id String NOT NULL DEFAULT '',
             query String NOT NULL,
             query_hash String NOT NULL,
+            exec_time UInt32 NOT NULL DEFAULT 0,
             exec_time_ms UInt32 NOT NULL,
             result Enum8(
                 'ok' = 1,
@@ -116,6 +118,7 @@ pub struct QueryExecutedRow {
     query: String,
     #[serde(with = "serde_bytes")]
     query_hash: Vec<u8>,
+    exec_time: u32,
     exec_time_ms: u32,
     result: QueryResult,
     num_read_chunks: u32,
@@ -203,13 +206,14 @@ impl QueryExecutedRow {
             client_id: query_executed.client_id,
             worker_id: worker_id.to_string(),
             query_id: query.query_id,
-            dataset: Default::default(), // TODO: base64(dataset_id)
+            dataset: base64(&query.dataset),
             dataset_id: query.dataset,
             from_block: query.block_range.map(|r| r.begin),
             to_block: query.block_range.map(|r| r.end),
             chunk_id: query.chunk_id,
+            query_hash: sha3_256(query.query.as_bytes()).to_vec(),
             query: query.query,
-            query_hash: Default::default(), // TODO: sha3_256(query.query)
+            exec_time: query_executed.exec_time_micros,
             exec_time_ms: query_executed.exec_time_micros / 1000,
             result: query_result,
             num_read_chunks,

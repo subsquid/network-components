@@ -18,7 +18,6 @@ use sqd_messages::{Pong, RangeSet};
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 use sqd_network_transport::{SchedulerEvent, SchedulerTransportHandle};
 
-use sqd_messages::assignments::{Assignment, Chunk};
 use crate::cli::Config;
 use crate::data_chunk::{chunks_to_worker_state, DataChunk};
 use crate::scheduler::{ChunkStatus, Scheduler};
@@ -26,6 +25,7 @@ use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::storage::S3Storage;
 use crate::worker_state::WorkerState;
 use crate::{metrics_server, prometheus_metrics};
+use sqd_messages::assignments::{Assignment, Chunk};
 
 const WORKER_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const CHUNKS_SUMMARY_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
@@ -356,10 +356,7 @@ fn build_assignment(
 
     for worker in workers {
         let peer_id = worker.peer_id;
-        let status = match worker.jail_reason {
-            Some(str) => str.to_string(),
-            None => "Ok".to_string(),
-        };
+        let jail_reason = worker.jail_reason.map(|r| r.to_string());
         let mut chunks_idxs: Vec<u64> = Default::default();
 
         for unit in &worker.assigned_units {
@@ -373,7 +370,7 @@ fn build_assignment(
             chunks_idxs[i] -= chunks_idxs[i - 1];
         }
 
-        assignment.insert_assignment(&peer_id.to_string(), status, chunks_idxs);
+        assignment.insert_assignment(&peer_id.to_string(), jail_reason, chunks_idxs);
     }
     assignment.regenerate_headers(&Config::get().cloudflare_storage_secret);
     assignment

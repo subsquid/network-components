@@ -121,9 +121,9 @@ where
         let mut last_query_id = None;
         for page in 0..MAX_PAGES {
             if page == 0 {
-                log::debug!("Collecting logs from {worker_id:?} since {from_timestamp_ms}");
+                log::debug!("Collecting logs from {worker_id} since {from_timestamp_ms}");
             } else {
-                log::debug!("Collecting more logs from {worker_id:?} since {from_timestamp_ms}");
+                log::debug!("Collecting more logs from {worker_id} since {from_timestamp_ms}");
             }
             let logs = match self
                 .transport_handle
@@ -138,7 +138,7 @@ where
             {
                 Ok(logs) => logs,
                 Err(e) => {
-                    return log::warn!("Error getting logs from {worker_id:?}: {e:?}");
+                    return log::warn!("Error getting logs from {worker_id}: {e:?}");
                 }
             };
 

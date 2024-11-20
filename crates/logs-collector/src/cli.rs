@@ -42,6 +42,15 @@ pub struct Cli {
         default_value = "20"
     )]
     pub request_timeout: Duration,
+
+    /// Timeout for workers lookup
+    #[arg(
+        long,
+        env = "LOOKUP_TIMEOUT_SEC",
+        value_parser = parse_seconds,
+        default_value = "10"
+    )]
+    pub lookup_timeout: Duration,
 }
 
 fn parse_seconds(s: &str) -> anyhow::Result<Duration> {

@@ -2,14 +2,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use collector_utils::Storage;
 use futures::StreamExt;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use sqd_contract_client::Client as ContractClient;
 use sqd_messages::LogsRequest;
 use sqd_network_transport::util::{CancellationToken, TaskManager};
-use sqd_network_transport::{protocol, LogsCollectorTransport, PeerId};
-
-use collector_utils::{timestamp_now_ms, Storage};
+use sqd_network_transport::{LogsCollectorTransport, PeerId};
 
 use crate::collector::LogsCollector;
 
@@ -20,8 +19,8 @@ where
     T: Storage + Send + Sync + 'static,
 {
     transport_handle: Arc<LogsCollectorTransport>,
-    logs_collector: Mutex<LogsCollector<T>>,
-    registered_workers: Arc<RwLock<HashSet<PeerId>>>,
+    logs_collector: LogsCollector<T>,
+    registered_workers: Arc<Mutex<HashSet<PeerId>>>,
     task_manager: TaskManager,
 }
 
@@ -32,7 +31,7 @@ where
     pub fn new(transport: LogsCollectorTransport, logs_collector: LogsCollector<T>) -> Self {
         Self {
             transport_handle: Arc::new(transport),
-            logs_collector: Mutex::new(logs_collector),
+            logs_collector,
             registered_workers: Default::default(),
             task_manager: Default::default(),
         }
@@ -55,7 +54,7 @@ where
             .into_iter()
             .map(|w| w.peer_id)
             .collect();
-        *self.registered_workers.write() = workers;
+        *self.registered_workers.lock() = workers;
 
         self.spawn_worker_update_task(contract_client, worker_update_interval);
         self.spawn_transport_task();
@@ -86,9 +85,9 @@ where
                 _ = cancel_token.cancelled() => break,
             };
 
-            let workers = self.registered_workers.read().clone();
+            let workers = self.registered_workers.lock().clone();
             log::info!("Collecting logs from {} workers", workers.len());
-            let last_timestamps = match self.logs_collector.lock().last_timestamps().await {
+            let last_timestamps = match self.logs_collector.last_timestamps().await {
                 Ok(timestamps) => timestamps,
                 Err(e) => {
                     log::warn!("Couldn't read last stored logs: {e:?}");
@@ -112,7 +111,6 @@ where
                 .await;
 
             self.logs_collector
-                .lock()
                 .dump_buffer()
                 .await
                 .unwrap_or_else(|e| log::warn!("Couldn't store logs: {e:?}"));
@@ -120,13 +118,12 @@ where
     }
 
     async fn collect_logs(&self, worker_id: PeerId, mut from_timestamp_ms: u64) {
-        let now = timestamp_now_ms();
         let mut last_query_id = None;
         for page in 0..MAX_PAGES {
             if page == 0 {
-                log::info!("Collecting logs from {worker_id:?} since {from_timestamp_ms}");
+                log::debug!("Collecting logs from {worker_id:?} since {from_timestamp_ms}");
             } else {
-                log::info!("Collecting more logs from {worker_id:?} since {from_timestamp_ms}");
+                log::debug!("Collecting more logs from {worker_id:?} since {from_timestamp_ms}");
             }
             let logs = match self
                 .transport_handle
@@ -134,7 +131,6 @@ where
                     worker_id,
                     LogsRequest {
                         from_timestamp_ms,
-                        to_timestamp_ms: now - protocol::MAX_TIME_LAG.as_millis() as u64,
                         last_received_query_id: last_query_id,
                     },
                 )
@@ -142,18 +138,17 @@ where
             {
                 Ok(logs) => logs,
                 Err(e) => {
-                    return log::error!("Error getting logs from {worker_id:?}: {e:?}");
+                    return log::warn!("Error getting logs from {worker_id:?}: {e:?}");
                 }
             };
 
             let Some(last_log) = logs.queries_executed.last() else {
-                return log::warn!("No logs returned from {worker_id}");
+                return;
             };
             last_query_id = last_log.query.as_ref().map(|q| q.query_id.clone());
             from_timestamp_ms = last_log.timestamp_ms;
 
             self.logs_collector
-                .lock()
                 .buffer_logs(worker_id, logs.queries_executed);
 
             if !logs.has_more {
@@ -179,7 +174,7 @@ where
                     Ok(workers) => workers,
                     Err(e) => return log::error!("Error getting registered workers: {e:?}"),
                 };
-                *registered_workers.write() = workers
+                *registered_workers.lock() = workers
                     .into_iter()
                     .map(|w| w.peer_id)
                     .collect::<HashSet<PeerId>>();

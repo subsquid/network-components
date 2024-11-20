@@ -33,6 +33,15 @@ pub struct Cli {
         default_value = "300"
     )]
     pub worker_update_interval: Duration,
+
+    /// Timeout for log requests to workers
+    #[arg(
+        long,
+        env = "REQUEST_TIMEOUT_SEC",
+        value_parser = parse_seconds,
+        default_value = "20"
+    )]
+    pub request_timeout: Duration,
 }
 
 fn parse_seconds(s: &str) -> anyhow::Result<Duration> {

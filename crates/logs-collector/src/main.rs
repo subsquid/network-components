@@ -3,7 +3,7 @@ use std::sync::Arc;
 use clap::Parser;
 use env_logger::Env;
 use sqd_network_transport::util::CancellationToken;
-use sqd_network_transport::{get_agent_info, AgentInfo, P2PTransportBuilder};
+use sqd_network_transport::{get_agent_info, AgentInfo, LogsCollectorConfig, P2PTransportBuilder};
 
 use collector_utils::ClickhouseStorage;
 
@@ -55,7 +55,9 @@ async fn main() -> anyhow::Result<()> {
     let agent_info = get_agent_info!();
     let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info).await?;
     let contract_client: Arc<_> = transport_builder.contract_client().into();
-    let transport = transport_builder.build_logs_collector(Default::default())?;
+    let mut config = LogsCollectorConfig::default();
+    config.request_config.request_timeout = args.request_timeout;
+    let transport = transport_builder.build_logs_collector(config)?;
 
     let storage = ClickhouseStorage::new(args.clickhouse).await?;
     let logs_collector = LogsCollector::new(storage);

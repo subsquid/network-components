@@ -1,11 +1,12 @@
 [package]
 name = "collector-utils"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2021"
 
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 clickhouse = "0.12"
 lazy_static = "1"
@@ -15,8 +16,8 @@ serde_bytes = "0.11"
 serde_repr = "0.1"
 
 sqd-messages = { workspace = true }
+sqd-network-transport = { workspace = true }
 
 [dev-dependencies]
 test-with = "0.13"
-sqd-network-transport = { workspace = true }
 tokio = { version = "1", features = ["full"] }

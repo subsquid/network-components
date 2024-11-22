@@ -6,10 +6,12 @@ use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
-use sqd_messages::{query_executed, InputAndOutput, Ping, Query, QueryExecuted, SizeAndHash};
+use sqd_messages::signatures::sha3_256;
+use sqd_messages::{query_error, query_executed, Heartbeat, QueryExecuted};
+use sqd_network_transport::{protocol, PeerId};
 
 use crate::cli::ClickhouseArgs;
-use crate::timestamp_now_ms;
+use crate::{base64, timestamp_now_ms};
 
 lazy_static! {
     static ref LOGS_TABLE: String =
@@ -24,21 +26,32 @@ lazy_static! {
             worker_id String NOT NULL,
             query_id String NOT NULL,
             dataset String NOT NULL,
+            dataset_id String NOT NULL DEFAULT '',
+            from_block Nullable(UInt64),
+            to_block Nullable(UInt64),
+            chunk_id String NOT NULL DEFAULT '',
             query String NOT NULL,
-            profiling Boolean NOT NULL,
-            client_state_json String NOT NULL,
             query_hash String NOT NULL,
+            exec_time UInt32 NOT NULL DEFAULT 0,
             exec_time_ms UInt32 NOT NULL,
-            result Enum8('ok' = 1, 'bad_request' = 2, 'server_error' = 3) NOT NULL,
+            result Enum8(
+                'ok' = 1,
+                'bad_request' = 2,
+                'server_error' = 3,
+                'not_found' = 4,
+                'server_overloaded' = 5,
+                'too_many_requests' = 6
+            ) NOT NULL,
             num_read_chunks UInt32 NOT NULL DEFAULT 0,
             output_size UInt32 NOT NULL DEFAULT 0,
             output_hash String NOT NULL DEFAULT '',
+            last_block Nullable(UInt64),
             error_msg String NOT NULL DEFAULT '',
-            seq_no UInt64 NOT NULL,
             client_signature String NOT NULL,
-            worker_signature String NOT NULL,
+            client_timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD),
             worker_timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD),
-            collector_timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD)
+            collector_timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD),
+            worker_version LowCardinality(String) NOT NULL DEFAULT ''
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(worker_timestamp)
@@ -65,18 +78,18 @@ lazy_static! {
 
 #[async_trait]
 pub trait Storage {
-    async fn store_logs<'a, T: Iterator<Item = QueryExecutedRow> + Sized + Send>(
+    async fn store_logs<T: Iterator<Item = QueryExecutedRow> + Sized + Send>(
         &self,
         query_logs: T,
     ) -> anyhow::Result<()>;
 
-    async fn store_pings<'a, T: Iterator<Item = PingRow> + Sized + Send>(
+    async fn store_pings<T: Iterator<Item = PingRow> + Sized + Send>(
         &self,
         pings: T,
     ) -> anyhow::Result<()>;
 
-    /// Get the sequence number & timestamp of the last stored log for each worker
-    async fn get_last_stored(&self) -> anyhow::Result<HashMap<String, (u64, u64)>>;
+    /// Get timestamp of the last stored log for each worker
+    async fn get_last_stored(&self) -> anyhow::Result<HashMap<String, u64>>;
 }
 
 pub struct ClickhouseStorage(Client);
@@ -87,6 +100,9 @@ enum QueryResult {
     Ok = 1,
     BadRequest = 2,
     ServerError = 3,
+    NotFound = 4,
+    ServerOverloaded = 5,
+    TooManyRequests = 6,
 }
 
 #[derive(Row, Debug, Clone, Serialize, Deserialize)]
@@ -95,120 +111,122 @@ pub struct QueryExecutedRow {
     worker_id: String,
     query_id: String,
     dataset: String,
+    dataset_id: String,
+    from_block: Option<u64>,
+    to_block: Option<u64>,
+    chunk_id: String,
     query: String,
-    profiling: bool,
-    client_state_json: String,
     #[serde(with = "serde_bytes")]
     query_hash: Vec<u8>,
+    exec_time: u32,
     exec_time_ms: u32,
     result: QueryResult,
     num_read_chunks: u32,
     output_size: u32,
     #[serde(with = "serde_bytes")]
     output_hash: Vec<u8>,
+    last_block: Option<u64>,
     error_msg: String,
-    pub seq_no: u64,
     #[serde(with = "serde_bytes")]
     client_signature: Vec<u8>,
-    #[serde(with = "serde_bytes")]
-    worker_signature: Vec<u8>,
+    pub client_timestamp: u64,
     pub worker_timestamp: u64,
     collector_timestamp: u64,
+    worker_version: String,
 }
 
-impl TryFrom<QueryExecuted> for QueryExecutedRow {
-    type Error = &'static str;
-
-    fn try_from(query_executed: QueryExecuted) -> Result<Self, Self::Error> {
+impl QueryExecutedRow {
+    pub fn try_from(
+        query_executed: QueryExecuted,
+        worker_id: PeerId,
+    ) -> Result<Self, &'static str> {
         let query = query_executed.query.ok_or("Query field missing")?;
         let result = query_executed.result.ok_or("Result field missing")?;
+        let client_id = query_executed
+            .client_id
+            .parse()
+            .map_err(|_| "Invalid client_id")?;
         let collector_timestamp = timestamp_now_ms();
-        let (result, num_read_chunks, output_size, output_hash, error_msg) = match result {
-            query_executed::Result::Ok(res) => {
-                let output = res.output.ok_or("Output field missing")?;
-                (
-                    QueryResult::Ok,
-                    res.num_read_chunks,
-                    output.size,
-                    output.sha3_256,
-                    "".to_string(),
-                )
+
+        if query.timestamp_ms.abs_diff(query_executed.timestamp_ms) as u128
+            > protocol::MAX_TIME_LAG.as_millis()
+        {
+            return Err("Invalid worker timestamp");
+        }
+        if !query.verify_signature(client_id, worker_id) {
+            return Err("Invalid client signature");
+        }
+
+        let query_result;
+        let num_read_chunks;
+        let output_size;
+        let output_hash;
+        let error_msg;
+        let last_block;
+        match result {
+            query_executed::Result::Ok(ok) => {
+                query_result = QueryResult::Ok;
+                num_read_chunks = 1;
+                output_size = ok.uncompressed_data_size as u32;
+                output_hash = ok.data_hash;
+                error_msg = Default::default();
+                last_block = Some(ok.last_block);
             }
-            query_executed::Result::BadRequest(err_msg) => (
-                QueryResult::BadRequest,
-                Some(0u32),
-                Some(0u32),
-                vec![],
-                err_msg,
-            ),
-            query_executed::Result::ServerError(err_msg) => (
-                QueryResult::ServerError,
-                Some(0u32),
-                Some(0u32),
-                vec![],
-                err_msg,
-            ),
-        };
+            query_executed::Result::Err(err) => {
+                num_read_chunks = 0;
+                output_size = 0;
+                output_hash = Default::default();
+                last_block = None;
+                match err.err.ok_or("Unknown error type")? {
+                    query_error::Err::BadRequest(err_msg) => {
+                        query_result = QueryResult::BadRequest;
+                        error_msg = err_msg;
+                    }
+                    query_error::Err::NotFound(err_msg) => {
+                        query_result = QueryResult::NotFound;
+                        error_msg = err_msg;
+                    }
+                    query_error::Err::ServerError(err_msg) => {
+                        query_result = QueryResult::ServerError;
+                        error_msg = err_msg;
+                    }
+                    query_error::Err::ServerOverloaded(()) => {
+                        query_result = QueryResult::ServerOverloaded;
+                        error_msg = Default::default();
+                    }
+                    query_error::Err::TooManyRequests(()) => {
+                        query_result = QueryResult::TooManyRequests;
+                        error_msg = Default::default();
+                    }
+                }
+            }
+        }
+
         Ok(Self {
             client_id: query_executed.client_id,
-            worker_id: query_executed.worker_id,
-            query_id: query.query_id.ok_or("query_id field missing")?,
-            dataset: query.dataset.ok_or("dataset field missing")?,
-            query: query.query.ok_or("query field missing")?,
-            profiling: query.profiling.ok_or("profiling field missing")?,
-            client_state_json: query.client_state_json.unwrap(),
-            query_hash: query_executed.query_hash,
-            exec_time_ms: query_executed
-                .exec_time_ms
-                .ok_or("exec_time field missing")?,
-            result,
-            num_read_chunks: num_read_chunks.ok_or("num_read_chunks field missing")?,
-            output_size: output_size.ok_or("output_size field missing")?,
+            worker_id: worker_id.to_string(),
+            query_id: query.query_id,
+            dataset: base64(&query.dataset),
+            dataset_id: query.dataset,
+            from_block: query.block_range.map(|r| r.begin),
+            to_block: query.block_range.map(|r| r.end),
+            chunk_id: query.chunk_id,
+            query_hash: sha3_256(query.query.as_bytes()).to_vec(),
+            query: query.query,
+            exec_time: query_executed.exec_time_micros,
+            exec_time_ms: query_executed.exec_time_micros / 1000,
+            result: query_result,
+            num_read_chunks,
+            output_size,
             output_hash,
+            last_block,
             error_msg,
-            seq_no: query_executed.seq_no.ok_or("seq_no field missing")?,
             client_signature: query.signature,
-            worker_signature: query_executed.signature,
-            worker_timestamp: query_executed
-                .timestamp_ms
-                .ok_or("timestamp field missing")?,
+            client_timestamp: query.timestamp_ms,
+            worker_timestamp: query_executed.timestamp_ms,
             collector_timestamp,
+            worker_version: query_executed.worker_version,
         })
-    }
-}
-
-impl From<QueryExecutedRow> for QueryExecuted {
-    fn from(row: QueryExecutedRow) -> Self {
-        let result = match row.result {
-            QueryResult::Ok => query_executed::Result::Ok(InputAndOutput {
-                num_read_chunks: Some(row.num_read_chunks),
-                output: Some(SizeAndHash {
-                    size: Some(row.output_size),
-                    sha3_256: row.output_hash,
-                }),
-            }),
-            QueryResult::BadRequest => query_executed::Result::BadRequest(row.error_msg),
-            QueryResult::ServerError => query_executed::Result::ServerError(row.error_msg),
-        };
-        QueryExecuted {
-            client_id: row.client_id,
-            worker_id: row.worker_id,
-            query: Some(Query {
-                query_id: Some(row.query_id),
-                dataset: Some(row.dataset),
-                query: Some(row.query),
-                profiling: Some(row.profiling),
-                client_state_json: Some(row.client_state_json),
-                signature: row.client_signature,
-                block_range: None,
-            }),
-            query_hash: row.query_hash,
-            exec_time_ms: Some(row.exec_time_ms),
-            seq_no: Some(row.seq_no),
-            timestamp_ms: Some(row.worker_timestamp),
-            signature: row.worker_signature,
-            result: Some(result),
-        }
     }
 }
 
@@ -220,23 +238,20 @@ pub struct PingRow {
     version: String,
 }
 
-impl TryFrom<Ping> for PingRow {
-    type Error = &'static str;
-
-    fn try_from(ping: Ping) -> Result<Self, Self::Error> {
+impl PingRow {
+    pub fn new(heartbeat: Heartbeat, worker_id: String) -> Result<Self, &'static str> {
         Ok(Self {
-            stored_bytes: ping.stored_bytes(),
-            worker_id: ping.worker_id.ok_or("worker_id missing")?,
-            version: ping.version.ok_or("version missing")?,
+            stored_bytes: heartbeat.stored_bytes(),
+            worker_id,
+            version: heartbeat.version,
             timestamp: timestamp_now_ms(),
         })
     }
 }
 
 #[derive(Row, Debug, Deserialize)]
-struct SeqNoRow {
+struct TimestampRow {
     worker_id: String,
-    seq_no: u64,
     timestamp: u64,
 }
 
@@ -255,7 +270,7 @@ impl ClickhouseStorage {
 
 #[async_trait]
 impl Storage for ClickhouseStorage {
-    async fn store_logs<'a, T: Iterator<Item = QueryExecutedRow> + Sized + Send>(
+    async fn store_logs<T: Iterator<Item = QueryExecutedRow> + Sized + Send>(
         &self,
         query_logs: T,
     ) -> anyhow::Result<()> {
@@ -269,7 +284,7 @@ impl Storage for ClickhouseStorage {
         Ok(())
     }
 
-    async fn store_pings<'a, T: Iterator<Item = PingRow> + Sized + Send>(
+    async fn store_pings<T: Iterator<Item = PingRow> + Sized + Send>(
         &self,
         pings: T,
     ) -> anyhow::Result<()> {
@@ -283,28 +298,27 @@ impl Storage for ClickhouseStorage {
         Ok(())
     }
 
-    async fn get_last_stored(&self) -> anyhow::Result<HashMap<String, (u64, u64)>> {
-        log::debug!("Retrieving latest sequence from clickhouse");
+    async fn get_last_stored(&self) -> anyhow::Result<HashMap<String, u64>> {
+        log::debug!("Retrieving latest timestamps from clickhouse");
         let mut cursor = self
             .0
             .query(&format!(
-                "SELECT worker_id, MAX(seq_no), MAX(worker_timestamp) FROM {} GROUP BY worker_id",
+                "SELECT worker_id, MAX(worker_timestamp) FROM {} GROUP BY worker_id",
                 &*LOGS_TABLE
             ))
-            .fetch::<SeqNoRow>()?;
+            .fetch::<TimestampRow>()?;
         let mut result = HashMap::new();
         while let Some(row) = cursor.next().await? {
-            result.insert(row.worker_id, (row.seq_no, row.timestamp));
+            result.insert(row.worker_id, row.timestamp);
         }
-        log::debug!("Retrieved sequence numbers: {:?}", result);
+        log::debug!("Retrieved timestamps: {:?}", result);
         Ok(result)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use sqd_messages::signatures::SignedMessage;
-    use sqd_messages::{InputAndOutput, Query, SizeAndHash};
+    use sqd_messages::{Query, QueryOkSummary};
     use sqd_network_transport::{Keypair, PeerId};
 
     use super::*;
@@ -364,71 +378,55 @@ mod tests {
         let worker_id = PeerId::from_public_key(&worker_keypair.public());
 
         let mut query = Query {
-            query_id: Some("query_id".to_string()),
-            dataset: Some("dataset".to_string()),
-            query: Some("{\"from\": \"0xdeadbeef\"}".to_string()),
-            profiling: Some(false),
-            client_state_json: Some("".to_string()),
+            query_id: "b14371f9-2463-49cb-9e60-f2f62283b1af".to_string(),
+            dataset: "dataset".to_string(),
+            query: r#"{"from": "0"}"#.to_string(),
+            block_range: Some(sqd_messages::Range {
+                begin: 808650,
+                end: 808800,
+            }),
+            chunk_id: "0000000000/0000808640-0000816499-b0486318".to_string(),
+            timestamp_ms: 123456789000,
             signature: vec![],
-            block_range: None
         };
-        query.sign(&client_keypair);
+        query.sign(&client_keypair, worker_id).unwrap();
 
-        let mut query_log = QueryExecuted {
+        let query_log = QueryExecuted {
             client_id: client_id.to_string(),
-            worker_id: worker_id.to_string(),
             query: Some(query),
-            query_hash: vec![0xde, 0xad, 0xbe, 0xef],
-            exec_time_ms: Some(2137),
-            seq_no: Some(69),
-            timestamp_ms: Some(123456789000),
-            signature: vec![],
-            result: Some(query_executed::Result::Ok(InputAndOutput {
-                num_read_chunks: Some(10),
-                output: Some(SizeAndHash {
-                    size: Some(666),
-                    sha3_256: vec![0xbe, 0xbe, 0xf0, 0x00],
-                }),
+            exec_time_micros: 2137000,
+            timestamp_ms: 123456789500,
+            result: Some(query_executed::Result::Ok(QueryOkSummary {
+                uncompressed_data_size: 666,
+                data_hash: vec![0xbe, 0xbe, 0xf0, 0x00],
+                last_block: 808800,
             })),
+            worker_version: "1.0.0".to_string(),
         };
-        query_log.sign(&worker_keypair);
 
         storage
-            .store_logs(std::iter::once(query_log.clone().try_into().unwrap()))
+            .store_logs(std::iter::once(
+                QueryExecutedRow::try_from(query_log.clone(), worker_id).unwrap(),
+            ))
             .await
             .unwrap();
 
-        // Verify the last stored sequence number and timestamp
+        // Verify the last stored timestamp
         let last_stored = storage.get_last_stored().await.unwrap();
-        assert_eq!(
-            last_stored.get(&worker_id.to_string()),
-            Some(&(69, 123456789000))
-        );
-
-        // Verify the signatures
-        let mut cursor = storage
-            .0
-            .query(&format!("SELECT * FROM {}", &*LOGS_TABLE))
-            .fetch::<QueryExecutedRow>()
-            .unwrap();
-        let row = cursor.next().await.unwrap().unwrap();
-        let mut saved_log: QueryExecuted = row.into();
-        assert_eq!(query_log, saved_log);
-        assert!(saved_log.verify_signature(&worker_id));
+        assert_eq!(last_stored.get(&worker_id.to_string()), Some(&123456789500));
 
         // Check pings storing
-        let ping = Ping {
-            worker_id: Some("worker_id".to_string()),
-            version: Some("1.0.0".to_string()),
+        let ping = Heartbeat {
+            version: "1.0.0".to_string(),
             stored_bytes: Some(1024),
-            stored_ranges: vec![],
-            signature: vec![],
             assignment_id: Default::default(),
             missing_chunks: Default::default(),
         };
         let ts = timestamp_now_ms();
         storage
-            .store_pings(std::iter::once(ping.clone().try_into().unwrap()))
+            .store_pings(std::iter::once(
+                PingRow::new(ping.clone(), worker_id.to_string()).unwrap(),
+            ))
             .await
             .unwrap();
 
@@ -438,8 +436,7 @@ mod tests {
             .fetch::<PingRow>()
             .unwrap();
         let row = cursor.next().await.unwrap().unwrap();
-        assert_eq!(ping.worker_id.unwrap(), row.worker_id);
-        assert_eq!(ping.version.unwrap(), row.version);
+        assert_eq!(ping.version, row.version);
         assert_eq!(ping.stored_bytes.unwrap(), row.stored_bytes);
         assert!(row.timestamp >= ts);
         assert!(row.timestamp <= timestamp_now_ms());

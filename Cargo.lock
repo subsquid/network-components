@@ -1686,10 +1686,11 @@ dependencies = [
 
 [[package]]
 name = "collector-utils"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "clap",
  "clickhouse",
  "lazy_static",
@@ -4375,7 +4376,7 @@ checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
 
 [[package]]
 name = "logs-collector"
-version = "1.0.13"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4383,8 +4384,7 @@ dependencies = [
  "env_logger",
  "futures",
  "log",
- "rand 0.8.5",
- "serde_json",
+ "parking_lot",
  "sqd-contract-client",
  "sqd-messages",
  "sqd-network-transport",
@@ -6826,7 +6826,7 @@ dependencies = [
 [[package]]
 name = "sqd-contract-client"
 version = "1.1.0"
-source = "git+https://github.com/subsquid/subsquid-network.git?rev=c25a986#c25a9860f7291fe245562b3d791d1fbb59cc3446"
+source = "git+https://github.com/subsquid/sqd-network.git?rev=a311acc#a311acc26f35f5122990532af0f049e2aefc9c6c"
 dependencies = [
  "async-trait",
  "clap",
@@ -6843,7 +6843,7 @@ dependencies = [
 [[package]]
 name = "sqd-messages"
 version = "2.0.0"
-source = "git+https://github.com/subsquid/subsquid-network.git?rev=c25a986#c25a9860f7291fe245562b3d791d1fbb59cc3446"
+source = "git+https://github.com/subsquid/sqd-network.git?rev=a311acc#a311acc26f35f5122990532af0f049e2aefc9c6c"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6870,7 +6870,7 @@ dependencies = [
 [[package]]
 name = "sqd-network-transport"
 version = "2.0.0"
-source = "git+https://github.com/subsquid/subsquid-network.git?rev=c25a986#c25a9860f7291fe245562b3d791d1fbb59cc3446"
+source = "git+https://github.com/subsquid/sqd-network.git?rev=a311acc#a311acc26f35f5122990532af0f049e2aefc9c6c"
 dependencies = [
  "anyhow",
  "async-trait",

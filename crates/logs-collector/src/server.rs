@@ -2,47 +2,35 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::{Stream, StreamExt};
-use rand::seq::IteratorRandom;
-use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::RwLock;
-
-use sqd_contract_client::Client as ContractClient;
-use sqd_messages::{LogsCollected, QueryExecuted};
-use sqd_network_transport::util::TaskManager;
-use sqd_network_transport::PeerId;
-use sqd_network_transport::{LogsCollectorEvent, LogsCollectorTransportHandle};
-
 use collector_utils::Storage;
+use futures::StreamExt;
+use parking_lot::Mutex;
+use sqd_contract_client::Client as ContractClient;
+use sqd_messages::LogsRequest;
+use sqd_network_transport::util::{CancellationToken, TaskManager};
+use sqd_network_transport::{LogsCollectorTransport, PeerId};
 
 use crate::collector::LogsCollector;
 
-pub struct Server<T, S>
+const MAX_PAGES: usize = 5;
+
+pub struct Server<T>
 where
     T: Storage + Send + Sync + 'static,
-    S: Stream<Item = LogsCollectorEvent> + Send + Unpin + 'static,
 {
-    incoming_events: S,
-    transport_handle: LogsCollectorTransportHandle,
-    logs_collector: Arc<RwLock<LogsCollector<T>>>,
-    registered_workers: Arc<RwLock<HashSet<PeerId>>>,
+    transport_handle: Arc<LogsCollectorTransport>,
+    logs_collector: LogsCollector<T>,
+    registered_workers: Arc<Mutex<HashSet<PeerId>>>,
     task_manager: TaskManager,
 }
 
-impl<T, S> Server<T, S>
+impl<T> Server<T>
 where
     T: Storage + Send + Sync + 'static,
-    S: Stream<Item = LogsCollectorEvent> + Send + Unpin + 'static,
 {
-    pub fn new(
-        incoming_events: S,
-        transport_handle: LogsCollectorTransportHandle,
-        logs_collector: LogsCollector<T>,
-    ) -> Self {
-        let logs_collector = Arc::new(RwLock::new(logs_collector));
+    pub fn new(transport: LogsCollectorTransport, logs_collector: LogsCollector<T>) -> Self {
         Self {
-            incoming_events,
-            transport_handle,
+            transport_handle: Arc::new(transport),
             logs_collector,
             registered_workers: Default::default(),
             task_manager: Default::default(),
@@ -52,98 +40,122 @@ where
     pub async fn run(
         mut self,
         contract_client: Arc<dyn ContractClient>,
-        store_logs_interval: Duration,
+        collection_interval: Duration,
         worker_update_interval: Duration,
+        concurrent_workers: usize,
+        cancellation_token: CancellationToken,
     ) -> anyhow::Result<()> {
         log::info!("Starting logs collector server");
 
-        // Perform initial storage sync to get sequence numbers
-        self.logs_collector.write().await.storage_sync().await?;
-
         // Get registered workers from chain
-        *self.registered_workers.write().await = contract_client
+        let workers = contract_client
             .active_workers()
             .await?
             .into_iter()
             .map(|w| w.peer_id)
             .collect();
+        *self.registered_workers.lock() = workers;
 
-        self.spawn_saving_task(store_logs_interval);
         self.spawn_worker_update_task(contract_client, worker_update_interval);
+        self.spawn_transport_task();
 
-        let mut sigint = signal(SignalKind::interrupt())?;
-        let mut sigterm = signal(SignalKind::terminate())?;
-        loop {
-            tokio::select! {
-                Some(ev) = self.incoming_events.next() => self.on_incoming_event(ev).await, // FIXME: blocking event loop
-                _ = sigint.recv() => break,
-                _ = sigterm.recv() => break,
-                else => break
-            }
-        }
+        self.run_collecting_task(
+            collection_interval,
+            concurrent_workers,
+            cancellation_token.child_token(),
+        )
+        .await;
+
         log::info!("Server shutting down");
-        self.logs_collector.write().await.storage_sync().await?;
         self.task_manager.await_stop().await;
         Ok(())
     }
 
-    async fn on_incoming_event(&mut self, ev: LogsCollectorEvent) {
-        match ev {
-            LogsCollectorEvent::WorkerLogs { peer_id, logs } => {
-                self.collect_logs(peer_id, logs).await
-            }
-            // LogsCollectorEvent::Ping { peer_id, ping } => self.collect_ping(peer_id, ping).await,
-            LogsCollectorEvent::QuerySubmitted(query_submitted) => {
-                match serde_json::to_string(&query_submitted) {
-                    Ok(s) => println!("{s}"),
-                    Err(e) => log::error!("Error serializing log: {e:?}"),
+    async fn run_collecting_task(
+        &mut self,
+        interval: Duration,
+        concurrent_jobs: usize,
+        cancel_token: CancellationToken,
+    ) {
+        let mut interval = tokio::time::interval(interval);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                _ = interval.tick() => (),
+                _ = cancel_token.cancelled() => break,
+            };
+
+            let workers = self.registered_workers.lock().clone();
+            log::info!("Collecting logs from {} workers", workers.len());
+            let last_timestamps = match self.logs_collector.last_timestamps().await {
+                Ok(timestamps) => timestamps,
+                Err(e) => {
+                    log::warn!("Couldn't read last stored logs: {e:?}");
+                    continue;
                 }
-            }
-            LogsCollectorEvent::QueryFinished(query_finished) => {
-                match serde_json::to_string(&query_finished) {
-                    Ok(s) => println!("{s}"),
-                    Err(e) => log::error!("Error serializing log: {e:?}"),
-                }
-            }
+            };
+
+            futures::stream::iter(workers.into_iter())
+                .map(|worker_id| {
+                    self.collect_logs(
+                        worker_id,
+                        last_timestamps
+                            .get(&worker_id.to_string())
+                            .map(|ts| ts + 1)
+                            .unwrap_or(0),
+                    )
+                })
+                .buffer_unordered(concurrent_jobs)
+                .take_until(cancel_token.cancelled())
+                .collect::<()>()
+                .await;
+
+            self.logs_collector
+                .dump_buffer()
+                .await
+                .unwrap_or_else(|e| log::warn!("Couldn't store logs: {e:?}"));
         }
     }
 
-    async fn collect_logs(&self, worker_id: PeerId, logs: Vec<QueryExecuted>) {
-        if !self.registered_workers.read().await.contains(&worker_id) {
-            log::warn!("Worker not registered: {worker_id:?}");
-            return;
-        }
-        self.logs_collector
-            .write()
-            .await
-            .collect_logs(worker_id, logs);
-    }
-
-    fn spawn_saving_task(&mut self, interval: Duration) {
-        log::info!("Starting logs saving task");
-        let collector = self.logs_collector.clone();
-        let transport_handle = self.transport_handle.clone();
-        let task = move |_| {
-            let collector = collector.clone();
-            let transport_handle = transport_handle.clone();
-            async move {
-                let sequence_numbers = match collector.write().await.storage_sync().await {
-                    Ok(seq_nums) => seq_nums,
-                    Err(e) => return log::error!("Error saving logs to storage: {e:?}"),
-                };
-                // The pubsub message limit size prevents us from sending all sequence numbers
-                let sequence_numbers = sequence_numbers
-                    .into_iter()
-                    .choose_multiple(&mut rand::thread_rng(), 900)
-                    .into_iter()
-                    .collect();
-                let logs_collected = LogsCollected { sequence_numbers };
-                if transport_handle.logs_collected(logs_collected).is_err() {
-                    log::error!("Error broadcasting logs collected: queue full");
-                }
+    async fn collect_logs(&self, worker_id: PeerId, mut from_timestamp_ms: u64) {
+        let mut last_query_id = None;
+        for page in 0..MAX_PAGES {
+            if page == 0 {
+                log::debug!("Collecting logs from {worker_id} since {from_timestamp_ms}");
+            } else {
+                log::debug!("Collecting more logs from {worker_id} since {from_timestamp_ms}");
             }
-        };
-        self.task_manager.spawn_periodic(task, interval);
+            let logs = match self
+                .transport_handle
+                .request_logs(
+                    worker_id,
+                    LogsRequest {
+                        from_timestamp_ms,
+                        last_received_query_id: last_query_id,
+                    },
+                )
+                .await
+            {
+                Ok(logs) => logs,
+                Err(e) => {
+                    return log::warn!("Error getting logs from {worker_id}: {e:?}");
+                }
+            };
+
+            let Some(last_log) = logs.queries_executed.last() else {
+                return;
+            };
+            last_query_id = last_log.query.as_ref().map(|q| q.query_id.clone());
+            from_timestamp_ms = last_log.timestamp_ms;
+
+            self.logs_collector
+                .buffer_logs(worker_id, logs.queries_executed);
+
+            if !logs.has_more {
+                return;
+            }
+        }
+        log::warn!("Logs from {worker_id} didn't fit in {MAX_PAGES} pages, giving up");
     }
 
     fn spawn_worker_update_task(
@@ -162,12 +174,19 @@ where
                     Ok(workers) => workers,
                     Err(e) => return log::error!("Error getting registered workers: {e:?}"),
                 };
-                *registered_workers.write().await = workers
+                *registered_workers.lock() = workers
                     .into_iter()
                     .map(|w| w.peer_id)
                     .collect::<HashSet<PeerId>>();
             }
         };
         self.task_manager.spawn_periodic(task, interval);
+    }
+
+    fn spawn_transport_task(&mut self) {
+        let transport_handle = self.transport_handle.clone();
+        self.task_manager.spawn(|cancel_token| async move {
+            transport_handle.run(cancel_token).await;
+        });
     }
 }

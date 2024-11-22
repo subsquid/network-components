@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use clap::Parser;
 use collector_utils::ClickhouseArgs;
 use sqd_network_transport::TransportArgs;
@@ -11,19 +13,46 @@ pub struct Cli {
     #[command(flatten)]
     pub clickhouse: ClickhouseArgs,
 
+    /// Interval at which logs are collected and saved to persistent storage (seconds)
     #[arg(
         long,
-        env,
-        help = "Interval at which logs are saved to persistent storage (seconds)",
+        env = "COLLECTION_INTERVAL_SEC",
+        value_parser = parse_seconds,
         default_value = "120"
     )]
-    pub storage_sync_interval_sec: u32,
+    pub collection_interval: Duration,
 
-    #[arg(
-        long,
-        env,
-        help = "Interval at which registered workers are updated (seconds)",
+    /// Number of workers processed in parallel
+    #[arg(long, env, default_value_t = 30)]
+    pub concurrent_workers: usize,
+
+    /// Interval at which registered workers are updated (seconds)
+    #[arg(long,
+        env = "WORKER_UPDATE_INTERVAL_SEC",
+        value_parser = parse_seconds,
         default_value = "300"
     )]
-    pub worker_update_interval_sec: u32,
+    pub worker_update_interval: Duration,
+
+    /// Timeout for log requests to workers
+    #[arg(
+        long,
+        env = "REQUEST_TIMEOUT_SEC",
+        value_parser = parse_seconds,
+        default_value = "20"
+    )]
+    pub request_timeout: Duration,
+
+    /// Timeout for workers lookup
+    #[arg(
+        long,
+        env = "LOOKUP_TIMEOUT_SEC",
+        value_parser = parse_seconds,
+        default_value = "10"
+    )]
+    pub lookup_timeout: Duration,
+}
+
+fn parse_seconds(s: &str) -> anyhow::Result<Duration> {
+    Ok(Duration::from_secs(s.parse()?))
 }

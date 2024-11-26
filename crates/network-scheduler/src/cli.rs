@@ -16,6 +16,10 @@ fn default_worker_version() -> VersionReq {
     ">=2.0.0".parse().unwrap()
 }
 
+fn default_assignment_history_len() -> usize {
+    10
+}
+
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -63,6 +67,8 @@ pub struct Config {
     pub ignore_existing_conns: bool,
     #[serde(default = "num_cpus::get")]
     pub ping_processing_threads: usize,
+    #[serde(default = "default_assignment_history_len")]
+    pub assignment_history_len: usize,
     #[serde(skip_serializing, skip_deserializing, default)]
     pub network: String,
 }

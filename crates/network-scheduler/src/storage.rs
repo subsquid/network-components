@@ -18,12 +18,12 @@ use tokio::sync::Mutex;
 
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 
-use sqd_messages::assignments::{Assignment, NetworkAssignment, NetworkState};
 use crate::cli::Config;
 use crate::data_chunk::DataChunk;
 use crate::prometheus_metrics;
 use crate::scheduler::{ChunksSummary, Scheduler};
 use crate::scheduling_unit::{bundle_chunks, SchedulingUnit};
+use sqd_messages::assignments::{Assignment, NetworkAssignment, NetworkState};
 
 #[derive(Clone)]
 struct DatasetStorage {
@@ -358,6 +358,49 @@ impl S3Storage {
             .await
             .map_err(|e| log::error!("Error saving link to assignment: {e:?}"));
         prometheus_metrics::s3_request();
+        self.cleanup_assignments().await;
+    }
+
+    pub async fn cleanup_assignments(&self) {
+        let network = Config::get().network.clone();
+        let path = format!("assignments/{network}/");
+        let Ok(files) = self
+            .client
+            .list_objects()
+            .bucket(&self.config.scheduler_state_bucket)
+            .prefix(path)
+            .send()
+            .await
+        else {
+            log::error!("Failed to list assignments");
+            return;
+        };
+        prometheus_metrics::s3_request();
+        for v in files
+            .contents()
+            .iter()
+            .skip(Config::get().assignment_history_len)
+        {
+            let Some(ref filepath) = v.key else {
+                log::error!("Failed to fetch filepath");
+                return;
+            };
+            let result = self
+                .client
+                .delete_object()
+                .bucket(&self.config.scheduler_state_bucket)
+                .key(filepath)
+                .send()
+                .await;
+            prometheus_metrics::s3_request();
+            match result {
+                Ok(result) => log::error!("S3 object deleted: {result:?}"),
+                Err(err) => {
+                    log::error!("Can not delete S3 object: {err:?}");
+                    return;
+                }
+            }
+        }
     }
 
     pub fn save_chunks_list(&self, chunks_summary: &ChunksSummary) -> impl Future<Output = ()> {

@@ -13,7 +13,7 @@ from pydantic import BaseModel, AnyUrl, TypeAdapter, ValidationError, UrlConstra
 from typing import List, Dict, Annotated, Tuple, Any, Optional, NewType
 
 NUM_THREADS = int(os.environ.get('NUM_THREADS', 10))
-QUERY_TIMEOUT_SEC = int(os.environ.get('QUERY_TIMEOUT_SEC', 60))
+QUERY_TIMEOUT_SEC = int(os.environ.get('QUERY_TIMEOUT_SEC', 20))
 MIN_INTERVAL_SEC = float(os.environ.get('MIN_INTERVAL_SEC', 60))
 MAX_BLOCK_RANGE = int(os.environ.get('MAX_BLOCK_RANGE', 1_000_000))
 
@@ -146,7 +146,7 @@ class TrafficGenerator:
             return None
 
         template, dataset_id, dataset_name = random.choice(stored_datasets)
-        query_url = f'{PORTAL_URL}/query/{dataset_id}/{worker_id}?timeout={QUERY_TIMEOUT_SEC}s'
+        query_url = f'{PORTAL_URL}/datasets/{dataset_id}/query/{worker_id}'
         query = random.choice(self._query_templates[template])
         query['fromBlock'], query['toBlock'] = random_range(state[dataset_id])
 
@@ -154,7 +154,7 @@ class TrafficGenerator:
             f"Sending query worker_id={worker_id} query_url={query_url} "
             f"from={query['fromBlock']} to={query['toBlock']}")
         try:
-          response = requests.post(query_url, json=query, stream=True, timeout=20)  # stream=True to discard response body
+          response = requests.post(query_url, json=query, stream=True, timeout=QUERY_TIMEOUT_SEC)  # stream=True to discard response body
         except:
             logging.info(f"Query timed out. worker_id={worker_id}")
             return 499

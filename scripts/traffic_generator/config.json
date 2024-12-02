@@ -8,7 +8,7 @@
     {
       "name": "ethereum-mainnet",
       "template_dir": "evm",
-      "id": "czM6Ly9ldGhlcmV1bS1tYWlubmV0"
+      "id": "czM6Ly9ldGhlcmV1bS1tYWlubmV0LTI"
     },
     {
       "name": "binance-mainnet",
@@ -24,6 +24,11 @@
       "name": "zksync-mainnet",
       "template_dir": "evm",
       "id": "czM6Ly96a3N5bmMtbWFpbm5ldC0x"
+    },
+    {
+      "name": "bittensor",
+      "template_dir": "substrate",
+      "id": "czM6Ly9iaXR0ZW5zb3ItNA"
     }
   ]
 }

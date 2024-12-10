@@ -374,6 +374,7 @@ impl S3Storage {
         for v in files
             .contents()
             .iter()
+            .rev()
             .skip(Config::get().assignment_history_len)
         {
             let Some(ref filepath) = v.key else {

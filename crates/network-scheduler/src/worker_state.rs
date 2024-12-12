@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::time::{Duration, SystemTime};
 
@@ -9,13 +9,11 @@ use serde_with::{serde_as, TimestampMilliSeconds};
 
 use dashmap::DashMap;
 use sqd_contract_client::Address;
-use sqd_messages::{Heartbeat, OldPing, RangeSet};
+use sqd_messages::Heartbeat;
 use sqd_network_transport::PeerId;
 
 use crate::cli::Config;
-use crate::data_chunk::DataChunk;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
-use sqd_messages::assignments::timed_hmac_now;
 
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, SerializePartial)]
@@ -28,10 +26,10 @@ pub struct WorkerState {
     pub jailed: bool,
     pub assigned_units: HashSet<UnitId>,
     pub assigned_bytes: u64, // Can be outdated, source of truth is assigned_units
-    pub stored_ranges: HashMap<String, RangeSet>, // dataset -> ranges
     pub stored_bytes: u64,
     pub num_missing_chunks: u32,
-    pub num_missing_chunks_on_heartbeat: Option<u32>,
+    #[serde(skip)]
+    pub num_missing_chunks_on_heartbeat: u32,
     #[serde_as(as = "Option<TimestampMilliSeconds>")]
     pub last_assignment: Option<SystemTime>,
     #[serde_as(as = "Option<TimestampMilliSeconds>")]
@@ -42,8 +40,6 @@ pub struct WorkerState {
     pub unreachable_since: Option<SystemTime>,
     #[serde(default)]
     pub jail_reason: Option<JailReason>,
-    #[serde(skip)]
-    pub signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -80,28 +76,16 @@ impl WorkerState {
             version: None,
             jailed: false,
             assigned_units: HashSet::new(),
-            stored_ranges: HashMap::new(),
             stored_bytes: 0,
             assigned_bytes: 0,
             num_missing_chunks: 0,
-            num_missing_chunks_on_heartbeat: None,
+            num_missing_chunks_on_heartbeat: 0,
             last_assignment: None,
             last_dial_time: None,
             last_dial_ok: false,
             unreachable_since: None,
             jail_reason: None,
-            signature: Some(timed_hmac_now(
-                &peer_id.to_string(),
-                &Config::get().cloudflare_storage_secret,
-            )),
         }
-    }
-
-    pub fn jail_reason_str(&self) -> String {
-        self.jail_reason
-            .as_ref()
-            .map(|r| r.to_string())
-            .unwrap_or_else(|| "??".to_string())
     }
 
     fn time_since_last_ping(&self) -> Option<Duration> {
@@ -109,33 +93,19 @@ impl WorkerState {
             .map(|t| t.elapsed().expect("Time doesn't go backwards"))
     }
 
-    /// Register ping msg from a worker.
-    pub fn ping(&mut self, msg: OldPing) {
-        self.last_ping = Some(SystemTime::now());
-        self.version = msg.version;
-        self.stored_ranges = msg
-            .stored_ranges
-            .into_iter()
-            .map(|r| (r.url, r.ranges.into()))
-            .collect();
-        self.stored_bytes = msg.stored_bytes.unwrap_or_default();
-    }
-
+    /// Register heartbeat msg from a worker.
     pub fn heartbeat(&mut self, msg: Heartbeat) {
+        let Some(missing_chunks) = msg.missing_chunks else {
+            error!("Got no missing chunks info from {}", self.peer_id);
+            return;
+        };
         self.last_ping = Some(SystemTime::now());
         self.version = Some(msg.version);
-        if let Some(missing_chunks) = msg.missing_chunks {
-            self.num_missing_chunks_on_heartbeat =
-                Some(missing_chunks.to_bytes().iter().filter(|v| **v > 0).count() as u32);
-            debug!(
-                "Got {} missing chunks for {}",
-                self.num_missing_chunks_on_heartbeat.unwrap(),
-                self.peer_id
-            );
-        } else {
-            self.num_missing_chunks_on_heartbeat = None;
-            error!("Got no missing chunks info");
-        }
+        self.num_missing_chunks_on_heartbeat = missing_chunks.ones() as u32;
+        debug!(
+            "Got {} missing chunks for {}",
+            self.num_missing_chunks_on_heartbeat, self.peer_id
+        );
         self.stored_bytes = msg.stored_bytes.unwrap_or(0);
     }
 
@@ -205,32 +175,11 @@ impl WorkerState {
         }
     }
 
-    pub fn assigned_chunks<'a>(
-        &'a self,
-        units_map: &'a DashMap<UnitId, SchedulingUnit>,
-    ) -> impl Iterator<Item = DataChunk> + 'a {
-        self.assigned_units.iter().flat_map(|unit_id| {
-            units_map
-                .get(unit_id)
-                .unwrap_or_else(|| panic!("Unknown scheduling unit {unit_id}"))
-                .clone()
-        })
-    }
-
-    fn count_missing_chunks<'a>(&'a self, units: &'a DashMap<UnitId, SchedulingUnit>) -> u32 {
-        self.assigned_chunks(units)
-            .map(|chunk| match self.stored_ranges.get(&chunk.dataset_id) {
-                Some(range_set) if range_set.includes(chunk.block_range) => 0,
-                _ => 1,
-            })
-            .sum()
-    }
-
     /// Check if the worker is making progress with downloading missing chunks.
     /// Returns true iff the worker is fully synced or making progress.
-    pub fn check_download_progress<'a>(
-        &'a mut self,
-        units: &'a DashMap<UnitId, SchedulingUnit>,
+    pub fn check_download_progress(
+        &mut self,
+        _units: &DashMap<UnitId, SchedulingUnit>,
     ) -> bool {
         assert!(!self.jailed);
         let Some(last_assignment) = self.last_assignment.as_ref() else {
@@ -243,22 +192,19 @@ impl WorkerState {
             return true;
         }
 
-        let num_missing_chunks = match self.num_missing_chunks_on_heartbeat {
-            Some(num) => num,
-            None => self.count_missing_chunks(units),
-        };
-        if num_missing_chunks == 0 {
+        let current_missing_chunks = self.num_missing_chunks_on_heartbeat;
+        if current_missing_chunks == 0 {
             log::debug!("Worker {} is fully synced", self.peer_id);
-            self.num_missing_chunks = num_missing_chunks;
+            self.num_missing_chunks = current_missing_chunks;
             true
-        } else if num_missing_chunks < self.num_missing_chunks {
+        } else if current_missing_chunks < self.num_missing_chunks {
             log::debug!(
                 "Worker {} is making progress {} -> {} chunks missing",
                 self.peer_id,
                 self.num_missing_chunks,
-                num_missing_chunks
+                current_missing_chunks
             );
-            self.num_missing_chunks = num_missing_chunks;
+            self.num_missing_chunks = current_missing_chunks;
             true
         } else {
             log::debug!(
@@ -269,8 +215,7 @@ impl WorkerState {
         }
     }
 
-    pub fn reset_download_progress<'a>(&'a mut self, units: &'a DashMap<UnitId, SchedulingUnit>) {
-        self.num_missing_chunks = self.count_missing_chunks(units);
+    pub fn reset_download_progress(&mut self, _units: &DashMap<UnitId, SchedulingUnit>) {
         self.last_assignment = Some(SystemTime::now());
     }
 
@@ -288,13 +233,6 @@ impl WorkerState {
         log::info!("Releasing worker {}", self.peer_id);
         self.jailed = false;
         self.jail_reason = None;
-    }
-
-    pub fn regenerate_signature(&mut self) {
-        self.signature = Some(timed_hmac_now(
-            &self.peer_id.to_string(),
-            &Config::get().cloudflare_storage_secret,
-        ));
     }
 }
 

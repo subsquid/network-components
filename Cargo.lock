@@ -4647,7 +4647,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "1.2.2"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4796,6 +4796,17 @@ version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
 dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "num-rational"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f83d14da390562dca69fc84082e73e548e1ad308d24accdedd2720017cb37824"
+dependencies = [
+ "num-bigint",
+ "num-integer",
  "num-traits",
 ]
 
@@ -5226,7 +5237,7 @@ dependencies = [
 
 [[package]]
 name = "pings-collector"
-version = "1.1.1"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6073,7 +6084,7 @@ dependencies = [
 
 [[package]]
 name = "router"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "aws-config 0.51.0",
@@ -6825,14 +6836,16 @@ dependencies = [
 
 [[package]]
 name = "sqd-contract-client"
-version = "1.1.0"
-source = "git+https://github.com/subsquid/sqd-network.git?rev=195d8bd#195d8bd91601ca17f86dc94ae04c4f874fbceaac"
+version = "1.2.1"
+source = "git+https://github.com/subsquid/sqd-network.git?rev=f0033c1#f0033c16c69078f694e382c3a2c56afb823ce1bc"
 dependencies = [
  "async-trait",
  "clap",
  "ethers",
+ "futures",
  "libp2p",
  "log",
+ "num-rational",
  "serde",
  "thiserror",
  "tokio",
@@ -6843,7 +6856,7 @@ dependencies = [
 [[package]]
 name = "sqd-messages"
 version = "2.0.0"
-source = "git+https://github.com/subsquid/sqd-network.git?rev=195d8bd#195d8bd91601ca17f86dc94ae04c4f874fbceaac"
+source = "git+https://github.com/subsquid/sqd-network.git?rev=f0033c1#f0033c16c69078f694e382c3a2c56afb823ce1bc"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6870,7 +6883,7 @@ dependencies = [
 [[package]]
 name = "sqd-network-transport"
 version = "2.0.0"
-source = "git+https://github.com/subsquid/sqd-network.git?rev=195d8bd#195d8bd91601ca17f86dc94ae04c4f874fbceaac"
+source = "git+https://github.com/subsquid/sqd-network.git?rev=f0033c1#f0033c16c69078f694e382c3a2c56afb823ce1bc"
 dependencies = [
  "anyhow",
  "async-trait",

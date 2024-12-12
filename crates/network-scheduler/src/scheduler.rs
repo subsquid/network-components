@@ -7,7 +7,6 @@ use dashmap::mapref::one::RefMut;
 use dashmap::DashMap;
 use iter_num_tools::lin_space;
 use itertools::Itertools;
-use parking_lot::RwLock;
 use prometheus_client::metrics::gauge::Atomic;
 use rand::prelude::SliceRandom;
 use rand::{thread_rng, Rng};
@@ -16,18 +15,13 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 
 use sqd_contract_client::Worker;
-use sqd_messages::pong::Status as WorkerStatus;
-use sqd_messages::{Heartbeat, HttpHeader, OldPing};
+use sqd_messages::Heartbeat;
 use sqd_network_transport::PeerId;
 
 use crate::cli::Config;
-use crate::data_chunk::chunks_to_assignment;
 use crate::prometheus_metrics;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::worker_state::{JailReason, WorkerState};
-
-const WORKER_ID_HEADER: &str = "worker-id";
-const WORKER_SIGNATURE_HEADER: &str = "worker-signature";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkStatus {
@@ -38,14 +32,11 @@ pub struct ChunkStatus {
     pub downloaded_by: Vec<Arc<str>>, // Will deserialize duplicated, but it's short-lived
 }
 
-pub type ChunksSummary = HashMap<String, Vec<ChunkStatus>>; // dataset -> chunks statuses
-
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Scheduler {
     known_units: Arc<DashMap<UnitId, SchedulingUnit>>,
     units_assignments: Arc<DashMap<UnitId, Vec<PeerId>>>,
     worker_states: Arc<DashMap<PeerId, WorkerState>>,
-    chunks_summary: Arc<RwLock<ChunksSummary>>,
     last_schedule_epoch: Arc<AtomicU32>,
 }
 
@@ -94,40 +85,7 @@ impl Scheduler {
         }
     }
 
-    pub fn regenerate_signatures(&self) {
-        let start = Instant::now();
-        for mut state in self.worker_states.iter_mut() {
-            state.regenerate_signature();
-        }
-        prometheus_metrics::exec_time("regen_signatures", start.elapsed());
-    }
-
-    /// Register ping msg from a worker. Returns worker status if ping was accepted, otherwise None
-    pub fn ping(&self, worker_id: PeerId, msg: OldPing) -> Option<WorkerStatus> {
-        if !msg.version_matches(&Config::get().supported_worker_versions) {
-            log::debug!(
-                "Worker {worker_id} version not supported: {:?}",
-                msg.version
-            );
-            return Some(WorkerStatus::UnsupportedVersion(()));
-        }
-        let mut worker_state = match self.worker_states.get_mut(&worker_id) {
-            None => {
-                log::debug!("Worker {worker_id} not registered");
-                return None;
-            }
-            Some(worker_state) => worker_state,
-        };
-        worker_state.ping(msg);
-        if worker_state.jailed {
-            return Some(WorkerStatus::Jailed(worker_state.jail_reason_str()));
-        }
-        let assigned_chunks = worker_state.assigned_chunks(&self.known_units);
-        let mut assignment = chunks_to_assignment(assigned_chunks);
-        add_signature_headers(&mut assignment, &worker_id, worker_state.value());
-        Some(WorkerStatus::Active(assignment))
-    }
-
+    /// Register heartbeat msg from a worker
     pub fn heartbeat(&self, worker_id: &PeerId, msg: Heartbeat) {
         let mut worker_state = match self.worker_states.get_mut(worker_id) {
             None => {
@@ -542,34 +500,6 @@ impl Scheduler {
             });
         prometheus_metrics::exec_time("assign_units", start.elapsed());
     }
-
-    pub fn get_chunks_summary(&self) -> ChunksSummary {
-        self.chunks_summary.read().clone()
-    }
-
-    pub fn update_chunks_summary(&self, summary: ChunksSummary) {
-        *self.chunks_summary.write() = summary;
-    }
-}
-
-fn add_signature_headers(
-    assignment: &mut sqd_messages::WorkerAssignment,
-    worker_id: &PeerId,
-    worker_state: &WorkerState,
-) {
-    assignment.http_headers.extend([
-        HttpHeader {
-            name: WORKER_ID_HEADER.to_string(),
-            value: worker_id.to_string(),
-        },
-        HttpHeader {
-            name: WORKER_SIGNATURE_HEADER.to_string(),
-            value: worker_state
-                .signature
-                .clone()
-                .unwrap_or_else(|| panic!("Worker {worker_id} signature not initialized")),
-        },
-    ]);
 }
 
 fn replication_factor(data_size_bytes: u64, num_workers: u64) -> Option<usize> {

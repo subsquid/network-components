@@ -5,22 +5,17 @@ use std::time::Duration;
 
 use dashmap::DashMap;
 use futures::{Stream, StreamExt};
-use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus_client::registry::Registry;
-use tokio::join;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc::Receiver;
 use tokio::time::Instant;
 
-use sqd_messages::signatures::msg_hash;
-use sqd_messages::{Pong, RangeSet};
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 use sqd_network_transport::{SchedulerEvent, SchedulerTransportHandle};
 
 use crate::cli::Config;
-use crate::data_chunk::{chunks_to_worker_state, DataChunk};
-use crate::scheduler::{ChunkStatus, Scheduler};
+use crate::scheduler::Scheduler;
 use crate::scheduling_unit::{SchedulingUnit, UnitId};
 use crate::storage::S3Storage;
 use crate::worker_state::WorkerState;
@@ -28,7 +23,7 @@ use crate::{metrics_server, prometheus_metrics};
 use sqd_messages::assignments::{Assignment, Chunk};
 
 const WORKER_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
-const CHUNKS_SUMMARY_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+const ASSIGNMENT_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct Server {
     incoming_units: Receiver<SchedulingUnit>,
@@ -72,8 +67,7 @@ impl Server {
         self.spawn_jail_inactive_workers_task(storage_client.clone());
         self.spawn_jail_stale_workers_task(storage_client.clone());
         self.spawn_jail_unreachable_workers_task(storage_client.clone());
-        self.spawn_regenerate_signatures_task();
-        self.spawn_chunks_summary_task(storage_client);
+        self.spawn_assignments_task(storage_client);
         self.spawn_event_processing_task(incoming_events);
 
         let mut sigint = signal(SignalKind::interrupt())?;
@@ -102,7 +96,6 @@ impl Server {
     ) {
         log::info!("Starting event processing task");
         let scheduler = self.scheduler.clone();
-        let transport_handle = self.transport_handle.clone();
         let num_threads = Config::get().ping_processing_threads;
 
         let task = move |cancel_token: CancellationToken| {
@@ -110,30 +103,19 @@ impl Server {
                 .take_until(cancel_token.cancelled_owned())
                 .for_each_concurrent(num_threads, move |ev| {
                     let scheduler = scheduler.clone();
-                    let transport_handle = transport_handle.clone();
                     async move {
-                        let (peer_id, ping) = match ev {
-                            SchedulerEvent::Ping { peer_id, ping } => (peer_id, ping),
+                        let start = Instant::now();
+                        let (peer_id, heartbeat) = match ev {
                             SchedulerEvent::PeerProbed { peer_id, reachable } => {
                                 return scheduler.worker_dialed(peer_id, reachable)
                             }
                             SchedulerEvent::Heartbeat { peer_id, heartbeat } => {
-                                log::debug!("Got heartbeat from {peer_id}");
-                                scheduler.heartbeat(&peer_id, heartbeat);
-                                return;
+                                (peer_id, heartbeat)
                             }
                         };
 
-                        log::debug!("Got ping from {peer_id}");
-                        let start = Instant::now();
-                        let ping_hash = msg_hash(&ping).to_vec();
-                        let status = scheduler.ping(peer_id, ping.clone());
-                        if status.is_some() {
-                            let pong = Pong { ping_hash, status };
-                            transport_handle
-                                .send_pong(peer_id, pong)
-                                .unwrap_or_else(|_| log::error!("Error sending pong: queue full"));
-                        }
+                        log::debug!("Got heartbeat from {peer_id}");
+                        scheduler.heartbeat(&peer_id, heartbeat);
                         prometheus_metrics::exec_time("ping", start.elapsed());
                     }
                 })
@@ -231,19 +213,6 @@ impl Server {
         self.task_manager.spawn(task);
     }
 
-    fn spawn_regenerate_signatures_task(&mut self) {
-        let scheduler = self.scheduler.clone();
-        let task = move |_| {
-            let scheduler = scheduler.clone();
-            async move {
-                log::info!("Regenerating signatures");
-                scheduler.regenerate_signatures();
-            }
-        };
-        self.task_manager
-            .spawn_periodic(task, Config::get().signature_refresh_interval);
-    }
-
     fn spawn_jail_inactive_workers_task(&mut self, storage_client: S3Storage) {
         let timeout = Config::get().worker_inactive_timeout;
         self.spawn_jail_task(storage_client, timeout, |s| s.jail_inactive_workers());
@@ -282,45 +251,22 @@ impl Server {
         self.task_manager.spawn_periodic(task, interval);
     }
 
-    fn spawn_chunks_summary_task(&mut self, storage_client: S3Storage) {
+    fn spawn_assignments_task(&mut self, storage_client: S3Storage) {
         let scheduler = self.scheduler.clone();
         let task = move |_| {
             let scheduler = scheduler.clone();
             let storage_client = storage_client.clone();
             async move {
-                log::info!("Updating chunks summary");
+                log::info!("Updating assignment");
                 let workers = scheduler.all_workers();
                 let units = scheduler.known_units();
                 let assignment = build_assignment(&workers, &units);
-                let assignment_fut = storage_client.save_assignment(assignment);
-                let summary = build_chunks_summary(workers, units);
-                let save_fut = storage_client.save_chunks_list(&summary);
-
-                scheduler.update_chunks_summary(summary);
-                join!(save_fut, assignment_fut);
+                storage_client.save_assignment(assignment).await;
             }
         };
         self.task_manager
-            .spawn_periodic(task, CHUNKS_SUMMARY_REFRESH_INTERVAL);
+            .spawn_periodic(task, ASSIGNMENT_REFRESH_INTERVAL);
     }
-}
-
-fn find_workers_with_chunk(
-    chunk: &DataChunk,
-    ranges: &HashMap<String, Vec<(Arc<str>, RangeSet)>>,
-) -> Vec<Arc<str>> {
-    let ranges = match ranges.get(&chunk.dataset_id) {
-        Some(ranges) => ranges,
-        None => return vec![],
-    };
-    ranges
-        .iter()
-        .filter_map(|(worker_id, ranget_set)| {
-            ranget_set
-                .includes(chunk.block_range)
-                .then_some(worker_id.clone())
-        })
-        .collect()
 }
 
 fn build_assignment(
@@ -370,53 +316,8 @@ fn build_assignment(
             chunks_idxs[i] -= chunks_idxs[i - 1];
         }
 
-        assignment.insert_assignment(&peer_id.to_string(), jail_reason, chunks_idxs);
+        assignment.insert_assignment(peer_id, jail_reason, chunks_idxs);
     }
     assignment.regenerate_headers(&Config::get().cloudflare_storage_secret);
     assignment
-}
-
-fn build_chunks_summary(
-    workers: Vec<WorkerState>,
-    units: DashMap<UnitId, SchedulingUnit>,
-) -> HashMap<String, Vec<ChunkStatus>> {
-    let assigned_ranges = workers
-        .iter()
-        .flat_map(|w| {
-            let chunks = w.assigned_chunks(&units);
-            chunks_to_worker_state(chunks)
-                .datasets
-                .into_iter()
-                .map(|(dataset, ranges)| {
-                    (dataset, (<Arc<str>>::from(w.peer_id.to_base58()), ranges))
-                })
-        })
-        .into_group_map();
-    let stored_ranges = workers
-        .iter()
-        .flat_map(|w| {
-            w.stored_ranges.iter().map(|(dataset, ranges)| {
-                (
-                    dataset.clone(),
-                    (<Arc<str>>::from(w.peer_id.to_base58()), ranges.clone()),
-                )
-            })
-        })
-        .into_group_map();
-    units
-        .into_iter()
-        .flat_map(|(_, unit)| unit)
-        .map(|chunk| {
-            let assigned_to = find_workers_with_chunk(&chunk, &assigned_ranges);
-            let downloaded_by = find_workers_with_chunk(&chunk, &stored_ranges);
-            let chunk_status = ChunkStatus {
-                begin: chunk.block_range.begin,
-                end: chunk.block_range.end,
-                size_bytes: chunk.size_bytes,
-                assigned_to,
-                downloaded_by,
-            };
-            (chunk.dataset_id, chunk_status)
-        })
-        .into_group_map()
 }

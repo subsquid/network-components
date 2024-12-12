@@ -10,7 +10,7 @@ use base64::Engine;
 use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
 
-use sqd_messages::{data_chunk::DataChunk, Range, RangeSet, WorkerState};
+use super::messages::{Range, RangeSet, WorkerState, DataChunk};
 
 use crate::atom::Atom;
 

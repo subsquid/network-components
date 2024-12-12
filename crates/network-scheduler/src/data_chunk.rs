@@ -1,14 +1,12 @@
-use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
-use itertools::Itertools;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use sha3::{Digest, Sha3_256};
 
-use sqd_messages::{AssignedChunk, DatasetChunks, Range, WorkerAssignment, WorkerState};
+use sqd_messages::Range;
 
 use crate::cli::Config;
 
@@ -78,57 +76,8 @@ impl DataChunk {
     }
 }
 
-pub fn chunks_to_worker_state(chunks: impl IntoIterator<Item = DataChunk>) -> WorkerState {
-    let datasets = chunks
-        .into_iter()
-        .map(|chunk| (chunk.dataset_id, chunk.block_range))
-        .into_grouping_map()
-        .collect();
-    WorkerState { datasets }
-}
-
-#[allow(deprecated)]
-pub fn chunks_to_assignment(chunks: impl Iterator<Item = DataChunk>) -> WorkerAssignment {
-    let mut known_filenames: HashMap<String, u32> = HashMap::new();
-    let mut filename_to_index = |filename: String| {
-        let next_index = known_filenames.len() as u32;
-        *known_filenames.entry(filename).or_insert(next_index)
-    };
-    #[allow(clippy::redundant_closure)]
-    let dataset_chunks = chunks
-        .into_group_map_by(|chunk| chunk.dataset_id.clone())
-        .into_iter()
-        .map(|(dataset_id, chunks)| DatasetChunks {
-            dataset_id: dataset_id.clone(),
-            download_url: chunks.first().unwrap().download_url.clone(),
-            chunks: chunks
-                .into_iter()
-                .map(|chunk| AssignedChunk {
-                    path: chunk.chunk_str,
-                    filenames: chunk
-                        .filenames
-                        .into_iter()
-                        .map(|filename| filename_to_index(filename))
-                        .collect(),
-                })
-                .collect(),
-        })
-        .collect();
-    WorkerAssignment {
-        dataset_chunks,
-        http_headers: Default::default(),
-        known_filenames: known_filenames
-            .into_iter()
-            .sorted_by_key(|(_filename, index)| *index)
-            .map(|(filename, _index)| filename)
-            .collect(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use sqd_messages::range::RangeSet;
-
     use super::*;
 
     #[test]
@@ -151,87 +100,5 @@ mod tests {
                 0x52, 0xea, 0x53, 0x90
             ])
         );
-    }
-
-    #[test]
-    #[rustfmt::skip]
-    #[allow(deprecated)]
-    fn test_conversion() {
-        let chunks = vec![
-            DataChunk {
-                dataset_id: "s3://squidnet".to_string(),
-                download_url: "https://squidnet.sqd-datasets.io".to_string(),
-                block_range: Range::new(0, 1000),
-                size_bytes: 0,
-                chunk_str: "/00000/00001-01000-fa1f6773".to_string(),
-                filenames: vec![
-                    "blocks.parquet".to_string(),
-                    "transactions.parquet".to_string(),
-                    "logs.parquet".to_string(),
-                ],
-                id: Default::default(),
-            },
-            DataChunk {
-                dataset_id: "s3://squidnet".to_string(),
-                download_url: "https://squidnet.sqd-datasets.io".to_string(),
-                block_range: Range::new(500, 1500),
-                size_bytes: 0,
-                chunk_str: "/00000/00500-01500-82315a24".to_string(),
-                filenames: vec!["blocks.parquet".to_string(), "traces.parquet".to_string()],
-                id: Default::default(),
-            },
-            DataChunk {
-                dataset_id: "s3://pepenet".to_string(),
-                download_url: "https://pepenet.sqd-datasets.io".to_string(),
-                block_range: Range::new(1234, 5678),
-                size_bytes: 0,
-                chunk_str: "00000/01234-05678-b4357d89".to_string(),
-                filenames: vec!["blocks.parquet".to_string(), "transactions.parquet".to_string()],
-                id: Default::default(),
-            },
-        ];
-
-        assert_eq!(chunks_to_worker_state(chunks.clone()), WorkerState {
-            datasets: vec![
-                ("s3://squidnet".to_string(), RangeSet { ranges: vec![Range::new(0, 1500)] }),
-                ("s3://pepenet".to_string(), RangeSet { ranges: vec![Range::new(1234, 5678)] }),
-            ].into_iter().collect()
-        });
-
-        assert_eq!(chunks_to_assignment(chunks.into_iter()), WorkerAssignment {
-            known_filenames: vec![
-                "blocks.parquet".to_string(),
-                "transactions.parquet".to_string(),
-                "logs.parquet".to_string(),
-                "traces.parquet".to_string(),
-            ],
-            dataset_chunks: vec![
-                DatasetChunks {
-                    dataset_id: "s3://squidnet".to_string(),
-                    download_url: "https://squidnet.sqd-datasets.io".to_string(),
-                    chunks: vec![
-                        AssignedChunk {
-                            path: "/00000/00001-01000-fa1f6773".to_string(),
-                            filenames: vec![0, 1, 2],
-                        },
-                        AssignedChunk {
-                            path: "/00000/00500-01500-82315a24".to_string(),
-                            filenames: vec![0, 3],
-                        },
-                    ],
-                },
-                DatasetChunks{
-                    dataset_id: "s3://pepenet".to_string(),
-                    download_url: "https://pepenet.sqd-datasets.io".to_string(),
-                    chunks: vec![
-                        AssignedChunk {
-                            path: "00000/01234-05678-b4357d89".to_string(),
-                            filenames: vec![0, 1],
-                        }
-                    ]
-                }
-            ],
-            ..Default::default()
-        });
     }
 }

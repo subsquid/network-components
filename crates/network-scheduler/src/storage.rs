@@ -1,5 +1,4 @@
 use std::fmt::Display;
-use std::future::Future;
 use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,12 +17,12 @@ use tokio::sync::Mutex;
 
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 
-use sqd_messages::assignments::{Assignment, NetworkAssignment, NetworkState};
 use crate::cli::Config;
 use crate::data_chunk::DataChunk;
 use crate::prometheus_metrics;
-use crate::scheduler::{ChunksSummary, Scheduler};
+use crate::scheduler::Scheduler;
 use crate::scheduling_unit::{bundle_chunks, SchedulingUnit};
+use sqd_messages::assignments::{Assignment, NetworkAssignment, NetworkState};
 
 #[derive(Clone)]
 struct DatasetStorage {
@@ -225,7 +224,6 @@ pub struct S3Storage {
     client: s3::Client,
     config: &'static Config,
     scheduler_state_key: String,
-    chunks_list_key: String,
     task_manager: Arc<Mutex<TaskManager>>,
 }
 
@@ -238,12 +236,10 @@ impl S3Storage {
             .await;
         let client = s3::Client::new(&s3_config);
         let scheduler_state_key = format!("scheduler_{scheduler_id}.json");
-        let chunks_list_key = format!("datasets_{}.json.gz", config.network);
         Self {
             client,
             config,
             scheduler_state_key,
-            chunks_list_key,
             task_manager: Default::default(),
         }
     }
@@ -289,7 +285,6 @@ impl S3Storage {
         let mut scheduler = Scheduler::from_json(bytes.as_ref())?;
         // List of datasets could have changed since last run, need to clear deprecated units
         scheduler.clear_deprecated_units();
-        scheduler.regenerate_signatures();
         Ok(scheduler)
     }
 
@@ -359,63 +354,4 @@ impl S3Storage {
             .map_err(|e| log::error!("Error saving link to assignment: {e:?}"));
         prometheus_metrics::s3_request();
     }
-
-    pub fn save_chunks_list(&self, chunks_summary: &ChunksSummary) -> impl Future<Output = ()> {
-        log::debug!("Saving chunks list");
-        let start = tokio::time::Instant::now();
-        let chunks = chunks_summary
-            .iter()
-            .map(|(ds, chunks)| {
-                (
-                    ds.clone(),
-                    chunks
-                        .iter()
-                        .map(|c| {
-                            serde_json::json!({
-                                "begin": c.begin,
-                                "end": c.end,
-                                "size_bytes": c.size_bytes,
-                            })
-                        })
-                        .collect(),
-                )
-            })
-            .collect::<serde_json::Map<_, _>>();
-        let json = serde_json::json!({
-            "chunks": chunks
-        });
-        let future = match serde_json::to_vec(&json)
-            .map_err(anyhow::Error::from)
-            .and_then(gzip)
-        {
-            Ok(compressed) => Some(
-                self.client
-                    .put_object()
-                    .bucket(&self.config.scheduler_state_bucket)
-                    .key(&self.chunks_list_key)
-                    .body(compressed.into())
-                    .send(),
-            ),
-            Err(e) => {
-                log::error!("Error serializing chunks list: {e:?}");
-                None
-            }
-        };
-        async move {
-            let Some(future) = future else { return };
-            if let Err(e) = future.await {
-                log::error!("Error saving chunks list: {e:?}");
-            }
-            prometheus_metrics::s3_request();
-            prometheus_metrics::exec_time("save_chunks", start.elapsed());
-        }
-    }
-}
-
-fn gzip(data: Vec<u8>) -> anyhow::Result<Vec<u8>> {
-    use flate2::write::GzEncoder;
-    use std::io::Write;
-    let mut encoder = GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder.write_all(&data)?;
-    Ok(encoder.finish()?)
 }

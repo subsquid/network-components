@@ -11,7 +11,7 @@ use sqd_network_transport::util::CancellationToken;
 use tokio::sync::RwLock;
 
 use crate::cli::Config;
-use crate::scheduler::{ChunksSummary, Scheduler};
+use crate::scheduler::Scheduler;
 use crate::worker_state::WorkerState;
 
 const JAIL_INFO_FIELDS: [Field<'static, WorkerState>; 3] = [
@@ -31,11 +31,6 @@ async fn workers_jail_info(Extension(scheduler): Extension<Scheduler>) -> Respon
         .map(|w| w.with_fields(|_| JAIL_INFO_FIELDS))
         .collect::<Vec<_>>();
     Json(jail_info).into_response()
-}
-
-async fn chunks(Extension(scheduler): Extension<Scheduler>) -> Json<ChunksSummary> {
-    let chunks_summary = scheduler.get_chunks_summary();
-    Json(chunks_summary)
 }
 
 async fn get_config() -> Json<Config> {
@@ -60,7 +55,6 @@ pub async fn run_server(
     let app = Router::new()
         .route("/workers/pings", get(active_workers))
         .route("/workers/jail_info", get(workers_jail_info))
-        .route("/chunks", get(chunks))
         .route("/config", get(get_config))
         .route("/metrics", get(get_metrics))
         .layer(Extension(scheduler))

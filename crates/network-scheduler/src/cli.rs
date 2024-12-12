@@ -13,7 +13,7 @@ use sqd_network_transport::TransportArgs;
 static CONFIG: OnceCell<Config> = OnceCell::const_new();
 
 fn default_worker_version() -> VersionReq {
-    ">=1.0.0-rc3".parse().unwrap()
+    ">=2.0.0".parse().unwrap()
 }
 
 #[serde_as]
@@ -38,9 +38,6 @@ pub struct Config {
     #[serde_as(as = "DurationSeconds")]
     #[serde(rename = "successful_dial_retry_sec")]
     pub successful_dial_retry: Duration,
-    #[serde_as(as = "DurationSeconds")]
-    #[serde(rename = "signature_refresh_interval_sec")]
-    pub signature_refresh_interval: Duration,
     pub replication_factor: usize, // this is minimum
     pub dynamic_replication: bool,
     pub dyn_rep_capacity_share: f64,

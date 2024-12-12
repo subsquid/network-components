@@ -353,5 +353,49 @@ impl S3Storage {
             .await
             .map_err(|e| log::error!("Error saving link to assignment: {e:?}"));
         prometheus_metrics::s3_request();
+        self.cleanup_assignments().await;
+    }
+
+    pub async fn cleanup_assignments(&self) {
+        let network = Config::get().network.clone();
+        let path = format!("assignments/{network}/");
+        let Ok(files) = self
+            .client
+            .list_objects()
+            .bucket(&self.config.scheduler_state_bucket)
+            .prefix(path)
+            .send()
+            .await
+        else {
+            log::error!("Failed to list assignments");
+            return;
+        };
+        prometheus_metrics::s3_request();
+        for v in files
+            .contents()
+            .iter()
+            .rev()
+            .skip(Config::get().assignment_history_len)
+        {
+            let Some(ref filepath) = v.key else {
+                log::error!("Failed to fetch filepath");
+                return;
+            };
+            let result = self
+                .client
+                .delete_object()
+                .bucket(&self.config.scheduler_state_bucket)
+                .key(filepath)
+                .send()
+                .await;
+            prometheus_metrics::s3_request();
+            match result {
+                Ok(_) => log::debug!("S3 object {filepath} deleted."),
+                Err(err) => {
+                    log::error!("Can not delete S3 object {filepath}: {err:?}");
+                    return;
+                }
+            }
+        }
     }
 }

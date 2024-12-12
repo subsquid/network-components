@@ -390,9 +390,9 @@ impl S3Storage {
                 .await;
             prometheus_metrics::s3_request();
             match result {
-                Ok(result) => log::error!("S3 object deleted: {result:?}"),
+                Ok(_) => log::debug!("S3 object {filepath} deleted."),
                 Err(err) => {
-                    log::error!("Can not delete S3 object: {err:?}");
+                    log::error!("Can not delete S3 object {filepath}: {err:?}");
                     return;
                 }
             }

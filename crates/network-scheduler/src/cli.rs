@@ -17,7 +17,7 @@ fn default_worker_version() -> VersionReq {
 }
 
 fn default_assignment_history_len() -> usize {
-    10
+    1000
 }
 
 #[serde_as]

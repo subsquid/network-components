@@ -27,7 +27,7 @@ pub struct WorkerState {
     pub assigned_units: HashSet<UnitId>,
     pub assigned_bytes: u64, // Can be outdated, source of truth is assigned_units
     pub stored_bytes: u64,
-    pub num_missing_chunks: u32,
+    pub num_missing_chunks: Option<u32>,
     #[serde(skip)]
     pub num_missing_chunks_on_heartbeat: u32,
     #[serde_as(as = "Option<TimestampMilliSeconds>")]
@@ -78,7 +78,7 @@ impl WorkerState {
             assigned_units: HashSet::new(),
             stored_bytes: 0,
             assigned_bytes: 0,
-            num_missing_chunks: 0,
+            num_missing_chunks: None,
             num_missing_chunks_on_heartbeat: 0,
             last_assignment: None,
             last_dial_time: None,
@@ -193,18 +193,22 @@ impl WorkerState {
         }
 
         let current_missing_chunks = self.num_missing_chunks_on_heartbeat;
+        if self.num_missing_chunks.is_none() {
+            self.num_missing_chunks = Some(current_missing_chunks);
+            return true;
+        }
         if current_missing_chunks == 0 {
             log::debug!("Worker {} is fully synced", self.peer_id);
-            self.num_missing_chunks = current_missing_chunks;
+            self.num_missing_chunks = Some(0);
             true
-        } else if current_missing_chunks < self.num_missing_chunks {
+        } else if current_missing_chunks < self.num_missing_chunks.unwrap() {
             log::debug!(
                 "Worker {} is making progress {} -> {} chunks missing",
                 self.peer_id,
-                self.num_missing_chunks,
+                self.num_missing_chunks.unwrap(),
                 current_missing_chunks
             );
-            self.num_missing_chunks = current_missing_chunks;
+            self.num_missing_chunks = Some(current_missing_chunks);
             true
         } else {
             log::debug!(
@@ -216,6 +220,7 @@ impl WorkerState {
     }
 
     pub fn reset_download_progress(&mut self, _units: &DashMap<UnitId, SchedulingUnit>) {
+        self.num_missing_chunks = None;
         self.last_assignment = Some(SystemTime::now());
     }
 
@@ -225,7 +230,7 @@ impl WorkerState {
         self.jailed = true;
         self.jail_reason = Some(reason);
         self.assigned_bytes = 0;
-        self.num_missing_chunks = 0;
+        self.num_missing_chunks = None;
         self.assigned_units.drain().collect()
     }
 

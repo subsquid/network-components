@@ -177,10 +177,7 @@ impl WorkerState {
 
     /// Check if the worker is making progress with downloading missing chunks.
     /// Returns true iff the worker is fully synced or making progress.
-    pub fn check_download_progress(
-        &mut self,
-        _units: &DashMap<UnitId, SchedulingUnit>,
-    ) -> bool {
+    pub fn check_download_progress(&mut self, _units: &DashMap<UnitId, SchedulingUnit>) -> bool {
         assert!(!self.jailed);
         let Some(last_assignment) = self.last_assignment.as_ref() else {
             return true; // worker doesn't have any assignment
@@ -215,7 +212,12 @@ impl WorkerState {
         }
     }
 
-    pub fn reset_download_progress(&mut self, _units: &DashMap<UnitId, SchedulingUnit>) {
+    pub fn reset_download_progress(&mut self, units: &DashMap<UnitId, SchedulingUnit>) {
+        self.num_missing_chunks = self
+            .assigned_units
+            .iter()
+            .map(|unit| units.get(unit).map_or(0, |u| u.num_chunks()))
+            .sum::<usize>() as u32;
         self.last_assignment = Some(SystemTime::now());
     }
 

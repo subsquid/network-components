@@ -6,19 +6,29 @@
       "id": "czM6Ly9hcmJpdHJ1bS1vbmU"
     },
     {
-      "name": "ethereum-mainnet",
-      "template_dir": "evm",
-      "id": "czM6Ly9ldGhlcmV1bS1tYWlubmV0LTI"
-    },
-    {
       "name": "binance-mainnet",
       "template_dir": "evm",
       "id": "czM6Ly9iaW5hbmNlLW1haW5uZXQ"
     },
     {
+      "name": "ethereum-mainnet",
+      "template_dir": "evm",
+      "id": "czM6Ly9ldGhlcmV1bS1tYWlubmV0LTI"
+    },
+    {
+      "name": "galxe-gravity",
+      "template_dir": "evm",
+      "id": "czM6Ly9nYWx4ZS1ncmF2aXR5"
+    },
+    {
       "name": "polygon-mainnet",
       "template_dir": "evm",
       "id": "czM6Ly9wb2x5Z29uLW1haW5uZXQtMQ"
+    },
+    {
+      "name": "shibarium",
+      "template_dir": "evm",
+      "id": "czM6Ly9zaGliYXJpdW0="
     },
     {
       "name": "zksync-mainnet",

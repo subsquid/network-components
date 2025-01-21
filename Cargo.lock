@@ -1392,9 +1392,9 @@ dependencies = [
 
 [[package]]
 name = "bytemuck"
-version = "1.19.0"
+version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8334215b81e418a0a7bdb8ef0849474f40bb10c8b71f1c4ed315cff49f32494d"
+checksum = "8b37c88a63ffd85d15b406896cc343916d7cf57838a847b3a6f2ca5d39a5695a"
 
 [[package]]
 name = "byteorder"
@@ -4647,7 +4647,7 @@ dependencies = [
 
 [[package]]
 name = "network-scheduler"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6837,7 +6837,7 @@ dependencies = [
 [[package]]
 name = "sqd-contract-client"
 version = "1.2.1"
-source = "git+https://github.com/subsquid/sqd-network.git?rev=f0033c1#f0033c16c69078f694e382c3a2c56afb823ce1bc"
+source = "git+https://github.com/subsquid/sqd-network.git?rev=e39ba1a#e39ba1a0e2e7966016e746cb7e6c150f2e14e13b"
 dependencies = [
  "async-trait",
  "clap",
@@ -6855,8 +6855,8 @@ dependencies = [
 
 [[package]]
 name = "sqd-messages"
-version = "2.0.0"
-source = "git+https://github.com/subsquid/sqd-network.git?rev=f0033c1#f0033c16c69078f694e382c3a2c56afb823ce1bc"
+version = "2.0.1"
+source = "git+https://github.com/subsquid/sqd-network.git?rev=e39ba1a#e39ba1a0e2e7966016e746cb7e6c150f2e14e13b"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -6883,7 +6883,7 @@ dependencies = [
 [[package]]
 name = "sqd-network-transport"
 version = "2.0.0"
-source = "git+https://github.com/subsquid/sqd-network.git?rev=f0033c1#f0033c16c69078f694e382c3a2c56afb823ce1bc"
+source = "git+https://github.com/subsquid/sqd-network.git?rev=e39ba1a#e39ba1a0e2e7966016e746cb7e6c150f2e14e13b"
 dependencies = [
  "anyhow",
  "async-trait",

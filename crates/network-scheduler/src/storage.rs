@@ -24,6 +24,8 @@ use crate::scheduler::Scheduler;
 use crate::scheduling_unit::{bundle_chunks, SchedulingUnit};
 use sqd_messages::assignments::{Assignment, NetworkAssignment, NetworkState};
 
+const ASSIGNMENT_EFFECTIVE_FROM_DELAY_SEC: u64 = 30;
+
 #[derive(Clone)]
 struct DatasetStorage {
     bucket: String,
@@ -334,11 +336,19 @@ impl S3Storage {
             }
         }
 
+        let system_time = std::time::SystemTime::now();
+        let effective_from = system_time
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + ASSIGNMENT_EFFECTIVE_FROM_DELAY_SEC;
+
         let network_state = NetworkState {
             network: Config::get().network.clone(),
             assignment: NetworkAssignment {
                 url: format!("https://metadata.sqd-datasets.io/{filename}"),
                 id: format!("{timestamp}_{hash:X}"),
+                effective_from,
             },
         };
         let contents = serde_json::to_vec(&network_state).unwrap();

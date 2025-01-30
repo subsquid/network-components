@@ -47,10 +47,11 @@ pub struct Cli {
     #[arg(
         long,
         env = "LOOKUP_TIMEOUT_SEC",
+        alias = "lookup-timeout",
         value_parser = parse_seconds,
         default_value = "10"
     )]
-    pub lookup_timeout: Duration,
+    pub connect_timeout: Duration,
 }
 
 fn parse_seconds(s: &str) -> anyhow::Result<Duration> {

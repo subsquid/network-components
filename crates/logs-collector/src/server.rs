@@ -18,7 +18,7 @@ pub struct Server<T>
 where
     T: Storage + Send + Sync + 'static,
 {
-    transport_handle: Arc<LogsCollectorTransport>,
+    transport_handle: LogsCollectorTransport,
     logs_collector: LogsCollector<T>,
     registered_workers: Arc<Mutex<HashSet<PeerId>>>,
     task_manager: TaskManager,
@@ -30,7 +30,7 @@ where
 {
     pub fn new(transport: LogsCollectorTransport, logs_collector: LogsCollector<T>) -> Self {
         Self {
-            transport_handle: Arc::new(transport),
+            transport_handle: transport,
             logs_collector,
             registered_workers: Default::default(),
             task_manager: Default::default(),
@@ -57,7 +57,6 @@ where
         *self.registered_workers.lock() = workers;
 
         self.spawn_worker_update_task(contract_client, worker_update_interval);
-        self.spawn_transport_task();
 
         self.run_collecting_task(
             collection_interval,
@@ -125,7 +124,7 @@ where
             } else {
                 log::debug!("Collecting more logs from {worker_id} since {from_timestamp_ms}");
             }
-            let logs = match self
+            let mut logs = match self
                 .transport_handle
                 .request_logs(
                     worker_id,
@@ -147,6 +146,16 @@ where
             };
             last_query_id = last_log.query.as_ref().map(|q| q.query_id.clone());
             from_timestamp_ms = last_log.timestamp_ms;
+
+            let total_count = logs.queries_executed.len();
+            logs.queries_executed
+                .retain(|log| log.verify_client_signature(worker_id));
+            if logs.queries_executed.len() < total_count {
+                log::warn!(
+                    "Invalid client signature in {} logs from {worker_id}",
+                    total_count - logs.queries_executed.len()
+                );
+            }
 
             self.logs_collector
                 .buffer_logs(worker_id, logs.queries_executed);
@@ -181,12 +190,5 @@ where
             }
         };
         self.task_manager.spawn_periodic(task, interval);
-    }
-
-    fn spawn_transport_task(&mut self) {
-        let transport_handle = self.transport_handle.clone();
-        self.task_manager.spawn(|cancel_token| async move {
-            transport_handle.run(cancel_token).await;
-        });
     }
 }

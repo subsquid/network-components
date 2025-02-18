@@ -292,6 +292,7 @@ fn build_assignment(
                 base_url: format!("{download_url}/{chunk_str}"),
                 files,
                 size_bytes,
+                summary: chunk.summary,
             };
 
             assignment.add_chunk(chunk, dataset_id, download_url);

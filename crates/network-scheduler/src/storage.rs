@@ -143,7 +143,7 @@ impl DatasetStorage {
         if let Some(last_chunk) = chunks.last_mut() {
             self.populate_with_summary(last_chunk)
                 .await
-                .context("couldn't download chunk summary")?;
+                .context(format!("couldn't download chunk summary for {}", last_chunk))?;
         }
 
         self.last_key = Some(last_key);

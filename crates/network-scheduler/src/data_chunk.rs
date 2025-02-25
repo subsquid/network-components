@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{hex::Hex, serde_as};
 use sha3::{Digest, Sha3_256};
 
-use sqd_messages::Range;
+use sqd_messages::{assignments, Range};
 
 use crate::cli::Config;
 
@@ -20,7 +20,8 @@ impl Display for ChunkId {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, derivative::Derivative)]
+#[derivative(PartialEq)]
 pub struct DataChunk {
     #[serde(alias = "dataset_url")]
     pub dataset_id: String,
@@ -31,6 +32,8 @@ pub struct DataChunk {
     pub chunk_str: String,
     #[serde(default)]
     pub filenames: Vec<String>,
+    #[derivative(PartialEq = "ignore")]
+    pub summary: Option<assignments::ChunkSummary>,
     #[serde(skip)]
     id: OnceCell<ChunkId>,
 }
@@ -62,6 +65,7 @@ impl DataChunk {
             size_bytes,
             filenames,
             id: Default::default(),
+            summary: None,
         })
     }
 
@@ -89,6 +93,7 @@ mod tests {
             size_bytes: 0,
             chunk_str: "/00000/00001-01000-fa1f6773".to_string(),
             filenames: vec![],
+            summary: None,
             id: Default::default(),
         };
         assert_eq!(chunk.to_string(), "s3://squidnet/0-1000");

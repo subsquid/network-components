@@ -3,6 +3,7 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context;
 use aws_sdk_s3 as s3;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::types::Object;
@@ -12,6 +13,7 @@ use flate2::Compression;
 use itertools::Itertools;
 use nonempty::NonEmpty;
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncSeekExt;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
 
@@ -117,7 +119,7 @@ impl DatasetStorage {
             Some(objects) => objects,
         };
         let last_key = objects.last().key();
-        let chunks = objects
+        let mut chunks = objects
             .into_iter()
             .chunk_by(|obj| obj.prefix.clone())
             .into_iter()
@@ -136,6 +138,12 @@ impl DatasetStorage {
                 );
             }
             next_block = Some(chunk.block_range.end + 1);
+        }
+
+        if let Some(last_chunk) = chunks.last_mut() {
+            self.populate_with_summary(last_chunk)
+                .await
+                .context(format!("couldn't download chunk summary for {}", last_chunk))?;
         }
 
         self.last_key = Some(last_key);
@@ -218,6 +226,38 @@ impl DatasetStorage {
             }
         }
         log::info!("Chunks stream ended");
+    }
+
+    async fn populate_with_summary(&self, data_chunk: &mut DataChunk) -> anyhow::Result<()> {
+        let key = format!("{}/blocks.parquet", data_chunk.chunk_str);
+        let temp_file = tempfile::tempfile()?;
+        let mut tokio_file = tokio::fs::File::from_std(temp_file);
+        self.download_object(&key, &mut tokio_file).await?;
+
+        tokio_file.rewind().await?;
+        let temp_file = tokio_file.into_std().await;
+        let summary =
+            tokio::task::spawn_blocking(move || crate::parquet::read_chunk_summary(temp_file))
+                .await??;
+
+        log::debug!("Adding summary to {}/{}: {:?}", self.bucket, key, summary);
+        data_chunk.summary = Some(summary);
+        Ok(())
+    }
+
+    async fn download_object(&self, key: &str, file: &mut tokio::fs::File) -> anyhow::Result<()> {
+        log::debug!("Downloading object {}/{} to extract summary", self.bucket, key);
+        let response = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await?;
+        let mut stream = response.body.into_async_read();
+        tokio::io::copy(&mut stream, file).await?;
+        log::debug!("Downloaded object {}/{}", self.bucket, key);
+        Ok(())
     }
 }
 

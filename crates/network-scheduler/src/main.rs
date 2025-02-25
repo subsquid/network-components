@@ -11,6 +11,7 @@ use crate::storage::S3Storage;
 mod cli;
 mod data_chunk;
 mod metrics_server;
+mod parquet;
 mod prometheus_metrics;
 mod scheduler;
 mod scheduling_unit;

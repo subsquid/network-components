@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
     let contract_client: Arc<_> = transport_builder.contract_client().into();
     let mut config = LogsCollectorConfig::default();
     config.request_config.request_timeout = args.request_timeout;
-    config.request_config.lookup_timeout = args.lookup_timeout;
+    config.request_config.connect_timeout = args.connect_timeout;
     let transport = transport_builder.build_logs_collector(config)?;
 
     let storage = ClickhouseStorage::new(args.clickhouse).await?;

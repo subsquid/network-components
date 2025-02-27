@@ -32,9 +32,10 @@ fn read_blocks(
     reader: &impl FileReader,
 ) -> anyhow::Result<impl Iterator<Item = anyhow::Result<BlockSummary>> + '_> {
     let metadata = reader.metadata();
-    let mut fields = metadata.file_metadata().schema().get_fields().to_vec();
+    let schema = metadata.file_metadata().schema();
+    let mut fields = schema.get_fields().to_vec();
     fields.retain(|f| matches!(f.name(), "number" | "hash" | "slot"));
-    let projection = Type::group_type_builder("schema")
+    let projection = Type::group_type_builder(schema.get_basic_info().name())
         .with_fields(fields)
         .build()
         .unwrap();
@@ -49,6 +50,9 @@ fn read_blocks(
                     hash = Some(s);
                 }
                 (name, Field::Int(n)) if name == "number" => {
+                    number = Some(n as u64);
+                }
+                (name, Field::UInt(n)) if name == "number" => {
                     number = Some(n as u64);
                 }
                 (name, Field::Long(n)) if name == "slot" => {

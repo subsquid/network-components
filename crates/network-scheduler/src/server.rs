@@ -23,7 +23,6 @@ use crate::{metrics_server, prometheus_metrics};
 use sqd_messages::assignments::{Assignment, Chunk};
 
 const WORKER_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
-const ASSIGNMENT_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct Server {
     incoming_units: Receiver<SchedulingUnit>,
@@ -265,7 +264,7 @@ impl Server {
             }
         };
         self.task_manager
-            .spawn_periodic(task, ASSIGNMENT_REFRESH_INTERVAL);
+            .spawn_periodic(task, Config::get().assignment_refresh_interval);
     }
 }
 

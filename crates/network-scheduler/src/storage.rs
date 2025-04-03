@@ -26,8 +26,6 @@ use crate::scheduler::Scheduler;
 use crate::scheduling_unit::{bundle_chunks, SchedulingUnit};
 use sqd_messages::assignments::{Assignment, NetworkAssignment, NetworkState};
 
-const ASSIGNMENT_EFFECTIVE_FROM_DELAY_SEC: u64 = 30;
-
 #[derive(Clone)]
 struct DatasetStorage {
     bucket: String,
@@ -143,7 +141,10 @@ impl DatasetStorage {
         if let Some(last_chunk) = chunks.last_mut() {
             self.populate_with_summary(last_chunk)
                 .await
-                .context(format!("couldn't download chunk summary for {}", last_chunk))?;
+                .context(format!(
+                    "couldn't download chunk summary for {}",
+                    last_chunk
+                ))?;
         }
 
         self.last_key = Some(last_key);
@@ -246,7 +247,11 @@ impl DatasetStorage {
     }
 
     async fn download_object(&self, key: &str, file: &mut tokio::fs::File) -> anyhow::Result<()> {
-        log::debug!("Downloading object {}/{} to extract summary", self.bucket, key);
+        log::debug!(
+            "Downloading object {}/{} to extract summary",
+            self.bucket,
+            key
+        );
         let response = self
             .client
             .get_object()
@@ -377,11 +382,9 @@ impl S3Storage {
         }
 
         let system_time = std::time::SystemTime::now();
-        let effective_from = system_time
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            + ASSIGNMENT_EFFECTIVE_FROM_DELAY_SEC;
+        let effective_from = (system_time.duration_since(std::time::UNIX_EPOCH).unwrap()
+            + Config::get().assignment_delay)
+            .as_secs();
 
         let network_state = NetworkState {
             network: Config::get().network.clone(),

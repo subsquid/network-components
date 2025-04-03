@@ -20,6 +20,14 @@ fn default_assignment_history_len() -> usize {
     1000
 }
 
+fn default_assignment_refresh_interval() -> Duration {
+    Duration::from_secs(60)
+}
+
+fn default_assignment_delay() -> Duration {
+    Duration::from_secs(30)
+}
+
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -67,6 +75,18 @@ pub struct Config {
     pub ignore_existing_conns: bool,
     #[serde(default = "num_cpus::get")]
     pub ping_processing_threads: usize,
+    #[serde_as(as = "DurationSeconds")]
+    #[serde(
+        rename = "assignment_refresh_interval_sec",
+        default = "default_assignment_refresh_interval"
+    )]
+    pub assignment_refresh_interval: Duration,
+    #[serde_as(as = "DurationSeconds")]
+    #[serde(
+        rename = "assignment_delay_sec",
+        default = "default_assignment_delay"
+    )]
+    pub assignment_delay: Duration,
     #[serde(default = "default_assignment_history_len")]
     pub assignment_history_len: usize,
     #[serde(skip_serializing, skip_deserializing, default)]

@@ -31,7 +31,14 @@ async fn main() -> anyhow::Result<()> {
 
     // Build P2P transport
     let agent_info = get_agent_info!();
-    let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info).await?;
+    let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info)
+        .await?
+        .with_base_config(|mut config| {
+            config.worker_status_via_gossipsub = args.use_gossipsub;
+            config.status_request_timeout = Duration::from_secs(args.request_timeout_sec as u64);
+            config.concurrent_status_requests = args.concurrent_requests;
+            config
+        });
     let contract_client: Arc<dyn sqd_contract_client::Client> =
         transport_builder.contract_client().into();
     let (incoming_pings, transport_handle) =

@@ -43,7 +43,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Build P2P transport
     let agent_info = get_agent_info!();
-    let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info).await?;
+    let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info)
+        .await?
+        .with_base_config(|mut base_config| {
+            base_config.worker_status_via_gossipsub = args.use_gossipsub;
+            base_config
+        });
     let contract_client: Box<dyn sqd_contract_client::Client> = transport_builder.contract_client();
     let local_peer_id = transport_builder.local_peer_id();
     let scheduler_config = SchedulerConfig {

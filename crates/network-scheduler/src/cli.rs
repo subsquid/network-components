@@ -126,6 +126,9 @@ pub struct Cli {
         default_value = "config.yml"
     )]
     config: PathBuf,
+
+    #[arg(long, env, default_value_t = true)]
+    pub use_gossipsub: bool,
 }
 
 impl Cli {

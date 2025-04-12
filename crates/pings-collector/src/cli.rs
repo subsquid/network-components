@@ -37,4 +37,13 @@ pub struct Cli {
         default_value = "."
     )]
     pub buffer_dir: PathBuf,
+
+    #[arg(long, env, default_value_t = true)]
+    pub use_gossipsub: bool,
+
+    #[arg(long, env, default_value_t = 15)]
+    pub request_timeout_sec: u32,
+
+    #[arg(long, env, default_value_t = 10)]
+    pub concurrent_requests: usize,
 }

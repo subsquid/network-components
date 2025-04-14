@@ -3,7 +3,9 @@ use std::time::Duration;
 
 use clap::Parser;
 use env_logger::Env;
-use sqd_network_transport::{get_agent_info, AgentInfo, P2PTransportBuilder};
+use sqd_network_transport::{
+    get_agent_info, AgentInfo, BaseConfig, P2PTransportBuilder, PingsCollectorConfig,
+};
 
 use collector_utils::ClickhouseStorage;
 
@@ -33,16 +35,20 @@ async fn main() -> anyhow::Result<()> {
     let agent_info = get_agent_info!();
     let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info)
         .await?
-        .with_base_config(|mut config| {
-            config.worker_status_via_gossipsub = args.use_gossipsub;
-            config.status_request_timeout = Duration::from_secs(args.request_timeout_sec as u64);
-            config.concurrent_status_requests = args.concurrent_requests;
-            config
+        .with_base_config(|config| BaseConfig {
+            status_request_timeout: Duration::from_secs(args.request_timeout_sec as u64),
+            concurrent_status_requests: args.concurrent_requests,
+            ..config
         });
+
     let contract_client: Arc<dyn sqd_contract_client::Client> =
         transport_builder.contract_client().into();
     let (incoming_pings, transport_handle) =
-        transport_builder.build_pings_collector(Default::default())?;
+        transport_builder.build_pings_collector(PingsCollectorConfig {
+            worker_status_via_gossipsub: args.use_gossipsub,
+            worker_status_via_requests: args.use_polling,
+            ..Default::default()
+        })?;
 
     let storage = ClickhouseStorage::new(args.clickhouse).await?;
     let storage_sync_interval = Duration::from_secs(args.storage_sync_interval_sec as u64);

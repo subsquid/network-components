@@ -28,6 +28,14 @@ fn default_assignment_delay() -> Duration {
     Duration::from_secs(30)
 }
 
+fn default_worker_status_request_timeout() -> Duration {
+    Duration::from_secs(5)
+}
+
+fn default_concurrent_worker_status_requests() -> usize {
+    500
+}
+
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -82,15 +90,24 @@ pub struct Config {
     )]
     pub assignment_refresh_interval: Duration,
     #[serde_as(as = "DurationSeconds")]
-    #[serde(
-        rename = "assignment_delay_sec",
-        default = "default_assignment_delay"
-    )]
+    #[serde(rename = "assignment_delay_sec", default = "default_assignment_delay")]
     pub assignment_delay: Duration,
     #[serde(default = "default_assignment_history_len")]
     pub assignment_history_len: usize,
     #[serde(skip_serializing, skip_deserializing, default)]
     pub network: String,
+    #[serde(default = "default_true")]
+    pub gossipsub_worker_status: bool,
+    #[serde(default = "default_false")]
+    pub poll_worker_status: bool,
+    #[serde_as(as = "DurationSeconds")]
+    #[serde(
+        rename = "worker_status_request_timeout_sec",
+        default = "default_worker_status_request_timeout"
+    )]
+    pub worker_status_request_timeout: Duration,
+    #[serde(default = "default_concurrent_worker_status_requests")]
+    pub concurrent_worker_status_requests: usize,
 }
 
 impl Config {
@@ -98,6 +115,14 @@ impl Config {
     pub fn get() -> &'static Self {
         CONFIG.get().expect("Config not initialized")
     }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_false() -> bool {
+    false
 }
 
 fn default_storage_domain() -> String {
@@ -126,9 +151,6 @@ pub struct Cli {
         default_value = "config.yml"
     )]
     config: PathBuf,
-
-    #[arg(long, env, default_value_t = true)]
-    pub use_gossipsub: bool,
 }
 
 impl Cli {

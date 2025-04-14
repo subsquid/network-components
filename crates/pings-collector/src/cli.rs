@@ -41,6 +41,9 @@ pub struct Cli {
     #[arg(long, env, default_value_t = true)]
     pub use_gossipsub: bool,
 
+    #[arg(long, env, default_value_t = false)]
+    pub use_polling: bool,
+
     #[arg(long, env, default_value_t = 15)]
     pub request_timeout_sec: u32,
 

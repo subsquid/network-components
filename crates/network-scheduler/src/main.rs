@@ -2,7 +2,9 @@ use clap::Parser;
 use env_logger::Env;
 use prometheus_client::registry::Registry;
 
-use sqd_network_transport::{get_agent_info, AgentInfo, P2PTransportBuilder, SchedulerConfig};
+use sqd_network_transport::{
+    get_agent_info, AgentInfo, BaseConfig, P2PTransportBuilder, SchedulerConfig,
+};
 
 use crate::cli::{Cli, Config};
 use crate::server::Server;
@@ -45,13 +47,16 @@ async fn main() -> anyhow::Result<()> {
     let agent_info = get_agent_info!();
     let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info)
         .await?
-        .with_base_config(|mut base_config| {
-            base_config.worker_status_via_gossipsub = args.use_gossipsub;
-            base_config
+        .with_base_config(|base_config| BaseConfig {
+            status_request_timeout: Config::get().worker_status_request_timeout,
+            concurrent_status_requests: Config::get().concurrent_worker_status_requests,
+            ..base_config
         });
     let contract_client: Box<dyn sqd_contract_client::Client> = transport_builder.contract_client();
     let local_peer_id = transport_builder.local_peer_id();
     let scheduler_config = SchedulerConfig {
+        worker_status_via_gossipsub: Config::get().gossipsub_worker_status,
+        worker_status_via_requests: Config::get().poll_worker_status,
         ignore_existing_conns: Config::get().ignore_existing_conns,
         ..Default::default()
     };

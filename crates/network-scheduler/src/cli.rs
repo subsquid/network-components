@@ -70,6 +70,8 @@ pub struct Config {
     pub storage_domain: String,
     pub dataset_buckets: Vec<String>,
     pub network_state_name: String,
+    #[serde(default = "default_network_state_url")]
+    pub network_state_url: String,
     pub scheduler_state_bucket: String,
     #[serde(skip_serializing)]
     pub cloudflare_storage_secret: String,
@@ -127,6 +129,10 @@ fn default_false() -> bool {
 
 fn default_storage_domain() -> String {
     "sqd-datasets.io".to_string()
+}
+
+fn default_network_state_url() -> String {
+    "https://metadata.sqd-datasets.io".to_string()
 }
 
 #[derive(Parser)]

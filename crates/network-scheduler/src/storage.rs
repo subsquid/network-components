@@ -389,7 +389,7 @@ impl S3Storage {
         let network_state = NetworkState {
             network: Config::get().network.clone(),
             assignment: NetworkAssignment {
-                url: format!("https://metadata.sqd-datasets.io/{filename}"),
+                url: format!("{}/{filename}", Config::get().network_state_url),
                 id: format!("{timestamp}_{hash:X}"),
                 effective_from,
             },

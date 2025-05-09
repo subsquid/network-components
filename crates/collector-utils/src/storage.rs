@@ -383,6 +383,7 @@ mod tests {
         let mut query = Query {
             query_id: "b14371f9-2463-49cb-9e60-f2f62283b1af".to_string(),
             dataset: "dataset".to_string(),
+            request_id: "my-request-id".to_string(),
             query: r#"{"from": "0"}"#.to_string(),
             block_range: Some(sqd_messages::Range {
                 begin: 808650,

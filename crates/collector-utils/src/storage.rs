@@ -27,6 +27,7 @@ lazy_static! {
             query_id String NOT NULL,
             dataset String NOT NULL,
             dataset_id String NOT NULL DEFAULT '',
+            request_id String NOT NULL,
             from_block Nullable(UInt64),
             to_block Nullable(UInt64),
             chunk_id String NOT NULL DEFAULT '',
@@ -112,6 +113,7 @@ pub struct QueryExecutedRow {
     query_id: String,
     dataset: String,
     dataset_id: String,
+    request_id: String,
     from_block: Option<u64>,
     to_block: Option<u64>,
     chunk_id: String,
@@ -208,6 +210,7 @@ impl QueryExecutedRow {
             query_id: query.query_id,
             dataset: base64(&query.dataset),
             dataset_id: query.dataset,
+            request_id: query.request_id,
             from_block: query.block_range.map(|r| r.begin),
             to_block: query.block_range.map(|r| r.end),
             chunk_id: query.chunk_id,
@@ -380,6 +383,7 @@ mod tests {
         let mut query = Query {
             query_id: "b14371f9-2463-49cb-9e60-f2f62283b1af".to_string(),
             dataset: "dataset".to_string(),
+            request_id: "my-request-id".to_string(),
             query: r#"{"from": "0"}"#.to_string(),
             block_range: Some(sqd_messages::Range {
                 begin: 808650,

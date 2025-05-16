@@ -1871,7 +1871,7 @@ dependencies = [
 
 [[package]]
 name = "collector-utils"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4907,7 +4907,7 @@ checksum = "04cbf5b083de1c7e0222a7a51dbfdba1cbe1c6ab0b15e29fff3f6c077fd9cd9f"
 
 [[package]]
 name = "logs-collector"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "anyhow",
  "clap",

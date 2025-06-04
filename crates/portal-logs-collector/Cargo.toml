@@ -1,0 +1,22 @@
+[package]
+name = "portal-logs-collector"
+version = "2.1.2"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+env_logger = "0.11"
+futures = "0.3"
+log = "0.4"
+parking_lot = "0.12"
+tokio = { version = "1", features = ["full"] }
+
+sqd-contract-client = { workspace = true }
+sqd-messages = { workspace = true }
+sqd-network-transport = { workspace = true, features = ["portal-logs-collector"] }
+
+collector-utils = { path = "../collector-utils" }
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.6"

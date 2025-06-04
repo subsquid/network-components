@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use sqd_messages::signatures::sha3_256;
-use sqd_messages::{query_error, query_executed, Heartbeat, QueryExecuted};
+use sqd_messages::{query_error, query_executed, query_finished, Heartbeat, QueryExecuted, QueryFinished};
 use sqd_network_transport::{protocol, PeerId};
 
 use crate::cli::ClickhouseArgs;
@@ -18,6 +18,8 @@ lazy_static! {
         std::env::var("LOGS_TABLE").unwrap_or("worker_query_logs".to_string());
     static ref PINGS_TABLE: String =
         std::env::var("PINGS_TABLE").unwrap_or("worker_pings_v2".to_string());
+    static ref PORTAL_LOGS_TABLE: String =
+        std::env::var("PORTAL_LOGS_TABLE").unwrap_or("portal_logs".to_string());
     static ref LOGS_TABLE_DEFINITION: String = format!(
         "
         CREATE TABLE IF NOT EXISTS {}
@@ -75,6 +77,23 @@ lazy_static! {
     ",
         &*PINGS_TABLE
     );
+    static ref PORTAL_LOGS_TABLE_DEFINITION: String = format!(
+        "
+        CREATE TABLE IF NOT EXISTS {}
+        (
+            query_id String NOT NULL,
+            worker_id String NOT NULL,
+            result_hash String NOT NULL DEFAULT '',
+            worker_signature String NOT NULL,
+            total_time UInt32 NOT NULL,
+            collector_timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD),
+        )
+        ENGINE = MergeTree
+        PARTITION BY toYYYYMM(collector_timestamp)
+        ORDER BY (collector_timestamp, worker_id);
+    ",
+        &*PORTAL_LOGS_TABLE
+    );
 }
 
 #[async_trait]
@@ -91,6 +110,11 @@ pub trait Storage {
 
     /// Get timestamp of the last stored log for each worker
     async fn get_last_stored(&self) -> anyhow::Result<HashMap<String, u64>>;
+
+    async fn store_portal_logs<T: Iterator<Item = QueryFinishedRow> + Sized + Send>(
+        &self,
+        portal_logs: T,
+    ) -> anyhow::Result<()>;
 }
 
 pub struct ClickhouseStorage(Client);
@@ -258,6 +282,48 @@ struct TimestampRow {
     timestamp: u64,
 }
 
+#[derive(Row, Debug, Clone, Serialize, Deserialize)]
+pub struct QueryFinishedRow {
+    query_id: String,
+    worker_id: String,
+    #[serde(with = "serde_bytes")]
+    result_hash: Vec<u8>,
+    #[serde(with = "serde_bytes")]
+    worker_signature: Vec<u8>,
+    total_time: u32,
+    collector_timestamp: u64,
+}
+
+impl QueryFinishedRow {
+    pub fn try_from(
+        query_finished: QueryFinished,
+    ) -> Result<Self, &'static str> {
+        let QueryFinished {
+            worker_id,
+            query_id,
+            total_time_micros: total_time,
+            worker_signature,
+            result
+        } = query_finished;
+        let result_hash = match result {
+            Some(query_finished::Result::Ok(ok)) => ok.data_hash,
+            Some(_) => Default::default(),
+            None => Default::default(),
+        };
+        let collector_timestamp = timestamp_now_ms();
+
+        Ok(Self {
+            query_id,
+            worker_id,
+            result_hash,
+            worker_signature,
+            total_time,
+            collector_timestamp,
+        })
+    }
+}
+
+
 impl ClickhouseStorage {
     pub async fn new(args: ClickhouseArgs) -> anyhow::Result<Self> {
         let client = Client::default()
@@ -316,6 +382,20 @@ impl Storage for ClickhouseStorage {
         }
         log::debug!("Retrieved timestamps: {:?}", result);
         Ok(result)
+    }
+
+    async fn store_portal_logs<T: Iterator<Item = QueryFinishedRow> + Sized + Send>(
+        &self,
+        portal_logs: T,
+    ) -> anyhow::Result<()> {
+        log::debug!("Storing portal logs in clickhouse");
+        let mut insert = self.0.insert(&PORTAL_LOGS_TABLE)?;
+        for row in portal_logs {
+            log::trace!("Storing portal log {:?}", row);
+            insert.write(&row).await?;
+        }
+        insert.end().await?;
+        Ok(())
     }
 }
 

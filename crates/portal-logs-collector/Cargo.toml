@@ -14,7 +14,7 @@ tokio = { version = "1", features = ["full"] }
 
 sqd-contract-client = { workspace = true }
 sqd-messages = { workspace = true }
-sqd-network-transport = { workspace = true, features = ["portal-logs-collector"] }
+sqd-network-transport = { workspace = true, features = ["portal-logs-collector", "request-server", "proto"] }
 
 collector-utils = { path = "../collector-utils" }
 

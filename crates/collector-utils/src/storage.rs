@@ -333,6 +333,7 @@ impl ClickhouseStorage {
             .with_password(args.clickhouse_password);
         client.query(&LOGS_TABLE_DEFINITION).execute().await?;
         client.query(&PINGS_TABLE_DEFINITION).execute().await?;
+        client.query(&PORTAL_LOGS_TABLE_DEFINITION).execute().await?;
         Ok(Self(client))
     }
 }

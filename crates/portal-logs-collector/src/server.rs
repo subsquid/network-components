@@ -7,24 +7,21 @@ use collector_utils::Storage;
 use futures::{Stream, StreamExt};
 use parking_lot::Mutex;
 use sqd_contract_client::Client as ContractClient;
-use sqd_messages::LogsRequest;
 use sqd_network_transport::util::{CancellationToken, TaskManager};
+use sqd_network_transport::PortalLogsCollectorEvent::LogQuery;
 use sqd_network_transport::{PeerId, PortalLogsCollectorEvent, PortalLogsCollectorTransportHandle};
 
-use crate::collector::LogsCollector;
-
-const MAX_PAGES: usize = 5;
+use crate::collector::PortalLogsCollector;
 
 pub struct Server<T>
 where
     T: Storage + Send + Sync + 'static,
 {
-    transport_handle: PortalLogsCollectorTransportHandle,
-    // logs_collector: LogsCollector<T>,
-    registered_workers: Arc<Mutex<HashSet<PeerId>>>,
+    _transport_handle: PortalLogsCollectorTransportHandle,
+    logs_collector: PortalLogsCollector<T>,
+    registered_gateways: Arc<Mutex<HashSet<PeerId>>>,
     task_manager: TaskManager,
-    event_stream:Box<dyn Stream<Item = PortalLogsCollectorEvent> + Send + Unpin + 'static>,
-    //Box<dyn Stream<Item = GatewayEvent> + Send + Unpin + 'static
+    event_stream: Box<dyn Stream<Item = PortalLogsCollectorEvent> + Send + Unpin + 'static>,
     _phantom: PhantomData<T>,
 }
 
@@ -32,14 +29,18 @@ impl<T> Server<T>
 where
     T: Storage + Send + Sync + 'static,
 {
-    pub fn new(transport_handle: PortalLogsCollectorTransportHandle, event_stream: impl Stream<Item = PortalLogsCollectorEvent> + Send + Unpin + 'static/*, logs_collector: LogsCollector<T>*/) -> Self {
+    pub fn new(
+        transport_handle: PortalLogsCollectorTransportHandle,
+        event_stream: impl Stream<Item = PortalLogsCollectorEvent> + Send + Unpin + 'static,
+        logs_collector: PortalLogsCollector<T>,
+    ) -> Self {
         Self {
-            transport_handle,
-            // logs_collector,
-            registered_workers: Default::default(),
+            _transport_handle: transport_handle,
+            logs_collector,
+            registered_gateways: Default::default(),
             task_manager: Default::default(),
             event_stream: Box::new(event_stream),
-            _phantom: Default::default()
+            _phantom: Default::default(),
         }
     }
 
@@ -48,153 +49,69 @@ where
         contract_client: Arc<dyn ContractClient>,
         collection_interval: Duration,
         worker_update_interval: Duration,
-        concurrent_workers: usize,
         cancellation_token: CancellationToken,
     ) -> anyhow::Result<()> {
         log::info!("Starting logs collector server");
 
-        // Get registered workers from chain
-        let workers = contract_client
-            .active_workers()
+        // Get registered gateways from chain
+        let gateways = contract_client
+            .active_gateways()
             .await?
             .into_iter()
-            .map(|w| w.peer_id)
             .collect();
-        *self.registered_workers.lock() = workers;
+        *self.registered_gateways.lock() = gateways;
 
-        self.spawn_worker_update_task(contract_client, worker_update_interval);
+        self.spawn_portal_update_task(contract_client, worker_update_interval);
 
-        self.run_collecting_task(
-            collection_interval,
-            concurrent_workers,
-            cancellation_token.child_token(),
-        )
-        .await;
+        self.run_collecting_task(collection_interval, cancellation_token.child_token())
+            .await;
 
         log::info!("Server shutting down");
         self.task_manager.await_stop().await;
         Ok(())
     }
 
-    async fn run_collecting_task(
-        &mut self,
-        interval: Duration,
-        concurrent_jobs: usize,
-        cancel_token: CancellationToken,
-    ) {
-        // let mut interval = tokio::time::interval(interval);
-        // interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    async fn run_collecting_task(&mut self, interval: Duration, cancel_token: CancellationToken) {
+        let mut interval = tokio::time::interval(interval);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
-                // _ = interval.tick() => (),
-                ev = self.event_stream.next() => {
-                    println!("EVENT {ev:?}");
+                _ = interval.tick() => {
+                    let res = self.logs_collector.dump_buffer().await;
+                    let _ = res.inspect_err(|err| log::error!("Error while dumping records: {err:?}"));
+                },
+                Some(LogQuery { peer_id, log }) = self.event_stream.next() => {
+                    if self.registered_gateways.lock().contains(&peer_id) {
+                        log::error!("Got log from {peer_id:?}: {log:?}");
+                        self.logs_collector.buffer_logs(peer_id, vec![log]);
+                    } else {
+                        log::error!("Got unauthorized log from: {peer_id:?}");
+                    }
                 },
                 _ = cancel_token.cancelled() => break,
             };
-
-            // let workers = self.registered_workers.lock().clone();
-            // log::info!("Collecting logs from {} workers", workers.len());
-            // let last_timestamps = match self.logs_collector.last_timestamps().await {
-            //     Ok(timestamps) => timestamps,
-            //     Err(e) => {
-            //         log::warn!("Couldn't read last stored logs: {e:?}");
-            //         continue;
-            //     }
-            // };
-
-            // futures::stream::iter(workers.into_iter())
-            //     .map(|worker_id| {
-            //         self.collect_logs(
-            //             worker_id,
-            //             last_timestamps
-            //                 .get(&worker_id.to_string())
-            //                 .map(|ts| ts + 1)
-            //                 .unwrap_or(0),
-            //         )
-            //     })
-            //     .buffer_unordered(concurrent_jobs)
-            //     .take_until(cancel_token.cancelled())
-            //     .collect::<()>()
-            //     .await;
-
-            // self.logs_collector
-            //     .dump_buffer()
-            //     .await
-            //     .unwrap_or_else(|e| log::warn!("Couldn't store logs: {e:?}"));
         }
     }
 
-    // async fn collect_logs(&self, worker_id: PeerId, mut from_timestamp_ms: u64) {
-    //     let mut last_query_id = None;
-    //     for page in 0..MAX_PAGES {
-    //         if page == 0 {
-    //             log::debug!("Collecting logs from {worker_id} since {from_timestamp_ms}");
-    //         } else {
-    //             log::debug!("Collecting more logs from {worker_id} since {from_timestamp_ms}");
-    //         }
-    //         let mut logs = match self
-    //             .transport_handle
-    //             .request_logs(
-    //                 worker_id,
-    //                 LogsRequest {
-    //                     from_timestamp_ms,
-    //                     last_received_query_id: last_query_id,
-    //                 },
-    //             )
-    //             .await
-    //         {
-    //             Ok(logs) => logs,
-    //             Err(e) => {
-    //                 return log::warn!("Error getting logs from {worker_id}: {e:?}");
-    //             }
-    //         };
-
-    //         let Some(last_log) = logs.queries_executed.last() else {
-    //             return;
-    //         };
-    //         last_query_id = last_log.query.as_ref().map(|q| q.query_id.clone());
-    //         from_timestamp_ms = last_log.timestamp_ms;
-
-    //         let total_count = logs.queries_executed.len();
-    //         logs.queries_executed
-    //             .retain(|log| log.verify_client_signature(worker_id));
-    //         if logs.queries_executed.len() < total_count {
-    //             log::warn!(
-    //                 "Invalid client signature in {} logs from {worker_id}",
-    //                 total_count - logs.queries_executed.len()
-    //             );
-    //         }
-
-    //         self.logs_collector
-    //             .buffer_logs(worker_id, logs.queries_executed);
-
-    //         if !logs.has_more {
-    //             return;
-    //         }
-    //     }
-    //     log::warn!("Logs from {worker_id} didn't fit in {MAX_PAGES} pages, giving up");
-    // }
-
-    fn spawn_worker_update_task(
+    fn spawn_portal_update_task(
         &mut self,
         contract_client: Arc<dyn ContractClient>,
         interval: Duration,
     ) {
-        log::info!("Starting worker update task");
-        let registered_workers = self.registered_workers.clone();
+        log::info!("Starting gateway update task");
+
+        let registered_gateways = self.registered_gateways.clone();
         let contract_client: Arc<dyn ContractClient> = contract_client;
         let task = move |_| {
-            let registered_workers = registered_workers.clone();
+            let registered_gateways = registered_gateways.clone();
             let contract_client = contract_client.clone();
             async move {
-                let workers = match contract_client.active_workers().await {
-                    Ok(workers) => workers,
-                    Err(e) => return log::error!("Error getting registered workers: {e:?}"),
+                let gateways = match contract_client.active_gateways().await {
+                    Ok(gateways) => gateways,
+                    Err(e) => return log::error!("Error getting registered gateways: {e:?}"),
                 };
-                *registered_workers.lock() = workers
+                *registered_gateways.lock() = gateways
                     .into_iter()
-                    .map(|w| w.peer_id)
                     .collect::<HashSet<PeerId>>();
             }
         };

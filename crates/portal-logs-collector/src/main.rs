@@ -4,13 +4,14 @@ use clap::Parser;
 use env_logger::Env;
 use log::info;
 use sqd_network_transport::util::CancellationToken;
-use sqd_network_transport::{get_agent_info, AgentInfo, P2PTransportBuilder, PortalLogsCollectorConfig};
+use sqd_network_transport::{
+    get_agent_info, AgentInfo, P2PTransportBuilder, PortalLogsCollectorConfig,
+};
 
 use collector_utils::ClickhouseStorage;
 
 use crate::cli::Cli;
-use crate::collector::LogsCollector;
-use collector_utils::QueryFinishedRow;
+use crate::collector::PortalLogsCollector;
 use crate::server::Server;
 
 mod cli;
@@ -59,21 +60,19 @@ async fn main() -> anyhow::Result<()> {
     let peer_id = transport_builder.local_peer_id();
     info!("PEER ID: {peer_id:?}");
     let contract_client: Arc<_> = transport_builder.contract_client().into();
-    let mut config = PortalLogsCollectorConfig::new();
-    // config.request_config.request_timeout = args.request_timeout;
-    // config.request_config.connect_timeout = args.connect_timeout;
+    let config = PortalLogsCollectorConfig::new();
+
     let transport = transport_builder.build_portal_logs_collector(config)?;
 
-    // let storage = ClickhouseStorage::new(args.clickhouse).await?;
-    // let logs_collector = LogsCollector::new(storage);
+    let storage = ClickhouseStorage::new(args.clickhouse).await?;
+    let logs_collector = PortalLogsCollector::new(storage);
     let cancellation_token = create_cancellation_token()?;
 
-    Server::<ClickhouseStorage>::new(transport.1, transport.0/*, logs_collector*/)
+    Server::<ClickhouseStorage>::new(transport.1, transport.0, logs_collector)
         .run(
             contract_client,
             args.collection_interval,
             args.worker_update_interval,
-            args.concurrent_workers,
             cancellation_token,
         )
         .await

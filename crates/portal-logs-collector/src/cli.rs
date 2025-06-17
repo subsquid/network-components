@@ -16,11 +16,11 @@ pub struct Cli {
     /// Interval at which logs are collected and saved to persistent storage (seconds)
     #[arg(
         long,
-        env = "COLLECTION_INTERVAL_SEC",
+        env = "DUMPING_INTERVAL_SEC",
         value_parser = parse_seconds,
         default_value = "120"
     )]
-    pub collection_interval: Duration,
+    pub dumping_interval: Duration,
 
     /// Number of workers processed in parallel
     #[arg(long, env, default_value_t = 30)]
@@ -28,11 +28,11 @@ pub struct Cli {
 
     /// Interval at which registered workers are updated (seconds)
     #[arg(long,
-        env = "WORKER_UPDATE_INTERVAL_SEC",
+        env = "PORTAL_UPDATE_INTERVAL_SEC",
         value_parser = parse_seconds,
         default_value = "300"
     )]
-    pub worker_update_interval: Duration,
+    pub portal_update_interval: Duration,
 
     /// Timeout for log requests to workers
     #[arg(

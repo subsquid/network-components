@@ -48,7 +48,7 @@ where
         mut self,
         contract_client: Arc<dyn ContractClient>,
         collection_interval: Duration,
-        worker_update_interval: Duration,
+        portal_update_interval: Duration,
         cancellation_token: CancellationToken,
     ) -> anyhow::Result<()> {
         log::info!("Starting logs collector server");
@@ -61,7 +61,7 @@ where
             .collect();
         *self.registered_gateways.lock() = gateways;
 
-        self.spawn_portal_update_task(contract_client, worker_update_interval);
+        self.spawn_portal_update_task(contract_client, portal_update_interval);
 
         self.run_collecting_task(collection_interval, cancellation_token.child_token())
             .await;

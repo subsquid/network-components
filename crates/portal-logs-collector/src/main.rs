@@ -71,8 +71,8 @@ async fn main() -> anyhow::Result<()> {
     Server::<ClickhouseStorage>::new(transport.1, transport.0, logs_collector)
         .run(
             contract_client,
-            args.collection_interval,
-            args.worker_update_interval,
+            args.dumping_interval,
+            args.portal_update_interval,
             cancellation_token,
         )
         .await

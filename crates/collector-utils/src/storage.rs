@@ -79,7 +79,7 @@ lazy_static! {
     );
     static ref PORTAL_LOGS_TABLE_DEFINITION: String = format!(
         "
-        CREATE TABLE IF NOT EXISTS {}
+        CREATE TABLE IF NOT EXISTS {} ON CLUSTER default
         (
             query_id String NOT NULL,
             worker_id String NOT NULL,

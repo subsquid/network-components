@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use clap::Parser;
 use env_logger::Env;
-use log::info;
 use sqd_network_transport::util::CancellationToken;
 use sqd_network_transport::{
     get_agent_info, AgentInfo, P2PTransportBuilder, PortalLogsCollectorConfig,

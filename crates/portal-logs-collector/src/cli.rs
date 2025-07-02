@@ -22,9 +22,13 @@ pub struct Cli {
     )]
     pub dumping_interval: Duration,
 
-    /// Number of workers processed in parallel
-    #[arg(long, env, default_value_t = 30)]
-    pub concurrent_workers: usize,
+    /// Number of log collectors in group
+    #[arg(long, env, default_value_t = 1)]
+    pub collector_group_size: usize,
+
+    /// Index of tis log collector in group
+    #[arg(long, env, default_value_t = 0)]
+    pub collector_index: usize,
 
     /// Interval at which registered workers are updated (seconds)
     #[arg(long,

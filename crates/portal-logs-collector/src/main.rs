@@ -57,8 +57,6 @@ async fn main() -> anyhow::Result<()> {
     // Build P2P transport
     let agent_info = get_agent_info!();
     let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info).await?;
-    let peer_id = transport_builder.local_peer_id();
-    info!("PEER ID: {peer_id:?}");
     let contract_client: Arc<_> = transport_builder.contract_client().into();
     let config = PortalLogsCollectorConfig::new();
 
@@ -68,12 +66,16 @@ async fn main() -> anyhow::Result<()> {
     let logs_collector = PortalLogsCollector::new(storage);
     let cancellation_token = create_cancellation_token()?;
 
-    Server::<ClickhouseStorage>::new(transport.1, transport.0, logs_collector)
-        .run(
-            contract_client,
-            args.dumping_interval,
-            args.portal_update_interval,
-            cancellation_token,
-        )
-        .await
+    Server::<ClickhouseStorage>::new(
+        transport.1,
+        transport.0,
+        logs_collector,
+        args.collector_index,
+        args.collector_group_size
+    ).run(
+        contract_client,
+        args.dumping_interval,
+        args.portal_update_interval,
+        cancellation_token,
+    ).await
 }

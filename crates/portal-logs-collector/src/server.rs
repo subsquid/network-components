@@ -22,6 +22,8 @@ where
     registered_gateways: Arc<Mutex<HashSet<PeerId>>>,
     task_manager: TaskManager,
     event_stream: Box<dyn Stream<Item = PortalLogsCollectorEvent> + Send + Unpin + 'static>,
+    collector_index: usize,
+    collector_group_size: usize,
     _phantom: PhantomData<T>,
 }
 
@@ -33,6 +35,8 @@ where
         transport_handle: PortalLogsCollectorTransportHandle,
         event_stream: impl Stream<Item = PortalLogsCollectorEvent> + Send + Unpin + 'static,
         logs_collector: PortalLogsCollector<T>,
+        collector_index: usize,
+        collector_group_size: usize,
     ) -> Self {
         Self {
             _transport_handle: transport_handle,
@@ -40,6 +44,8 @@ where
             registered_gateways: Default::default(),
             task_manager: Default::default(),
             event_stream: Box::new(event_stream),
+            collector_index,
+            collector_group_size,
             _phantom: Default::default(),
         }
     }
@@ -71,6 +77,14 @@ where
         Ok(())
     }
 
+    fn should_process(&self, peer_id: &PeerId) -> bool {
+        if let Some(byte) = peer_id.to_bytes().last() {
+            (*byte as usize) % self.collector_group_size == self.collector_index
+        } else {
+            false
+        }
+    }
+
     async fn run_collecting_task(&mut self, interval: Duration, cancel_token: CancellationToken) {
         let mut interval = tokio::time::interval(interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -81,6 +95,9 @@ where
                     let _ = res.inspect_err(|err| log::error!("Error while dumping records: {err:?}"));
                 },
                 Some(LogQuery { peer_id, log }) = self.event_stream.next() => {
+                    if !self.should_process(&peer_id) {
+                        continue
+                    }
                     if self.registered_gateways.lock().contains(&peer_id) {
                         log::error!("Got log from {peer_id:?}: {log:?}");
                         self.logs_collector.buffer_logs(peer_id, vec![log]);

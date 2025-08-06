@@ -99,7 +99,7 @@ where
                         continue
                     }
                     if self.registered_gateways.lock().contains(&peer_id) {
-                        log::error!("Got log from {peer_id:?}: {log:?}");
+                        log::debug!("Got log from {peer_id:?}: {log:?}");
                         self.logs_collector.buffer_logs(peer_id, vec![log]);
                     } else {
                         log::error!("Got unauthorized log from: {peer_id:?}");

@@ -56,6 +56,10 @@ pub struct Cli {
         default_value = "10"
     )]
     pub connect_timeout: Duration,
+
+    /// Whether the logs should be structured in JSON format
+    #[arg(long, env)]
+    pub json_log: bool,
 }
 
 fn parse_seconds(s: &str) -> anyhow::Result<Duration> {

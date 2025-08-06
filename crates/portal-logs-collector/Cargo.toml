@@ -11,6 +11,9 @@ futures = "0.3"
 log = "0.4"
 parking_lot = "0.12"
 tokio = { version = "1", features = ["full"] }
+tracing = { version = "0.1", features = ["async-await"] }
+tracing-futures = { version = "0.2.5", features = ["tokio", "futures-03"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
 
 sqd-contract-client = { workspace = true }
 sqd-messages = { workspace = true }

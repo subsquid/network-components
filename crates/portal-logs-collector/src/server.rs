@@ -18,7 +18,7 @@ where
     T: Storage + Send + Sync + 'static,
 {
     _transport_handle: PortalLogsCollectorTransportHandle,
-    logs_collector: PortalLogsCollector<T>,
+    logs_collector: Arc<PortalLogsCollector<T>>,
     registered_gateways: Arc<Mutex<HashSet<PeerId>>>,
     task_manager: TaskManager,
     event_stream: Box<dyn Stream<Item = PortalLogsCollectorEvent> + Send + Unpin + 'static>,
@@ -40,7 +40,7 @@ where
     ) -> Self {
         Self {
             _transport_handle: transport_handle,
-            logs_collector,
+            logs_collector: Arc::new(logs_collector),
             registered_gateways: Default::default(),
             task_manager: Default::default(),
             event_stream: Box::new(event_stream),
@@ -69,7 +69,9 @@ where
 
         self.spawn_portal_update_task(contract_client, portal_update_interval);
 
-        self.run_collecting_task(collection_interval, cancellation_token.child_token())
+        self.spawn_dumping_task(collection_interval);
+
+        self.run_collecting_task(cancellation_token.child_token())
             .await;
 
         log::info!("Server shutting down");
@@ -85,15 +87,9 @@ where
         }
     }
 
-    async fn run_collecting_task(&mut self, interval: Duration, cancel_token: CancellationToken) {
-        let mut interval = tokio::time::interval(interval);
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    async fn run_collecting_task(&mut self, cancel_token: CancellationToken) {
         loop {
             tokio::select! {
-                _ = interval.tick() => {
-                    let res = self.logs_collector.dump_buffer().await;
-                    let _ = res.inspect_err(|err| log::error!("Error while dumping records: {err:?}"));
-                },
                 Some(LogQuery { peer_id, log }) = self.event_stream.next() => {
                     if !self.should_process(&peer_id) {
                         continue
@@ -108,6 +104,21 @@ where
                 _ = cancel_token.cancelled() => break,
             };
         }
+    }
+
+    fn spawn_dumping_task(&mut self, interval: Duration) {
+        let collector = self.logs_collector.clone();
+        self.task_manager.spawn_periodic(
+            move |_| {
+                let local_collector = collector.clone();
+                async move {
+                    let res = (*local_collector).dump_buffer().await;
+                    let _ =
+                        res.inspect_err(|err| log::error!("Error while dumping records: {err:?}"));
+                }
+            },
+            interval,
+        );
     }
 
     fn spawn_portal_update_task(
@@ -127,9 +138,7 @@ where
                     Ok(gateways) => gateways,
                     Err(e) => return log::error!("Error getting registered gateways: {e:?}"),
                 };
-                *registered_gateways.lock() = gateways
-                    .into_iter()
-                    .collect::<HashSet<PeerId>>();
+                *registered_gateways.lock() = gateways.into_iter().collect::<HashSet<PeerId>>();
             }
         };
         self.task_manager.spawn_periodic(task, interval);

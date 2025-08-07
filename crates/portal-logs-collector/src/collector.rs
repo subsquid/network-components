@@ -29,11 +29,11 @@ impl<T: Storage + Sync> PortalLogsCollector<T> {
         // TODO: limit memory usage
     }
 
-    pub async fn dump_buffer(&mut self) -> anyhow::Result<()> {
-        let logs = self.buffered_logs.get_mut().drain(..);
+    pub async fn dump_buffer(&self) -> anyhow::Result<()> {
+        let logs: Vec<_> = self.buffered_logs.lock().drain(..).collect();
         log::info!("Dumping {} logs to storage", logs.len());
-        if logs.len() > 0 {
-            self.storage.store_portal_logs(logs).await?;
+        if !logs.is_empty() {
+            self.storage.store_portal_logs(logs.into_iter()).await?;
         }
         Ok(())
     }

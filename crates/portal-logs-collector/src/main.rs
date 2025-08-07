@@ -89,11 +89,13 @@ async fn main() -> anyhow::Result<()> {
         transport.0,
         logs_collector,
         args.collector_index,
-        args.collector_group_size
-    ).run(
+        args.collector_group_size,
+    )
+    .run(
         contract_client,
         args.dumping_interval,
         args.portal_update_interval,
         cancellation_token,
-    ).await
+    )
+    .await
 }

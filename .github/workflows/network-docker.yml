@@ -129,3 +129,29 @@ jobs:
             subsquid/peer-checker:${{ inputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build portal logs collector
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: portal-logs-collector
+          load: true
+          tags: subsquid/portal-logs-collector:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Get portal logs collector version
+        run: echo "PORTAL_LOGS_COLLECTOR_VERSION=$(docker run --rm subsquid/portal-logs-collector:test portal-logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
+
+      - name: Build & publish portal logs collector
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
+          target: portal-logs-collector
+          push: true
+          tags: |
+            subsquid/portal-logs-collector:${{ env.PORTAL_LOGS_COLLECTOR_VERSION }}
+            subsquid/portal-logs-collector:${{ inputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

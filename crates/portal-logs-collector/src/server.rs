@@ -61,7 +61,7 @@ where
 
         // Get registered gateways from chain
         let gateways = contract_client
-            .active_gateways()
+            .active_portals()
             .await?
             .into_iter()
             .collect();
@@ -90,13 +90,13 @@ where
     async fn run_collecting_task(&mut self, cancel_token: CancellationToken) {
         loop {
             tokio::select! {
-                Some(LogQuery { peer_id, log }) = self.event_stream.next() => {
+                Some(LogQuery { peer_id, logs }) = self.event_stream.next() => {
                     if !self.should_process(&peer_id) {
                         continue
                     }
                     if self.registered_gateways.lock().contains(&peer_id) {
-                        log::debug!("Got log from {peer_id:?}: {log:?}");
-                        self.logs_collector.buffer_logs(peer_id, vec![log]);
+                        log::debug!("Got log from {peer_id:?}: {logs:?}");
+                        self.logs_collector.buffer_logs(peer_id, logs);
                     } else {
                         log::error!("Got unauthorized log from: {peer_id:?}");
                     }
@@ -134,7 +134,7 @@ where
             let registered_gateways = registered_gateways.clone();
             let contract_client = contract_client.clone();
             async move {
-                let gateways = match contract_client.active_gateways().await {
+                let gateways = match contract_client.active_portals().await {
                     Ok(gateways) => gateways,
                     Err(e) => return log::error!("Error getting registered gateways: {e:?}"),
                 };

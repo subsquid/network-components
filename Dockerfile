@@ -2,7 +2,6 @@ FROM --platform=$BUILDPLATFORM rust:1.83 AS archive-router-builder
 RUN apt-get update && apt-get install protobuf-compiler -y
 WORKDIR /archive-router
 COPY ./ .
-RUN rm -r crates/network-scheduler
 RUN rm -r crates/logs-collector
 RUN --mount=type=ssh cargo build --release
 
@@ -49,28 +48,6 @@ RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
     && apt-get update \
     && apt-get -y install ca-certificates net-tools
 
-FROM --platform=$BUILDPLATFORM network-base AS network-scheduler
-
-RUN --mount=target=/var/lib/apt/lists,type=cache,sharing=locked \
-    --mount=target=/var/cache/apt,type=cache,sharing=locked \
-    rm -f /etc/apt/apt.conf.d/docker-clean \
-    && apt-get update \
-    && apt-get -y install curl
-
-WORKDIR /run
-
-COPY --from=network-builder /app/target/release/network-scheduler /usr/local/bin/network-scheduler
-COPY --from=network-builder /app/crates/network-scheduler/config.yml .
-
-ENV P2P_LISTEN_ADDRS="/ip4/0.0.0.0/udp/12345/quic-v1"
-ENV HTTP_LISTEN_ADDR="0.0.0.0:8000"
-
-CMD ["network-scheduler"]
-
-COPY crates/network-scheduler/healthcheck.sh .
-RUN chmod +x ./healthcheck.sh
-HEALTHCHECK --interval=5s CMD ./healthcheck.sh
-
 FROM --platform=$BUILDPLATFORM network-base AS logs-collector
 
 COPY --from=network-builder /app/target/release/logs-collector /usr/local/bin/logs-collector
@@ -104,19 +81,6 @@ ENV P2P_LISTEN_ADDRS="/ip4/0.0.0.0/udp/12345/quic-v1"
 ENV BUFFER_DIR="/run"
 
 CMD ["portal-logs-collector"]
-
-COPY crates/logs-collector/healthcheck.sh .
-RUN chmod +x ./healthcheck.sh
-HEALTHCHECK --interval=5s CMD ./healthcheck.sh
-
-FROM --platform=$BUILDPLATFORM network-base AS peer-checker
-
-COPY --from=network-builder /app/target/release/peer-checker /usr/local/bin/peer-checker
-
-ENV P2P_LISTEN_ADDRS="/ip4/0.0.0.0/udp/12345/quic-v1"
-ENV BUFFER_DIR="/run"
-
-CMD ["peer-checker"]
 
 COPY crates/logs-collector/healthcheck.sh .
 RUN chmod +x ./healthcheck.sh

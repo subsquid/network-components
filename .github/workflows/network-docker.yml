@@ -26,32 +26,6 @@ jobs:
           username: ${{ secrets.DOCKER_LOGIN }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
-      - name: Build scheduler
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          target: network-scheduler
-          load: true
-          tags: subsquid/network-scheduler:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Get scheduler version
-        run: echo "SCHEDULER_VERSION=$(docker run --rm subsquid/network-scheduler:test network-scheduler --version | cut -d ' ' -f2)" >> $GITHUB_ENV
-
-      - name: Build & publish scheduler
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
-          target: network-scheduler
-          push: true
-          tags: |
-            subsquid/network-scheduler:${{ env.SCHEDULER_VERSION }}
-            subsquid/network-scheduler:${{ inputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
       - name: Build logs collector
         uses: docker/build-push-action@v5
         with:
@@ -101,32 +75,6 @@ jobs:
           tags: |
             subsquid/pings-collector:${{ env.PINGS_COLLECTOR_VERSION }}
             subsquid/pings-collector:${{ inputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build peer checker
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          target: peer-checker
-          load: true
-          tags: subsquid/peer-checker:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Get peer checker version
-        run: echo "PEER_CHECKER_VERSION=$(docker run --rm subsquid/peer-checker:test peer-checker --version | cut -d ' ' -f2)" >> $GITHUB_ENV
-
-      - name: Build & publish peer checker
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
-          target: peer-checker
-          push: true
-          tags: |
-            subsquid/peer-checker:${{ env.PEER_CHECKER_VERSION }}
-            subsquid/peer-checker:${{ inputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

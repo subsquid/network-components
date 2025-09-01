@@ -45,8 +45,6 @@ async fn main() -> anyhow::Result<()> {
         transport_builder.contract_client().into();
     let (incoming_pings, transport_handle) =
         transport_builder.build_pings_collector(PingsCollectorConfig {
-            worker_status_via_gossipsub: args.use_gossipsub,
-            worker_status_via_requests: args.use_polling,
             ..Default::default()
         })?;
 

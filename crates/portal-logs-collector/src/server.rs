@@ -19,7 +19,7 @@ where
 {
     _transport_handle: PortalLogsCollectorTransportHandle,
     logs_collector: Arc<PortalLogsCollector<T>>,
-    registered_gateways: Arc<Mutex<HashSet<PeerId>>>,
+    registered_portals: Arc<Mutex<HashSet<PeerId>>>,
     task_manager: TaskManager,
     event_stream: Box<dyn Stream<Item = PortalLogsCollectorEvent> + Send + Unpin + 'static>,
     collector_index: usize,
@@ -41,7 +41,7 @@ where
         Self {
             _transport_handle: transport_handle,
             logs_collector: Arc::new(logs_collector),
-            registered_gateways: Default::default(),
+            registered_portals: Default::default(),
             task_manager: Default::default(),
             event_stream: Box::new(event_stream),
             collector_index,
@@ -59,13 +59,13 @@ where
     ) -> anyhow::Result<()> {
         log::info!("Starting logs collector server");
 
-        // Get registered gateways from chain
-        let gateways = contract_client
-            .active_gateways()
+        // Get registered portals from chain
+        let portals = contract_client
+            .active_portals()
             .await?
             .into_iter()
             .collect();
-        *self.registered_gateways.lock() = gateways;
+        *self.registered_portals.lock() = portals;
 
         self.spawn_portal_update_task(contract_client, portal_update_interval);
 
@@ -94,7 +94,7 @@ where
                     if !self.should_process(&peer_id) {
                         continue
                     }
-                    if self.registered_gateways.lock().contains(&peer_id) {
+                    if self.registered_portals.lock().contains(&peer_id) {
                         log::debug!("Got log from {peer_id:?}: {log:?}");
                         self.logs_collector.buffer_logs(peer_id, vec![log]);
                     } else {
@@ -126,19 +126,19 @@ where
         contract_client: Arc<dyn ContractClient>,
         interval: Duration,
     ) {
-        log::info!("Starting gateway update task");
+        log::info!("Starting portal update task");
 
-        let registered_gateways = self.registered_gateways.clone();
+        let registered_portals = self.registered_portals.clone();
         let contract_client: Arc<dyn ContractClient> = contract_client;
         let task = move |_| {
-            let registered_gateways = registered_gateways.clone();
+            let registered_portals = registered_portals.clone();
             let contract_client = contract_client.clone();
             async move {
-                let gateways = match contract_client.active_gateways().await {
-                    Ok(gateways) => gateways,
-                    Err(e) => return log::error!("Error getting registered gateways: {e:?}"),
+                let portals = match contract_client.active_portals().await {
+                    Ok(portals) => portals,
+                    Err(e) => return log::error!("Error getting registered portals: {e:?}"),
                 };
-                *registered_gateways.lock() = gateways.into_iter().collect::<HashSet<PeerId>>();
+                *registered_portals.lock() = portals.into_iter().collect::<HashSet<PeerId>>();
             }
         };
         self.task_manager.spawn_periodic(task, interval);

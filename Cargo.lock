@@ -4802,7 +4802,7 @@ checksum = "280dc24453071f1b63954171985a0b0d30058d287960968b9b2aca264c8d4ee6"
 
 [[package]]
 name = "portal-logs-collector"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -6179,7 +6179,7 @@ dependencies = [
 [[package]]
 name = "sqd-contract-client"
 version = "1.2.1"
-source = "git+https://github.com/subsquid/sqd-network.git?rev=6239b0a#6239b0a92c388e92d0443b919eba52478bfef228"
+source = "git+https://github.com/subsquid/sqd-network.git?rev=3392894#33928941621731829e1aa7428126eed035d4640b"
 dependencies = [
  "async-trait",
  "clap",
@@ -6198,7 +6198,7 @@ dependencies = [
 [[package]]
 name = "sqd-messages"
 version = "2.0.2"
-source = "git+https://github.com/subsquid/sqd-network.git?rev=6239b0a#6239b0a92c388e92d0443b919eba52478bfef228"
+source = "git+https://github.com/subsquid/sqd-network.git?rev=3392894#33928941621731829e1aa7428126eed035d4640b"
 dependencies = [
  "bytemuck",
  "flate2",
@@ -6214,7 +6214,7 @@ dependencies = [
 [[package]]
 name = "sqd-network-transport"
 version = "3.0.0"
-source = "git+https://github.com/subsquid/sqd-network.git?rev=6239b0a#6239b0a92c388e92d0443b919eba52478bfef228"
+source = "git+https://github.com/subsquid/sqd-network.git?rev=3392894#33928941621731829e1aa7428126eed035d4640b"
 dependencies = [
  "anyhow",
  "async-trait",

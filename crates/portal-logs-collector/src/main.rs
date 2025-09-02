@@ -76,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
     let agent_info = get_agent_info!();
     let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info).await?;
     let contract_client: Arc<_> = transport_builder.contract_client().into();
-    let config = PortalLogsCollectorConfig::new();
+    let config = PortalLogsCollectorConfig::default();
 
     let transport = transport_builder.build_portal_logs_collector(config)?;
 

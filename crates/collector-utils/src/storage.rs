@@ -103,7 +103,7 @@ pub trait Storage {
         query_logs: T,
     ) -> anyhow::Result<()>;
 
-    async fn store_pings<T: Iterator<Item = PingRow> + Sized + Send>(
+    async fn store_heartbeats<T: Iterator<Item = PingRow> + Sized + Send>(
         &self,
         pings: T,
     ) -> anyhow::Result<()>;
@@ -354,7 +354,7 @@ impl Storage for ClickhouseStorage {
         Ok(())
     }
 
-    async fn store_pings<T: Iterator<Item = PingRow> + Sized + Send>(
+    async fn store_heartbeats<T: Iterator<Item = PingRow> + Sized + Send>(
         &self,
         pings: T,
     ) -> anyhow::Result<()> {
@@ -509,7 +509,7 @@ mod tests {
         };
         let ts = timestamp_now_ms();
         storage
-            .store_pings(std::iter::once(
+            .store_heartbeats(std::iter::once(
                 PingRow::new(ping.clone(), worker_id.to_string()).unwrap(),
             ))
             .await

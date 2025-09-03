@@ -3,9 +3,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use env_logger::Env;
-use sqd_network_transport::{
-    get_agent_info, AgentInfo, BaseConfig, P2PTransportBuilder, PingsCollectorConfig,
-};
+use sqd_network_transport::{get_agent_info, AgentInfo, P2PTransportBuilder, PingsCollectorConfig};
 
 use collector_utils::ClickhouseStorage;
 
@@ -33,31 +31,23 @@ async fn main() -> anyhow::Result<()> {
 
     // Build P2P transport
     let agent_info = get_agent_info!();
-    let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info)
-        .await?
-        .with_base_config(|config| BaseConfig {
-            status_request_timeout: Duration::from_secs(args.request_timeout_sec as u64),
-            concurrent_status_requests: args.concurrent_requests,
-            ..config
-        });
+    let transport_builder = P2PTransportBuilder::from_cli(args.transport, agent_info).await?;
 
     let contract_client: Arc<dyn sqd_contract_client::Client> =
         transport_builder.contract_client().into();
-    let (incoming_pings, transport_handle) =
-        transport_builder.build_pings_collector(PingsCollectorConfig {
-            ..Default::default()
-        })?;
+    let transport_handle = transport_builder.build_pings_collector(PingsCollectorConfig {
+        request_timeout: Duration::from_secs(args.request_timeout_sec as u64),
+        connect_timeout: Duration::from_secs(args.connect_timeout_sec as u64),
+        ..Default::default()
+    })?;
 
     let storage = ClickhouseStorage::new(args.clickhouse).await?;
-    let storage_sync_interval = Duration::from_secs(args.storage_sync_interval_sec as u64);
     let worker_update_interval = Duration::from_secs(args.worker_update_interval_sec as u64);
-    Server::new(incoming_pings, transport_handle)
-        .run(
-            contract_client,
-            storage_sync_interval,
-            worker_update_interval,
-            args.buffer_dir,
-            storage,
-        )
+
+    let request_interval = Duration::from_secs(args.request_interval_sec as u64);
+    let concurrency_limit = args.concurrent_requests;
+
+    Server::new(transport_handle, request_interval, concurrency_limit)
+        .run(contract_client, worker_update_interval, storage)
         .await
 }

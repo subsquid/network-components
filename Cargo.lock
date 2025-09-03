@@ -4639,8 +4639,6 @@ dependencies = [
  "log",
  "parking_lot 0.12.3",
  "semver 1.0.25",
- "serde",
- "serde_json",
  "sqd-contract-client",
  "sqd-messages",
  "sqd-network-transport",

@@ -5,9 +5,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::{Stream, StreamExt};
+use futures::{stream, StreamExt};
 use lazy_static::lazy_static;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use tokio::signal::unix::{signal, SignalKind};
 
 use collector_utils::{PingRow, Storage};
@@ -27,26 +27,26 @@ lazy_static! {
 
 const PINGS_BATCH_SIZE: usize = 10000;
 
-pub struct Server<S>
-where
-    S: Stream<Item = Heartbeat> + Send + Unpin + 'static,
-{
-    incoming_pings: S,
-    _transport_handle: PingsCollectorTransportHandle,
+pub struct Server {
+    transport_handle: PingsCollectorTransportHandle,
     registered_workers: Arc<RwLock<HashSet<PeerId>>>,
     task_manager: TaskManager,
+    request_interval: Duration,
+    concurrency_limit: usize,
 }
 
-impl<S> Server<S>
-where
-    S: Stream<Item = Heartbeat> + Send + Unpin + 'static,
-{
-    pub fn new(incoming_pings: S, transport_handle: PingsCollectorTransportHandle) -> Self {
+impl Server {
+    pub fn new(
+        transport_handle: PingsCollectorTransportHandle,
+        request_interval: Duration,
+        concurrency_limit: usize,
+    ) -> Self {
         Self {
-            incoming_pings,
-            _transport_handle: transport_handle,
+            transport_handle,
             registered_workers: Default::default(),
             task_manager: Default::default(),
+            request_interval,
+            concurrency_limit,
         }
     }
 
@@ -69,18 +69,17 @@ where
             .collect();
 
         let (buffer_writer, buffer_reader) = open_buffer(buffer_path)?;
-        let mut collector = Collector::new(buffer_writer, self.registered_workers.clone());
+        let collector = Collector::new(buffer_writer, self.registered_workers.clone());
         let writer = StorageWriter::new(buffer_reader, storage, storage_sync_interval);
         self.task_manager.spawn(writer.start());
         self.spawn_worker_update_task(contract_client, worker_update_interval);
+
+        self.spawn_heartbeat_collection_task(collector);
 
         let mut sigint = signal(SignalKind::interrupt())?;
         let mut sigterm = signal(SignalKind::terminate())?;
         loop {
             tokio::select! {
-                Some(ping) = self.incoming_pings.next() => {
-                    _ = collector.collect_ping(ping).map_err(|e| log::error!("Error collecting ping: {e:?}"));
-                }
                 _ = sigint.recv() => break,
                 _ = sigterm.recv() => break,
                 else => break
@@ -115,6 +114,64 @@ where
             }
         };
         self.task_manager.spawn_periodic(task, interval);
+    }
+
+    fn spawn_heartbeat_collection_task(&mut self, collector: Collector) {
+        log::info!("Starting heartbeat collection task");
+        let transport_handle = self.transport_handle.clone();
+        let registered_workers = self.registered_workers.clone();
+        let concurrency_limit = self.concurrency_limit;
+        let collector = Arc::new(Mutex::new(collector));
+
+        let task = move |cancellation_token: CancellationToken| {
+            let transport_handle = transport_handle.clone();
+            let registered_workers = registered_workers.clone();
+            let collector = collector.clone();
+
+            async move {
+                let start = std::time::Instant::now();
+
+                let workers: Vec<PeerId> = registered_workers.read().iter().cloned().collect();
+                if workers.is_empty() {
+                    log::debug!("No registered workers to collect heartbeats from");
+                    return;
+                }
+
+                log::debug!("Collecting heartbeats from {} workers", workers.len());
+
+                let heartbeat_requests = stream::iter(workers.into_iter())
+                    .map(|peer_id| {
+                        let handle = transport_handle.clone();
+                        async move {
+                            match handle.request_heartbeat(peer_id).await {
+                                Ok(heartbeat) => Some(Heartbeat { peer_id, heartbeat }),
+                                Err(e) => {
+                                    log::debug!("Failed to get heartbeat from {}: {}", peer_id, e);
+                                    None
+                                }
+                            }
+                        }
+                    })
+                    .buffered(concurrency_limit)
+                    .take_until(cancellation_token.cancelled_owned());
+
+                let mut heartbeat_stream = Box::pin(heartbeat_requests);
+                let mut count = 0;
+                while let Some(heartbeat) = heartbeat_stream.next().await {
+                    if let Some(heartbeat) = heartbeat {
+                        count += 1;
+                        if let Err(e) = collector.lock().collect_ping(heartbeat) {
+                            log::error!("Error collecting ping: {:?}", e);
+                        }
+                    }
+                }
+
+                log::info!("Collected {} heartbeats in {:?}", count, start.elapsed());
+            }
+        };
+
+        self.task_manager
+            .spawn_periodic(task, self.request_interval);
     }
 }
 

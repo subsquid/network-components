@@ -90,13 +90,13 @@ where
     async fn run_collecting_task(&mut self, cancel_token: CancellationToken) {
         loop {
             tokio::select! {
-                Some(LogQuery { peer_id, log }) = self.event_stream.next() => {
+                Some(LogQuery { peer_id, logs }) = self.event_stream.next() => {
                     if !self.should_process(&peer_id) {
                         continue
                     }
                     if self.registered_portals.lock().contains(&peer_id) {
-                        log::debug!("Got log from {peer_id:?}: {log:?}");
-                        self.logs_collector.buffer_logs(peer_id, vec![log]);
+                        log::debug!("Got log from {peer_id:?}: {:?}", logs.len());
+                        self.logs_collector.buffer_logs(peer_id, logs);
                     } else {
                         log::error!("Got unauthorized log from: {peer_id:?}");
                     }

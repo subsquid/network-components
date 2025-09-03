@@ -1,31 +1,25 @@
 use std::collections::HashSet;
-use std::future::Future;
-use std::path::Path;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{stream, StreamExt};
 use lazy_static::lazy_static;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use tokio::signal::unix::{signal, SignalKind};
 
 use collector_utils::{PingRow, Storage};
 use semver::VersionReq;
 use sqd_contract_client::Client as ContractClient;
 use sqd_network_transport::util::{CancellationToken, TaskManager};
-use sqd_network_transport::{Heartbeat, PeerId, PingsCollectorTransportHandle};
+use sqd_network_transport::{PeerId, PingsCollectorTransportHandle};
 
 lazy_static! {
-    static ref BINCODE_CONFIG: bincode::config::Configuration = Default::default();
     pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq =
         std::env::var("SUPPORTED_WORKER_VERSIONS")
             .unwrap_or(">=1.1.0-rc3".to_string())
             .parse()
             .expect("Invalid SUPPORTED_WORKER_VERSIONS");
 }
-
-const PINGS_BATCH_SIZE: usize = 10000;
 
 pub struct Server {
     transport_handle: PingsCollectorTransportHandle,
@@ -53,9 +47,7 @@ impl Server {
     pub async fn run(
         mut self,
         contract_client: Arc<dyn ContractClient>,
-        storage_sync_interval: Duration,
         worker_update_interval: Duration,
-        buffer_path: impl AsRef<Path>,
         storage: impl Storage + Send + Sync + 'static,
     ) -> anyhow::Result<()> {
         log::info!("Starting pings collector server");
@@ -68,13 +60,8 @@ impl Server {
             .map(|w| w.peer_id)
             .collect();
 
-        let (buffer_writer, buffer_reader) = open_buffer(buffer_path)?;
-        let collector = Collector::new(buffer_writer, self.registered_workers.clone());
-        let writer = StorageWriter::new(buffer_reader, storage, storage_sync_interval);
-        self.task_manager.spawn(writer.start());
         self.spawn_worker_update_task(contract_client, worker_update_interval);
-
-        self.spawn_heartbeat_collection_task(collector);
+        self.spawn_heartbeat_collection_task(storage);
 
         let mut sigint = signal(SignalKind::interrupt())?;
         let mut sigterm = signal(SignalKind::terminate())?;
@@ -116,175 +103,83 @@ impl Server {
         self.task_manager.spawn_periodic(task, interval);
     }
 
-    fn spawn_heartbeat_collection_task(&mut self, collector: Collector) {
+    fn spawn_heartbeat_collection_task(&mut self, storage: impl Storage + Send + Sync + 'static) {
         log::info!("Starting heartbeat collection task");
         let transport_handle = self.transport_handle.clone();
         let registered_workers = self.registered_workers.clone();
         let concurrency_limit = self.concurrency_limit;
-        let collector = Arc::new(Mutex::new(collector));
+        let storage = Arc::new(storage);
 
         let task = move |cancellation_token: CancellationToken| {
             let transport_handle = transport_handle.clone();
             let registered_workers = registered_workers.clone();
-            let collector = collector.clone();
+            let storage = storage.clone();
 
             async move {
                 let start = std::time::Instant::now();
 
                 let workers: Vec<PeerId> = registered_workers.read().iter().cloned().collect();
                 if workers.is_empty() {
-                    log::debug!("No registered workers to collect heartbeats from");
+                    log::info!("No registered workers to collect heartbeats from");
                     return;
                 }
 
-                log::debug!("Collecting heartbeats from {} workers", workers.len());
+                log::info!("Collecting heartbeats from {} workers", workers.len());
 
-                let heartbeat_requests = stream::iter(workers.into_iter())
+                let ping_rows: Vec<PingRow> = stream::iter(workers.into_iter())
                     .map(|peer_id| {
                         let handle = transport_handle.clone();
                         async move {
-                            match handle.request_heartbeat(peer_id).await {
-                                Ok(heartbeat) => Some(Heartbeat { peer_id, heartbeat }),
+                            let heartbeat = match handle.request_heartbeat(peer_id).await {
+                                Ok(heartbeat) => heartbeat,
                                 Err(e) => {
                                     log::debug!("Failed to get heartbeat from {}: {}", peer_id, e);
+                                    return None;
+                                }
+                            };
+
+                            if !heartbeat.version_matches(&SUPPORTED_WORKER_VERSIONS) {
+                                log::debug!(
+                                    "Unsupported worker version {peer_id}: {:?}",
+                                    heartbeat.version
+                                );
+                                return None;
+                            }
+
+                            match PingRow::new(heartbeat, peer_id.to_string()) {
+                                Ok(ping_row) => Some(ping_row),
+                                Err(e) => {
+                                    log::error!("Error creating ping row: {e}");
                                     None
                                 }
                             }
                         }
                     })
                     .buffered(concurrency_limit)
-                    .take_until(cancellation_token.cancelled_owned());
+                    .take_until(cancellation_token.cancelled_owned())
+                    .filter_map(|x| std::future::ready(x))
+                    .collect()
+                    .await;
 
-                let mut heartbeat_stream = Box::pin(heartbeat_requests);
-                let mut count = 0;
-                while let Some(heartbeat) = heartbeat_stream.next().await {
-                    if let Some(heartbeat) = heartbeat {
-                        count += 1;
-                        if let Err(e) = collector.lock().collect_ping(heartbeat) {
-                            log::error!("Error collecting ping: {:?}", e);
+                log::info!(
+                    "Collected {} heartbeats in {:?}",
+                    ping_rows.len(),
+                    start.elapsed()
+                );
+                if !ping_rows.is_empty() {
+                    match storage.store_heartbeats(ping_rows.into_iter()).await {
+                        Ok(()) => {
+                            log::info!("Stored heartbeats successfully",);
+                        }
+                        Err(e) => {
+                            log::error!("Error storing heartbeats: {e:?}");
                         }
                     }
                 }
-
-                log::info!("Collected {} heartbeats in {:?}", count, start.elapsed());
             }
         };
 
         self.task_manager
             .spawn_periodic(task, self.request_interval);
-    }
-}
-
-fn open_buffer(path: impl AsRef<Path>) -> anyhow::Result<(yaque::Sender, yaque::Receiver)> {
-    match yaque::channel(&path) {
-        Ok(res) => Ok(res),
-        Err(e) => {
-            // Attempt to recover the buffer if it is corrupted
-            log::warn!("Error opening buffer: {e:?}");
-            yaque::recovery::recover_with_loss(&path)?;
-            Ok(yaque::channel(path)?)
-        }
-    }
-}
-
-struct Collector {
-    buffer_writer: yaque::Sender,
-    registered_workers: Arc<RwLock<HashSet<PeerId>>>,
-}
-
-impl Collector {
-    pub fn new(
-        buffer_writer: yaque::Sender,
-        registered_workers: Arc<RwLock<HashSet<PeerId>>>,
-    ) -> Self {
-        Self {
-            buffer_writer,
-            registered_workers,
-        }
-    }
-    pub fn collect_ping(
-        &mut self,
-        Heartbeat { peer_id, heartbeat }: Heartbeat,
-    ) -> anyhow::Result<()> {
-        if !self.registered_workers.read().contains(&peer_id) {
-            log::warn!("Heartbeat from unregistered worker {peer_id}: {heartbeat:?}");
-            return Ok(());
-        }
-        if !heartbeat.version_matches(&SUPPORTED_WORKER_VERSIONS) {
-            log::debug!(
-                "Unsupported worker version {peer_id}: {:?}",
-                heartbeat.version
-            );
-            return Ok(());
-        }
-        log::debug!("Collecting heartbeat from {peer_id}");
-        log::trace!("Heartbeat collected: {heartbeat:?}");
-        let ping_row = PingRow::new(heartbeat, peer_id.to_string())
-            .map_err(|e: &str| anyhow::format_err!(e))?;
-        let bytes = bincode::serde::encode_to_vec(ping_row, *BINCODE_CONFIG)?;
-        self.buffer_writer
-            .try_send(bytes)
-            .map_err(|e| anyhow::format_err!(e))?;
-        Ok(())
-    }
-}
-
-struct StorageWriter<S: Storage + Send + Sync + 'static> {
-    buffer_reader: yaque::Receiver,
-    storage: S,
-    interval: Duration,
-}
-
-impl<S: Storage + Send + Sync + 'static> StorageWriter<S> {
-    pub fn new(buffer_reader: yaque::Receiver, storage: S, interval: Duration) -> Self {
-        Self {
-            buffer_reader,
-            storage,
-            interval,
-        }
-    }
-
-    pub fn start(
-        self,
-    ) -> impl FnOnce(CancellationToken) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
-        move |cancel_token| Box::pin(self.run(cancel_token))
-    }
-
-    async fn run(mut self, cancel_token: CancellationToken) {
-        log::info!("Starting logs saving task");
-        loop {
-            let timeout = Box::pin(tokio::time::sleep(self.interval));
-            let recv_guard = tokio::select! {
-                _ = cancel_token.cancelled() => break,
-                res = self.buffer_reader.recv_batch_timeout(PINGS_BATCH_SIZE, timeout) => match res {
-                    Ok(guard) => guard,
-                    Err(e) => {
-                        log::error!("Error reading buffer: {e:?}");
-                        continue
-                    }
-                }
-            };
-            log::info!("Read {} ping rows from buffer", recv_guard.len());
-            let ping_rows =
-                recv_guard.iter().filter_map(|b| {
-                    match bincode::serde::decode_from_slice(b, *BINCODE_CONFIG) {
-                        Ok((row, _)) => Some(row),
-                        Err(e) => {
-                            log::error!("Corrupt ping row in buffer: {e:}");
-                            None
-                        }
-                    }
-                });
-            match self.storage.store_pings(ping_rows).await {
-                Ok(()) => {
-                    log::info!("Pings stored successfully");
-                    _ = recv_guard.commit().map_err(|e| log::error!("{e:?}"));
-                }
-                Err(e) => {
-                    log::error!("Error storing pings: {e:?}");
-                    _ = recv_guard.rollback().map_err(|e| log::error!("{e:?}"));
-                }
-            }
-        }
     }
 }

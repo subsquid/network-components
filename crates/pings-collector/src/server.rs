@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -9,7 +8,7 @@ use tokio::signal::unix::{signal, SignalKind};
 
 use collector_utils::{PingRow, Storage};
 use semver::VersionReq;
-use sqd_contract_client::Client as ContractClient;
+use sqd_contract_client::{Client as ContractClient, Worker};
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 use sqd_network_transport::{PeerId, PingsCollectorTransportHandle};
 
@@ -23,7 +22,7 @@ lazy_static! {
 
 pub struct Server {
     transport_handle: PingsCollectorTransportHandle,
-    registered_workers: Arc<RwLock<HashSet<PeerId>>>,
+    registered_workers: Arc<RwLock<Vec<PeerId>>>,
     task_manager: TaskManager,
     request_interval: Duration,
     concurrency_limit: usize,
@@ -49,18 +48,19 @@ impl Server {
         contract_client: Arc<dyn ContractClient>,
         worker_update_interval: Duration,
         storage: impl Storage + Send + Sync + 'static,
+        shard: u8,
+        total_shards: u8,
     ) -> anyhow::Result<()> {
         log::info!("Starting pings collector server");
 
         // Get registered workers from chain
-        *self.registered_workers.write() = contract_client
-            .active_workers()
-            .await?
-            .into_iter()
-            .map(|w| w.peer_id)
-            .collect();
+        *self.registered_workers.write() = filter_peer_ids(
+            &contract_client.active_workers().await?,
+            shard,
+            total_shards,
+        );
 
-        self.spawn_worker_update_task(contract_client, worker_update_interval);
+        self.spawn_worker_update_task(contract_client, worker_update_interval, shard, total_shards);
         self.spawn_heartbeat_collection_task(storage);
 
         let mut sigint = signal(SignalKind::interrupt())?;
@@ -81,6 +81,8 @@ impl Server {
         &mut self,
         contract_client: Arc<dyn ContractClient>,
         interval: Duration,
+        shard: u8,
+        total_shards: u8,
     ) {
         // TODO: There's exact same code in logs collector. Move out to collector-utils
         log::info!("Starting worker update task");
@@ -94,10 +96,7 @@ impl Server {
                     Ok(workers) => workers,
                     Err(e) => return log::error!("Error getting registered workers: {e:?}"),
                 };
-                *registered_workers.write() = workers
-                    .into_iter()
-                    .map(|w| w.peer_id)
-                    .collect::<HashSet<PeerId>>();
+                *registered_workers.write() = filter_peer_ids(&workers, shard, total_shards);
             }
         };
         self.task_manager.spawn_periodic(task, interval);
@@ -118,7 +117,7 @@ impl Server {
             async move {
                 let start = std::time::Instant::now();
 
-                let workers: Vec<PeerId> = registered_workers.read().iter().cloned().collect();
+                let workers = registered_workers.read().clone();
                 if workers.is_empty() {
                     log::info!("No registered workers to collect heartbeats from");
                     return;
@@ -182,4 +181,12 @@ impl Server {
         self.task_manager
             .spawn_periodic(task, self.request_interval);
     }
+}
+
+fn filter_peer_ids(workers: &[Worker], shard: u8, total_shards: u8) -> Vec<PeerId> {
+    workers
+        .iter()
+        .map(|w| w.peer_id)
+        .filter(move |peer_id| peer_id.to_bytes().last().unwrap() % total_shards == shard)
+        .collect()
 }

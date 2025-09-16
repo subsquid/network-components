@@ -68,6 +68,12 @@ async fn main() -> anyhow::Result<()> {
     let concurrency_limit = args.concurrent_requests;
 
     Server::new(transport_handle, request_interval, concurrency_limit)
-        .run(contract_client, worker_update_interval, storage)
+        .run(
+            contract_client,
+            worker_update_interval,
+            storage,
+            args.shard,
+            args.total_shards,
+        )
         .await
 }

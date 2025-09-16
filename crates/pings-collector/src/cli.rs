@@ -31,4 +31,10 @@ pub struct Cli {
 
     #[arg(long, env, default_value_t = 10)]
     pub concurrent_requests: usize,
+
+    #[arg(long, env, default_value_t = 0)]
+    pub shard: u8,
+
+    #[arg(long, env, default_value_t = 1)]
+    pub total_shards: u8,
 }

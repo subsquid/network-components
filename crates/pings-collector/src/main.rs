@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
-use env_logger::Env;
 use sqd_network_transport::{get_agent_info, AgentInfo, P2PTransportBuilder, PingsCollectorConfig};
 
 use collector_utils::ClickhouseStorage;
@@ -20,13 +19,34 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
+fn setup_tracing(json: bool) -> anyhow::Result<()> {
+    let env_filter = tracing_subscriber::EnvFilter::builder().parse_lossy(
+        std::env::var(tracing_subscriber::EnvFilter::DEFAULT_ENV)
+            .unwrap_or(format!("info,{}=debug", std::env!("CARGO_CRATE_NAME"))),
+    );
+
+    if json {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_target(false)
+            .json()
+            .with_span_list(false)
+            .flatten_event(true)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_target(false)
+            .compact()
+            .init();
+    };
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Init logger and parse arguments
-    env_logger::Builder::from_env(
-        Env::default().default_filter_or("info, aws_config=warn, ethers_providers=warn"),
-    )
-    .init();
+    setup_tracing(false)?;
     let args: Cli = Cli::parse();
 
     // Build P2P transport

@@ -408,8 +408,9 @@ impl Storage for ClickhouseStorage {
 
 #[cfg(test)]
 mod tests {
-    use sqd_messages::{Query, QueryOkSummary};
+    use sqd_messages::{Query, QueryOkSummary, BitString};
     use sqd_network_transport::{Keypair, PeerId};
+    use chrono::TimeZone;
 
     use super::*;
 
@@ -510,8 +511,12 @@ mod tests {
         let ping = Heartbeat {
             version: "1.0.0".to_string(),
             stored_bytes: Some(1024),
-            assignment_id: Default::default(),
-            missing_chunks: Default::default(),
+            assignment_id: "20241008T141245_242da92f7d6c".to_string(),
+            missing_chunks: Some(BitString {
+                data: vec![1, 0, 1, 0, 1, 0],
+                size: 6,
+                ones: 3,
+            }),
         };
         let ts = timestamp_now_ms();
         storage
@@ -531,5 +536,8 @@ mod tests {
         assert_eq!(ping.stored_bytes.unwrap(), row.stored_bytes);
         assert!(row.timestamp >= ts);
         assert!(row.timestamp <= timestamp_now_ms());
+        let dt = chrono::Utc.with_ymd_and_hms(2024, 10, 8, 14, 12, 45).unwrap();
+        assert_eq!(row.assignment_timestamp, dt.timestamp_millis() as u64);
+        assert_eq!(row.missing_chunks, 3);
     }
 }

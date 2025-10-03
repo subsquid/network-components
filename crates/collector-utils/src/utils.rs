@@ -1,4 +1,4 @@
-use chrono::DateTime;
+use anyhow::anyhow;
 use std::time::UNIX_EPOCH;
 
 use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
@@ -12,16 +12,15 @@ pub fn timestamp_now_ms() -> u64 {
         .expect("Timestamp should fit in u64")
 }
 
-pub fn parse_assignment(aid: &str) -> u64 {
+pub fn parse_assignment(aid: &str) -> anyhow::Result<u64> {
     let mut split = aid.split('_');
     if let Some(tp) = split.next() {
-        chrono::NaiveDateTime::parse_from_str(tp, "%Y%m%dT%H%M%S")
-            .map_or(DateTime::from_timestamp_nanos(0), |nt| nt.and_utc())
+        Ok(chrono::NaiveDateTime::parse_from_str(tp, "%Y%m%dT%H%M%S")?
+            .and_utc()
             .timestamp_millis()
-            .try_into() // i64 -> u64
-            .unwrap_or(0)
+            .try_into()?)
     } else {
-        0
+        Err(anyhow!("no underscore in assignment_id"))
     }
 }
 
@@ -32,14 +31,13 @@ pub fn base64(data: impl AsRef<[u8]>) -> String {
 #[cfg(test)]
 mod test {
     use super::*;
-    use chrono::{TimeZone, Utc};
+    use chrono::{DateTime, TimeZone, Utc};
 
     #[test]
     fn test_parse_assignment() {
         let sample = "20241008T141245_242da92f7d6c";
 
-        let tp = parse_assignment(sample);
-        assert_ne!(tp, 0);
+        let tp = parse_assignment(sample).expect("cannot parse sample");
 
         let expected = Utc.with_ymd_and_hms(2024, 10, 8, 14, 12, 45).unwrap();
         assert_eq!(expected.timestamp_millis() as u64, tp);

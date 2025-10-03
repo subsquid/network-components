@@ -11,7 +11,7 @@ use sqd_messages::{query_error, query_executed, query_finished, Heartbeat, Query
 use sqd_network_transport::{protocol, PeerId};
 
 use crate::cli::ClickhouseArgs;
-use crate::{base64, timestamp_now_ms, parse_assignment};
+use crate::{base64, parse_assignment, timestamp_now_ms};
 
 lazy_static! {
     static ref LOGS_TABLE: String =
@@ -70,8 +70,8 @@ lazy_static! {
             worker_id String NOT NULL,
             stored_bytes UInt64 NOT NULL CODEC(Delta, ZSTD),
             version LowCardinality(TEXT) NOT NULL,
-            missing_chunks UInt64 NOT NULL CODEC(Delta, ZSTD),
-            assignment_timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD)
+            missing_chunks UInt64 NOT NULL DEFAULT 0 CODEC(Delta, ZSTD),
+            assignment_timestamp DateTime64(3) NOT NULL DEFAULT 0 CODEC(DoubleDelta, ZSTD)
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(timestamp)
@@ -277,7 +277,7 @@ impl PingRow {
             version: heartbeat.version,
             timestamp: timestamp_now_ms(),
             missing_chunks: heartbeat.missing_chunks.map_or(0, |b| b.ones),
-            assignment_timestamp: parse_assignment(&heartbeat.assignment_id),
+            assignment_timestamp: parse_assignment(&heartbeat.assignment_id).unwrap_or(0),
         })
     }
 }
@@ -408,9 +408,9 @@ impl Storage for ClickhouseStorage {
 
 #[cfg(test)]
 mod tests {
-    use sqd_messages::{Query, QueryOkSummary, BitString};
-    use sqd_network_transport::{Keypair, PeerId};
     use chrono::TimeZone;
+    use sqd_messages::{BitString, Query, QueryOkSummary};
+    use sqd_network_transport::{Keypair, PeerId};
 
     use super::*;
 
@@ -423,7 +423,7 @@ mod tests {
     //   --network=host \
     //   --ulimit nofile=262144:262144 \
     //   clickhouse/clickhouse-server
-    // And set `STORAGE_TEST` env variable to a non-empty value
+    // And set `STORAGE_TEST` env variable to a non-empty value (and recompile)
     #[test_with::env(STORAGE_TEST)]
     #[tokio::test]
     async fn test_storage() {
@@ -536,7 +536,9 @@ mod tests {
         assert_eq!(ping.stored_bytes.unwrap(), row.stored_bytes);
         assert!(row.timestamp >= ts);
         assert!(row.timestamp <= timestamp_now_ms());
-        let dt = chrono::Utc.with_ymd_and_hms(2024, 10, 8, 14, 12, 45).unwrap();
+        let dt = chrono::Utc
+            .with_ymd_and_hms(2024, 10, 8, 14, 12, 45)
+            .unwrap();
         assert_eq!(row.assignment_timestamp, dt.timestamp_millis() as u64);
         assert_eq!(row.missing_chunks, 3);
     }

@@ -11,7 +11,7 @@ use sqd_messages::{query_error, query_executed, query_finished, Heartbeat, Query
 use sqd_network_transport::{protocol, PeerId};
 
 use crate::cli::ClickhouseArgs;
-use crate::{base64, timestamp_now_ms};
+use crate::{base64, parse_assignment_id, timestamp_now_ms};
 
 lazy_static! {
     static ref LOGS_TABLE: String =
@@ -69,7 +69,9 @@ lazy_static! {
             timestamp DateTime64(3) NOT NULL CODEC(DoubleDelta, ZSTD),
             worker_id String NOT NULL,
             stored_bytes UInt64 NOT NULL CODEC(Delta, ZSTD),
-            version LowCardinality(TEXT) NOT NULL
+            version LowCardinality(TEXT) NOT NULL,
+            missing_chunks UInt64 NOT NULL DEFAULT 0 CODEC(Delta, ZSTD),
+            assignment_timestamp DateTime64(3) NOT NULL DEFAULT 0
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(timestamp)
@@ -263,6 +265,8 @@ pub struct PingRow {
     worker_id: String,
     stored_bytes: u64,
     version: String,
+    missing_chunks: u64,
+    assignment_timestamp: u64,
 }
 
 impl PingRow {
@@ -272,6 +276,8 @@ impl PingRow {
             worker_id,
             version: heartbeat.version,
             timestamp: timestamp_now_ms(),
+            missing_chunks: heartbeat.missing_chunks.map_or(0, |b| b.ones),
+            assignment_timestamp: parse_assignment_id(&heartbeat.assignment_id).unwrap_or(0),
         })
     }
 }
@@ -402,7 +408,8 @@ impl Storage for ClickhouseStorage {
 
 #[cfg(test)]
 mod tests {
-    use sqd_messages::{Query, QueryOkSummary};
+    use chrono::TimeZone;
+    use sqd_messages::{BitString, Query, QueryOkSummary};
     use sqd_network_transport::{Keypair, PeerId};
 
     use super::*;
@@ -416,7 +423,7 @@ mod tests {
     //   --network=host \
     //   --ulimit nofile=262144:262144 \
     //   clickhouse/clickhouse-server
-    // And set `STORAGE_TEST` env variable to a non-empty value
+    // And set `STORAGE_TEST` env variable to a non-empty value (and recompile)
     #[test_with::env(STORAGE_TEST)]
     #[tokio::test]
     async fn test_storage() {
@@ -504,8 +511,12 @@ mod tests {
         let ping = Heartbeat {
             version: "1.0.0".to_string(),
             stored_bytes: Some(1024),
-            assignment_id: Default::default(),
-            missing_chunks: Default::default(),
+            assignment_id: "20241008T141245_242da92f7d6c".to_string(),
+            missing_chunks: Some(BitString {
+                data: vec![1, 0, 1, 0, 1, 0],
+                size: 6,
+                ones: 3,
+            }),
         };
         let ts = timestamp_now_ms();
         storage
@@ -525,5 +536,10 @@ mod tests {
         assert_eq!(ping.stored_bytes.unwrap(), row.stored_bytes);
         assert!(row.timestamp >= ts);
         assert!(row.timestamp <= timestamp_now_ms());
+        let dt = chrono::Utc
+            .with_ymd_and_hms(2024, 10, 8, 14, 12, 45)
+            .unwrap();
+        assert_eq!(row.assignment_timestamp, dt.timestamp_millis() as u64);
+        assert_eq!(row.missing_chunks, 3);
     }
 }

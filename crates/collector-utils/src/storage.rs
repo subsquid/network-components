@@ -11,7 +11,7 @@ use sqd_messages::{query_error, query_executed, query_finished, Heartbeat, Query
 use sqd_network_transport::{protocol, PeerId};
 
 use crate::cli::ClickhouseArgs;
-use crate::{base64, parse_assignment, timestamp_now_ms};
+use crate::{base64, parse_assignment_id, timestamp_now_ms};
 
 lazy_static! {
     static ref LOGS_TABLE: String =
@@ -71,7 +71,7 @@ lazy_static! {
             stored_bytes UInt64 NOT NULL CODEC(Delta, ZSTD),
             version LowCardinality(TEXT) NOT NULL,
             missing_chunks UInt64 NOT NULL DEFAULT 0 CODEC(Delta, ZSTD),
-            assignment_timestamp DateTime64(3) NOT NULL DEFAULT 0 CODEC(DoubleDelta, ZSTD)
+            assignment_timestamp DateTime64(3) NOT NULL DEFAULT 0 CODEC(Delta, ZSTD)
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(timestamp)
@@ -277,7 +277,7 @@ impl PingRow {
             version: heartbeat.version,
             timestamp: timestamp_now_ms(),
             missing_chunks: heartbeat.missing_chunks.map_or(0, |b| b.ones),
-            assignment_timestamp: parse_assignment(&heartbeat.assignment_id).unwrap_or(0),
+            assignment_timestamp: parse_assignment_id(&heartbeat.assignment_id).unwrap_or(0),
         })
     }
 }

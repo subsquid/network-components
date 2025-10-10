@@ -12,7 +12,7 @@ pub fn timestamp_now_ms() -> u64 {
         .expect("Timestamp should fit in u64")
 }
 
-pub fn parse_assignment(aid: &str) -> anyhow::Result<u64> {
+pub fn parse_assignment_id(aid: &str) -> anyhow::Result<u64> {
     let mut split = aid.split('_');
     if let Some(tp) = split.next() {
         Ok(chrono::NaiveDateTime::parse_from_str(tp, "%Y%m%dT%H%M%S")?
@@ -34,10 +34,10 @@ mod test {
     use chrono::{DateTime, TimeZone, Utc};
 
     #[test]
-    fn test_parse_assignment() {
+    fn test_parse_assignment_id() {
         let sample = "20241008T141245_242da92f7d6c";
 
-        let tp = parse_assignment(sample).expect("cannot parse sample");
+        let tp = parse_assignment_id(sample).expect("cannot parse sample");
 
         let expected = Utc.with_ymd_and_hms(2024, 10, 8, 14, 12, 45).unwrap();
         assert_eq!(expected.timestamp_millis() as u64, tp);

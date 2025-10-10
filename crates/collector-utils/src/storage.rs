@@ -71,7 +71,7 @@ lazy_static! {
             stored_bytes UInt64 NOT NULL CODEC(Delta, ZSTD),
             version LowCardinality(TEXT) NOT NULL,
             missing_chunks UInt64 NOT NULL DEFAULT 0 CODEC(Delta, ZSTD),
-            assignment_timestamp DateTime64(3) NOT NULL DEFAULT 0 CODEC(Delta, ZSTD)
+            assignment_timestamp DateTime64(3) NOT NULL DEFAULT 0
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(timestamp)

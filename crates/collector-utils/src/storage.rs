@@ -70,7 +70,7 @@ lazy_static! {
             worker_id String NOT NULL,
             stored_bytes UInt64 NOT NULL CODEC(Delta, ZSTD),
             version LowCardinality(TEXT) NOT NULL,
-            missing_chunks UInt64 NOT NULL DEFAULT 0 CODEC(Delta, ZSTD),
+            missing_chunks UInt64 NOT NULL DEFAULT 0,
             assignment_timestamp DateTime64(3) NOT NULL DEFAULT 0
         )
         ENGINE = MergeTree
@@ -277,7 +277,8 @@ impl PingRow {
             version: heartbeat.version,
             timestamp: timestamp_now_ms(),
             missing_chunks: heartbeat.missing_chunks.map_or(0, |b| b.ones),
-            assignment_timestamp: parse_assignment_id(&heartbeat.assignment_id).unwrap_or(0),
+            assignment_timestamp: parse_assignment_id(&heartbeat.assignment_id)
+                .or(Err("cannot parse assignment_id"))?,
         })
     }
 }
@@ -507,11 +508,14 @@ mod tests {
         let last_stored = storage.get_last_stored().await.unwrap();
         assert_eq!(last_stored.get(&worker_id.to_string()), Some(&123456789500));
 
+        let assignment_id = 
+            "2025-10-12T12:00:45_C1A955A7E13FABEC64DCA7965104FA0CBF98C063A6FCB4473E243348CADFAFAE";
+
         // Check pings storing
         let ping = Heartbeat {
             version: "1.0.0".to_string(),
             stored_bytes: Some(1024),
-            assignment_id: "20241008T141245_242da92f7d6c".to_string(),
+            assignment_id: assignment_id.to_string(),
             missing_chunks: Some(BitString {
                 data: vec![1, 0, 1, 0, 1, 0],
                 size: 6,
@@ -537,9 +541,38 @@ mod tests {
         assert!(row.timestamp >= ts);
         assert!(row.timestamp <= timestamp_now_ms());
         let dt = chrono::Utc
-            .with_ymd_and_hms(2024, 10, 8, 14, 12, 45)
+            .with_ymd_and_hms(2025, 10, 12, 12, 0, 45)
             .unwrap();
         assert_eq!(row.assignment_timestamp, dt.timestamp_millis() as u64);
         assert_eq!(row.missing_chunks, 3);
+    }
+
+    #[tokio::test]
+    async fn test_storage_assignment_id_error() {
+        let worker_keypair = Keypair::from_protobuf_encoding(&[
+            8, 1, 18, 64, 212, 50, 184, 182, 239, 153, 10, 166, 254, 122, 105, 16, 51, 223, 126,
+            105, 10, 134, 204, 224, 42, 135, 92, 76, 32, 60, 197, 56, 128, 22, 131, 84, 233, 166,
+            242, 11, 16, 14, 160, 254, 4, 185, 170, 32, 157, 3, 144, 53, 230, 39, 150, 221, 142, 2,
+            37, 101, 100, 63, 24, 116, 110, 6, 156, 78,
+        ])
+        .unwrap();
+
+        let worker_id = PeerId::from_public_key(&worker_keypair.public());
+
+        let assignment_id = "20251012T12:00:45_blablabla";
+        let ping = Heartbeat {
+            version: "1.0.0".to_string(),
+            stored_bytes: Some(1024),
+            assignment_id: assignment_id.to_string(),
+            missing_chunks: Some(BitString {
+                data: vec![1, 0, 1, 0, 1, 0],
+                size: 6,
+                ones: 3,
+            }),
+        };
+
+        let res = PingRow::new(ping.clone(), worker_id.to_string());
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), "cannot parse assignment_id");
     }
 }

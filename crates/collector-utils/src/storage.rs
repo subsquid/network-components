@@ -547,7 +547,6 @@ mod tests {
         assert_eq!(row.missing_chunks, 3);
     }
 
-
     #[tokio::test]
     async fn test_storage_assignment_id_error() {
         let worker_keypair = Keypair::from_protobuf_encoding(&[

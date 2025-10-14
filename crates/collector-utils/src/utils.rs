@@ -39,7 +39,7 @@ mod test {
         let hash = "C1A955A7E13FABEC64DCA7965104FA0CBF98C063A6FCB4473E243348CADFAFAE";
         let sample = format!("2025-10-12T12:00:45_{hash}");
 
-        let tp = parse_assignment_id(sample).expect("cannot parse sample");
+        let tp = parse_assignment_id(&sample).expect("cannot parse sample");
 
         let expected = Utc.with_ymd_and_hms(2025, 10, 12, 12, 0, 45).unwrap();
         assert_eq!(expected.timestamp_millis() as u64, tp);

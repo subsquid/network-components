@@ -17,7 +17,8 @@ QUERY_TIMEOUT_SEC = int(os.environ.get('QUERY_TIMEOUT_SEC', 20))
 MIN_INTERVAL_SEC = float(os.environ.get('MIN_INTERVAL_SEC', 60))
 MAX_BLOCK_RANGE = int(os.environ.get('MAX_BLOCK_RANGE', 1_000_000))
 
-PORTAL_URL = os.environ.get('PORTAL_URL', "https://portal.sqd.dev")
+PORTAL_URL = os.environ.get('PORTAL_URL', "https://portal.sqd.dev/datasets/solana-mainnet")
+# PORTAL_URL = os.environ.get('PORTAL_URL', "http://localhost:3001")
 
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
 
@@ -88,6 +89,44 @@ class TrafficGenerator:
                 print("Shutting down")
                 self._executor.shutdown(wait=False, cancel_futures=True)
                 break
+
+    def stream(self):
+        dataset = "solana-mainnet"
+        query = self._query_templates["solana"][0]
+        query_url = f'{PORTAL_URL}/stream'
+
+        # next_block = 374700000 # checked from
+        next_block = 374864743
+        try:
+            while True:
+                query['fromBlock'] = next_block
+
+                logging.debug(f"Querying from {next_block}")
+                response = None
+                try:
+                    response = requests.post(query_url, json=query, stream=True, timeout=QUERY_TIMEOUT_SEC)  # stream=True to discard response body
+                    response.raise_for_status()
+                except Exception as e:
+                    logging.info(f"Query failed: {e}")
+                    time.sleep(1)
+                    continue
+
+                last_block = ""
+                for line in response.iter_lines():
+                    block = json.loads(line)
+                    number = block["header"]["number"]
+                    try:
+                        instructions = len(block["instructions"])
+                        transactions = len(block["transactions"])
+                        balances = len(block["balances"])
+                        # print(f"Block {number}:\tinstructions={instructions},\ttransactions={transactions},\tbalances={balances}")
+                        last_block = number
+                    except KeyError:
+                        logging.warning(f"Malformed block: {number}")
+
+                next_block = int(last_block) + 1
+        except:
+            print("Last block:", next_block)
 
     def _query_workers(self):
         workers = self._get_workers()
@@ -202,7 +241,9 @@ def main(config_path: str = 'config.json'):
         logging.error(f"Error reading config: {e}")
         exit(1)
 
-    TrafficGenerator(config).run()
+    traffic_generator = TrafficGenerator(config)
+    traffic_generator.stream()
+    # traffic_generator.run()
 
 
 if __name__ == '__main__':

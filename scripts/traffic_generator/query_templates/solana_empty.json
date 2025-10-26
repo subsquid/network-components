@@ -1,0 +1,10 @@
+{
+    "type": "solana",
+    "fromBlock": 358600000,
+    "fields": {
+        "block": {
+            "number": true
+        }
+    }
+}
+

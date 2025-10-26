@@ -1,0 +1,75 @@
+{
+    "type": "solana",
+    "fields": {
+        "balance": {
+            "pre": true,
+            "post": true
+        },
+        "log": {
+            "programId": true,
+            "instructionAddress": true,
+            "kind": true,
+            "message": true
+        },
+        "tokenBalance": {
+            "preDecimals": true,
+            "postDecimals": true,
+            "postMint": true,
+            "postAmount": true,
+            "preAmount": true,
+            "preOwner": true,
+            "preMint": true,
+            "postOwner": true
+        },
+        "instruction": {
+            "accounts": true,
+            "isCommitted": true,
+            "programId": true,
+            "data": true
+        },
+        "reward": {
+            "lamports": true,
+            "rewardType": true,
+            "postBalance": true,
+            "commission": true
+        },
+        "transaction": {
+            "signatures": true,
+            "err": true,
+            "version": true,
+            "accountKeys": true,
+            "addressTableLookups": true,
+            "loadedAddresses": true,
+            "feePayer": true
+        },
+        "block": {
+            "parentHash": true,
+            "parentNumber": true,
+            "number": true,
+            "height": true,
+            "timestamp": true
+        }
+    },
+    "instructions": [
+    {
+      "d8": [
+        "0xf8c69e91e17587c8",
+        "0xb59d59438fb63448",
+        "0x1c8cee63e7a21595",
+        "0x0703967f94283dc8",
+        "0x2905eeaf64e106cd",
+        "0x5e9b6797465fdca5",
+        "0xa1c26754ab47fa9a",
+        "0x5055d14818ceb16c",
+        "0x0a333d2370691855",
+        "0x1a526698f04a691a",
+        "0x2d9aedd2dd0fa65c"
+      ],
+      "isCommitted": true,
+      "programId": [
+        "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwx1"
+      ]
+    }
+  ],
+    "fromBlock": 323061424
+}

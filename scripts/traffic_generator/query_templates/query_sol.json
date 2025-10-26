@@ -1,0 +1,88 @@
+{
+    "type": "solana",
+    "fromBlock": 358600000,
+    "fields": {
+        "block": {
+            "number": true,
+            "timestamp": true,
+            "hash": true,
+            "parentHash": true,
+            "height": true,
+            "parentNumber": true
+        },
+        "transaction": {
+            "signatures": true,
+            "err": true,
+            "transactionIndex": true,
+            "accountKeys": true,
+            "hasDroppedLogMessages": true,
+            "addressTableLookups": true,
+            "computeUnitsConsumed": true,
+            "fee": true,
+            "loadedAddresses": true,
+            "numReadonlySignedAccounts": true,
+            "numReadonlyUnsignedAccounts": true,
+            "numRequiredSignatures": true,
+            "recentBlockhash": true,
+            "version": true
+        },
+        "instruction": {
+            "programId": true,
+            "accounts": true,
+            "data": true,
+            "isCommitted": true,
+            "transactionIndex": true,
+            "instructionAddress": true,
+            "computeUnitsConsumed": true,
+            "error": true,
+            "hasDroppedLogMessages": true
+        },
+        "balance": {
+            "account": true,
+            "post": true,
+            "pre": true,
+            "transactionIndex": true
+        },
+        "log": {
+            "instructionAddress": true,
+            "kind": true,
+            "logIndex": true,
+            "message": true,
+            "programId": true,
+            "transactionIndex": true
+        },
+        "reward": {
+            "commission": true,
+            "lamports": true,
+            "pubkey": true,
+            "rewardType": true,
+            "postBalance": true
+        },
+        "tokenBalance": {
+            "account": true,
+            "postAmount": true,
+            "postDecimals": true,
+            "postMint": true,
+            "postOwner": true,
+            "postProgramId": true,
+            "preAmount": true,
+            "preDecimals": true,
+            "preMint": true,
+            "preOwner": true,
+            "preProgramId": true,
+            "transactionIndex": true
+        }
+    },
+    "instructions": [
+        {
+            "programId": ["whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"],
+            "d8": ["0xf8c69e91e17587c8"],
+            "isCommitted": true,
+            "innerInstructions": true,
+            "logs": true,
+            "transaction": true,
+            "transactionBalances": true,
+            "transactionTokenBalances": true
+        }
+    ]
+}

@@ -1,0 +1,83 @@
+{
+  "type": "solana",
+  "fields": {
+    "block": {
+      "number": true,
+      "hash": true,
+      "timestamp": true
+    },
+    "transaction": {
+      "transactionIndex": true,
+      "signatures": true,
+      "accountKeys": true,
+      "loadedAddresses": true
+    },
+    "instruction": {
+      "transactionIndex": true,
+      "data": true,
+      "instructionAddress": true,
+      "programId": true,
+      "accounts": true
+    },
+    "tokenBalance": {
+      "transactionIndex": true,
+      "account": true,
+      "preMint": true,
+      "postMint": true,
+      "preAmount": true,
+      "postAmount": true,
+      "preDecimals": true,
+      "postDecimals": true
+    },
+    "log": {
+      "transactionIndex": true,
+      "instructionAddress": true,
+      "message": true,
+      "logIndex": true
+    }
+  },
+  "instructions": [
+    {
+      "programId": [
+        "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc"
+      ],
+      "d8": [
+        "0xf8c69e91e17587c8"
+      ],
+      "isCommitted": true,
+      "innerInstructions": true,
+      "transaction": true,
+      "transactionTokenBalances": true,
+      "logs": true
+    },
+    {
+      "programId": [
+        "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK"
+      ],
+      "d8": [
+        "0xf8c69e91e17587c8",
+        "0x2b04ed0b1ac91e62",
+        "0x457d73daf5baf2c4"
+      ],
+      "isCommitted": true,
+      "innerInstructions": true,
+      "transaction": true,
+      "transactionTokenBalances": true,
+      "logs": true
+    },
+    {
+      "programId": [
+        "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C"
+      ],
+      "d1": [
+        "0x8fbe5adac41e33de",
+        "0x37d96256a34ab4ad"
+      ],
+      "isCommitted": true,
+      "innerInstructions": true,
+      "transaction": true,
+      "transactionTokenBalances": true,
+      "logs": true
+    }
+  ]
+}

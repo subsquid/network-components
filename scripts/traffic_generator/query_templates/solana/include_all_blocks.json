@@ -1,0 +1,15 @@
+{
+  "type": "solana",
+  "fromBlock": 86800000,
+  "fields": {
+    "block": {
+      "timestamp": true,
+      "hash": true,
+      "parentHash": true,
+      "height": true,
+      "number": true,
+      "parentNumber": true
+    }
+  },
+  "includeAllBlocks": true
+}

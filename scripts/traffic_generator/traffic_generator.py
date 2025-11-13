@@ -125,9 +125,7 @@ class TrafficGenerator:
             if len(vals) > 0:
                 logging.info(f"{min(vals)} - {max(vals)}")
 
-        # return
         fn = self._query_stream if USE_STREAM_API else self._query_worker
-        #samples = samples if USE_STREAM_API else workers.keys()
         states = list(map(lambda x: workers.get(x), samples)) if USE_STREAM_API else workers.values()
         results = Counter()
         try:
@@ -192,7 +190,6 @@ class TrafficGenerator:
             f"from={query['fromBlock']} to={query['toBlock']}")
         try:
           response = requests.post(query_url, json=query, stream=True, timeout=QUERY_TIMEOUT_SEC)  # stream=True to discard response body
-          logging.info(f"{response.headers}")
         except:
             logging.info(f"Query timed out. worker_id={worker_id}")
             return 499, dataset_id, block_start

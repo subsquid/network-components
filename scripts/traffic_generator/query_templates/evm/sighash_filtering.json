@@ -16,6 +16,7 @@
     ],
     "fields": {
         "block": {
+            "number": true,
             "timestamp": true
         },
         "transaction": {

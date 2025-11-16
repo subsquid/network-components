@@ -13,12 +13,15 @@ from concurrent import futures
 from pathlib import Path
 from pydantic import BaseModel, AnyUrl, TypeAdapter, ValidationError, UrlConstraints
 from typing import List, Dict, Annotated, Tuple, Any, Optional, NewType
+from tqdm import tqdm
 
 NUM_THREADS = int(os.environ.get('NUM_THREADS', 10))
+NUM_QUERIES = int(os.environ.get('NUM_QUERIES', 10))
+NUM_CHUNKS_PER_QUERY = int(os.environ.get('NUM_CHUNKS_PER_QUERY', 100))
 QUERY_TIMEOUT_SEC = int(os.environ.get('QUERY_TIMEOUT_SEC', 20))
 MIN_INTERVAL_SEC = float(os.environ.get('MIN_INTERVAL_SEC', 60))
 MAX_BLOCK_RANGE = int(os.environ.get('MAX_BLOCK_RANGE', 1_000_000))
-USE_STREAM_API = bool(os.getenv('USE_STREAM_API', False))
+ADD_SLOW_TEMPLATES = bool(os.environ.get('ADD_SLOW_TEMPLATES', False))
 
 PORTAL_URL = os.environ.get('PORTAL_URL', "https://portal.sqd.dev")
 
@@ -52,6 +55,9 @@ class BlockRange(BaseModel):
     begin: int
     end: int
 
+    def __hash__(self):
+        return self.begin
+
 
 class DatasetRanges(BaseModel):
     ranges: List[BlockRange]
@@ -76,7 +82,6 @@ class TrafficGenerator:
         self._config = config
         self._executor = futures.ThreadPoolExecutor(max_workers=NUM_THREADS)
         self._query_templates: Dict[str, List[Any]] = read_templates()
-        self._worker_timeouts: Counter[WorkerId] = Counter()
 
     def run(self):
         logging.info("Starting traffic generation")
@@ -87,6 +92,7 @@ class TrafficGenerator:
                 self._query_workers(worker_p)
                 time_to_wait = MIN_INTERVAL_SEC - (time.time() - start)
                 if time_to_wait > 0:
+                    #pass
                     time.sleep(time_to_wait)
             except KeyboardInterrupt:
                 print("Shutting down")
@@ -94,75 +100,50 @@ class TrafficGenerator:
                 break
 
     def _query_workers(self, worker_p):
-        workers = self._get_workers()
-        if not workers:
-            logging.info("No workers to query")
+        datasets = self._get_datasets()
+        if not datasets:
+            logging.info("No datasets to query")
             return
 
-        logging.info(f"Querying {len(workers)} workers")
-
-        samples = workers.keys()
-        if USE_STREAM_API:
-            dataset_to_workers = {}
-            dataset_and_range_to_workers = {}
-            for peer_id in workers.keys():
-                state = workers[peer_id]
-                for dataset in state.keys():
-                    dataset_to_workers.setdefault(dataset, []).append(peer_id)
-                    for r in state[dataset]:
-                        key = r.begin
-                        dataset_and_range_to_workers.setdefault(dataset, {}).setdefault(key, []).append(peer_id)
-            f = np.array(list(map(lambda x: worker_p.get(x, 1), workers.keys())))
-            if min(f) > 200:
-                for key in worker_p.keys():
-                    worker_p[key] -= 100
-            f = f - min(f) + 1
-            p = 1 / f
-            p = p / sum(p)
-            rng = np.random.default_rng()
-            samples = rng.choice(list(workers.keys()), size=len(workers.keys()), p=p)
-            vals = list(worker_p.values())
-            if len(vals) > 0:
-                logging.info(f"{min(vals)} - {max(vals)}")
-
-        fn = self._query_stream if USE_STREAM_API else self._query_worker
-        states = list(map(lambda x: workers.get(x), samples)) if USE_STREAM_API else workers.values()
+        fn = lambda x: self._query_stream(datasets, x)
+        samples = range(NUM_QUERIES)
         results = Counter()
         try:
-            tasks = self._executor.map(fn, samples, states)
-            for worker_id, task in zip(workers.keys(), tasks):
+            tasks = self._executor.map(fn, samples)
+            for worker_id, task in zip(samples, tasks):
                 res, dataset_id, block_begin = task
-                if res == 504:
-                    self._worker_timeouts[worker_id] += 1
-                if USE_STREAM_API:
-                    for sibling_id in dataset_and_range_to_workers[dataset_id][block_begin]:
-                        worker_p[sibling_id] = worker_p.get(sibling_id, 0) + 1 / len(dataset_and_range_to_workers[dataset_id][block_begin])
                 results[res] += 1
         except futures.TimeoutError:
             logging.error("Querying workers timed out")
         logging.info(f"All queries finished. Results: {results}")
 
-        logging.debug("Total timeouts per worker:")
-        for w, c in self._worker_timeouts.items():
-            logging.debug(f"{w}: {c}")
-
-    def _get_workers(self) -> WorkersDict:
+    def _pull_dataset(self, dataset) -> List[DatasetRanges]:
+        dataset_name = dataset.name
+        dataset_ranges = []
         try:
-            logging.info("Getting active workers")
-            workers: WorkersDict = {}
-            for dataset in self._config.datasets:
-                response = requests.get(f'{PORTAL_URL}/datasets/{dataset.name}/state')
-                if response.ok:
-                    dataset_state = DatasetState.model_validate_json(response.content)
-                    for worker_id, ranges in dataset_state.worker_ranges.items():
-                        if ranges.ranges:
-                            workers.setdefault(worker_id, {})[dataset.id] = ranges.ranges
-                else:
-                    logging.warning(f"Couldn't get chunks of {dataset.name}, skipping")
-            return self._filter_workers(workers)
+            response = requests.get(f'{PORTAL_URL}/datasets/{dataset_name}/state')
+            if response.ok:
+                dataset_state = DatasetState.model_validate_json(response.content)
+                for worker_id, ranges in dataset_state.worker_ranges.items():
+                    if ranges.ranges:
+                        dataset_ranges.extend(ranges.ranges)
+            else:
+                logging.warning(f"Couldn't get chunks of {dataset_name}, skipping")
         except (requests.HTTPError, ValidationError) as e:
-            logging.error(f"Error getting workers: {e}")
-            return {}
+            logging.error(f"Error getting datasets: {e}")
+        return sorted(set(dataset_ranges), key = lambda x: x.begin)
+
+    def _get_datasets(self) -> WorkersDict:
+        datasets = {}
+        try:
+            results = self._executor.map(self._pull_dataset, self._config.datasets)
+            for dataset, ranges in zip(self._config.datasets, results):
+                if len(ranges) == 0:
+                    continue
+                datasets[dataset.id] = ranges
+        except futures.TimeoutError:
+            logging.error("Querying datasets timed out")
+        return datasets
 
     def _filter_workers(self, workers: WorkersDict) -> WorkersDict:
         if self._config.worker_whitelist is not None:
@@ -171,10 +152,29 @@ class TrafficGenerator:
             workers = {w: s for w, s in workers.items() if w not in self._config.worker_blacklist}
         return workers
 
-    def _query_stream(self, worker_id: WorkerId, state: WorkerState) -> Optional[Tuple[int, str, int]]:
+    def _do_request(self, query_url, query) -> Tuple[int, int, int]:
+        logging.debug(
+            f"Sending stream query_url={query_url}"
+            f"from={query['fromBlock']} to={query['toBlock']}")
+        try:
+            response = requests.post(query_url, json=query, stream=True, timeout=QUERY_TIMEOUT_SEC)
+            cnt = 0
+            number = -1
+            if response.ok:
+                for line in response.iter_lines():
+                    if len(line) == 0:
+                        continue
+                    cnt += 1
+                    number = json.loads(line).get("header", {}).get("number", -1)
+            return response.status_code, cnt, number
+        except:
+            logging.info(f"Query timed out. query_url={query_url}")
+            return 499, 0, -1
+
+    def _query_stream(self, datasets, x) -> Optional[Tuple[int, str, int]]:
         stored_datasets = [
             (dataset.template_dir, dataset.id, dataset.name) for dataset in self._config.datasets
-            if dataset.id in state
+            if dataset.id in datasets.keys()
         ]
         if not stored_datasets:
             logging.warning(f"Worker {worker_id} has no datasets to query")
@@ -183,64 +183,33 @@ class TrafficGenerator:
         template, dataset_id, dataset_name = random.choice(stored_datasets)
         query_url = f'{PORTAL_URL}/datasets/{dataset_name}/finalized-stream'
         query = random.choice(self._query_templates[template])
-        query['fromBlock'], query['toBlock'], block_start = random_range(state[dataset_id])
+        query_id = self._query_templates[template].index(query)
+        query['fromBlock'], query['toBlock'], block_start = random_range(datasets[dataset_id], chunks = NUM_CHUNKS_PER_QUERY)
 
         logging.debug(
-            f"Sending stream for worker_id={worker_id} query_url={query_url} "
+            f"Sending stream query_url={query_url}"
             f"from={query['fromBlock']} to={query['toBlock']}")
-        try:
-          response = requests.post(query_url, json=query, stream=True, timeout=QUERY_TIMEOUT_SEC)  # stream=True to discard response body
-        except:
-            logging.info(f"Query timed out. worker_id={worker_id}")
-            return 499, dataset_id, block_start
+        for attempt in range(10):
+            code, ret_count, last_block = self._do_request(query_url, query)
+            logging.debug(f"attempt = {attempt} code = {code} last = {last_block}")
+            if ret_count == 0:
+                break
+            if last_block == query['toBlock']:
+                break
+            if last_block == -1:
+                break
+            query['fromBlock'] = last_block + 1
 
+        logging.info(f"from={query['fromBlock']} to={query['toBlock']} ret={ret_count} last_block={last_block}")
+        return code, dataset_id, block_start
 
-        if response.status_code != 200:
-            logging.info(
-                f"Query failed. worker_id={worker_id} status={response.status_code} "
-                f"msg='{response.text}' elapsed={response.elapsed}")
-        else:
-            logging.info(f"Query succeeded. worker_id={worker_id} elapsed={response.elapsed}")
-        return response.status_code, dataset_id, block_start
-
-    def _query_worker(self, worker_id: WorkerId, state: WorkerState) -> Optional[Tuple[int, str, int]]:
-        stored_datasets = [
-            (dataset.template_dir, dataset.id, dataset.name) for dataset in self._config.datasets
-            if dataset.id in state
-        ]
-        if not stored_datasets:
-            logging.warning(f"Worker {worker_id} has no datasets to query")
-            return None
-
-        template, dataset_id, dataset_name = random.choice(stored_datasets)
-        query_url = f'{PORTAL_URL}/datasets/{dataset_id}/query/{worker_id}'
-        query = random.choice(self._query_templates[template])
-        query['fromBlock'], query['toBlock'], block_start = random_range(state[dataset_id])
-
-        logging.debug(
-            f"Sending query worker_id={worker_id} query_url={query_url} "
-            f"from={query['fromBlock']} to={query['toBlock']}")
-        try:
-          response = requests.post(query_url, json=query, stream=True, timeout=QUERY_TIMEOUT_SEC)  # stream=True to discard response body
-        except:
-            logging.info(f"Query timed out. worker_id={worker_id}")
-            return 499, dataset_name, block_start
-
-
-        if response.status_code != 200:
-            logging.info(
-                f"Query failed. worker_id={worker_id} status={response.status_code} "
-                f"msg='{response.text}' elapsed={response.elapsed}")
-        else:
-            logging.info(f"Query succeeded. worker_id={worker_id} elapsed={response.elapsed}")
-        return response.status_code, dataset_name, block_start
-
-
-def random_range(ranges: List[BlockRange]) -> Tuple[int, int]:
-    r = random.choice(ranges)
-    from_block = random.randint(r.begin, r.end)
-    to_block = min(random.randint(from_block, r.end), from_block + MAX_BLOCK_RANGE)
-    return from_block, to_block, r.begin
+def random_range(ranges: List[BlockRange], chunks: int) -> Tuple[int, int]:
+    first_chunk_idx = random.randint(0, len(ranges) - chunks - 1)
+    first_chunk = ranges[first_chunk_idx]
+    last_chunk = ranges[first_chunk_idx + chunks]
+    from_block = random.randint(first_chunk.begin, first_chunk.end)
+    to_block = random.randint(last_chunk.begin, last_chunk.end)
+    return from_block, to_block, first_chunk.begin
 
 
 def read_templates() -> Dict[str, List[Any]]:
@@ -249,6 +218,8 @@ def read_templates() -> Dict[str, List[Any]]:
         templates_dir = TEMPLATES_DIR / dataset
         templates = []
         for template in templates_dir.glob('**/*.json'):
+            if str(template).find("slow") > -1 or ADD_SLOW_TEMPLATES:
+                continue
             logging.info(f"Loading template {template}")
             try:
                 templates.append(json.loads(template.read_text()))

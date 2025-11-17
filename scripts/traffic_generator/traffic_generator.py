@@ -191,6 +191,10 @@ class TrafficGenerator:
         for attempt in range(10):
             code, ret_count, last_block = self._do_request(query_url, query)
             logging.debug(f"attempt = {attempt} code = {code} last = {last_block}")
+            if code == 204:
+                break
+            if code == 499:
+                break
             if ret_count == 0:
                 break
             if last_block == query['toBlock']:
@@ -217,7 +221,7 @@ def read_templates() -> Dict[str, List[Any]]:
         templates_dir = TEMPLATES_DIR / dataset
         templates = []
         for template in templates_dir.glob('**/*.json'):
-            if str(template).find("slow") > -1 or ADD_SLOW_TEMPLATES:
+            if str(template).find("slow") > -1 and not ADD_SLOW_TEMPLATES:
                 continue
             logging.info(f"Loading template {template}")
             try:

@@ -13,7 +13,6 @@ from concurrent import futures
 from pathlib import Path
 from pydantic import BaseModel, AnyUrl, TypeAdapter, ValidationError, UrlConstraints
 from typing import List, Dict, Annotated, Tuple, Any, Optional, NewType
-from tqdm import tqdm
 
 NUM_THREADS = int(os.environ.get('NUM_THREADS', 10))
 NUM_QUERIES = int(os.environ.get('NUM_QUERIES', 10))

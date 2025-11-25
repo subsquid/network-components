@@ -486,6 +486,7 @@ mod tests {
             chunk_id: "0000000000/0000808640-0000816499-b0486318".to_string(),
             timestamp_ms: 123456789000,
             signature: vec![],
+            compression: 0,
         };
         query.sign(&client_keypair, worker_id).unwrap();
 

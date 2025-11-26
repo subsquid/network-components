@@ -91,7 +91,6 @@ class TrafficGenerator:
                 self._query_workers(worker_p)
                 time_to_wait = MIN_INTERVAL_SEC - (time.time() - start)
                 if time_to_wait > 0:
-                    #pass
                     time.sleep(time_to_wait)
             except KeyboardInterrupt:
                 print("Shutting down")
@@ -104,7 +103,7 @@ class TrafficGenerator:
             logging.info("No datasets to query")
             return
 
-        fn = lambda x: self._query_stream(datasets, x)
+        fn = lambda x: self._query_stream(datasets)
         samples = range(NUM_QUERIES)
         results = Counter()
         try:
@@ -166,11 +165,11 @@ class TrafficGenerator:
                     cnt += 1
                     number = json.loads(line).get("header", {}).get("number", -1)
             return response.status_code, cnt, number
-        except:
-            logging.info(f"Query timed out. query_url={query_url}")
+        except Exception as e:
+            logging.info(f"Error while executing query. query_url={query_url} e={e}")
             return 499, 0, -1
 
-    def _query_stream(self, datasets, x) -> Optional[Tuple[int, str, int]]:
+    def _query_stream(self, datasets) -> Optional[Tuple[int, str, int]]:
         stored_datasets = [
             (dataset.template_dir, dataset.id, dataset.name) for dataset in self._config.datasets
             if dataset.id in datasets.keys()
@@ -181,7 +180,7 @@ class TrafficGenerator:
 
         template, dataset_id, dataset_name = random.choice(stored_datasets)
         query_url = f'{PORTAL_URL}/datasets/{dataset_name}/finalized-stream'
-        query = random.choice(self._query_templates[template])
+        query = random.choice(self._query_templates[template]).copy()
         query_id = self._query_templates[template].index(query)
         query['fromBlock'], query['toBlock'], block_start = random_range(datasets[dataset_id], chunks = NUM_CHUNKS_PER_QUERY)
 
@@ -207,11 +206,12 @@ class TrafficGenerator:
         return code, dataset_id, block_start
 
 def random_range(ranges: List[BlockRange], chunks: int) -> Tuple[int, int]:
-    first_chunk_idx = random.randint(0, len(ranges) - chunks - 1)
+    rng = np.random.default_rng()
+    first_chunk_idx = rng.integers(0, len(ranges) - chunks - 1, dtype=int)
     first_chunk = ranges[first_chunk_idx]
-    last_chunk = ranges[first_chunk_idx + chunks]
-    from_block = random.randint(first_chunk.begin, first_chunk.end)
-    to_block = random.randint(last_chunk.begin, last_chunk.end)
+    last_chunk = ranges[first_chunk_idx + chunks + 1]
+    from_block = rng.integers(first_chunk.begin, first_chunk.end, dtype=int)
+    to_block = rng.integers(last_chunk.begin, last_chunk.end, dtype=int)
     return from_block, to_block, first_chunk.begin
 
 

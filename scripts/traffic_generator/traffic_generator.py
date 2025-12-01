@@ -142,7 +142,7 @@ class TrafficGenerator:
         ]
 
         template, dataset_id, dataset_name = random.choice(stored_datasets)
-        query_url = f'{PORTAL_URL}/datasets/{dataset_name}/finalized-stream?max_chunks={NUM_CHUNKS_PER_QUERY}'
+        query_url = f'{PORTAL_URL}/datasets/{dataset_name}/archival-stream?max_chunks={NUM_CHUNKS_PER_QUERY}'
         query = random.choice(self._query_templates[template]).copy()
         query_id = self._query_templates[template].index(query)
         del query['toBlock']

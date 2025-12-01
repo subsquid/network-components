@@ -11,6 +11,9 @@
         }
     ],
     "fields": {
+        "block" : {
+            "number": true
+        },
         "transaction": {
             "from": true,
             "to": true,

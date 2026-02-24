@@ -35,8 +35,12 @@ lazy_static! {
             chunk_id String NOT NULL DEFAULT '',
             query String NOT NULL,
             query_hash String NOT NULL,
+            parsing_time UInt32,
             exec_time UInt32 NOT NULL DEFAULT 0,
             exec_time_ms UInt32 NOT NULL,
+            serialization_time UInt32,
+            compression_time UInt32,
+            signing_time UInt32,
             result Enum8(
                 'ok' = 1,
                 'bad_request' = 2,
@@ -146,8 +150,12 @@ pub struct QueryExecutedRow {
     query: String,
     #[serde(with = "serde_bytes")]
     query_hash: Vec<u8>,
+    parsing_time: Option<u32>,
     exec_time: u32,
     exec_time_ms: u32,
+    serialization_time: Option<u32>,
+    compression_time: Option<u32>,
+    signing_time: Option<u32>,
     result: QueryResult,
     num_read_chunks: u32,
     output_size: u32,
@@ -230,7 +238,7 @@ impl QueryExecutedRow {
             }
         }
 
-        Ok(Self {
+        let mut row = Ok(Self {
             client_id: query_executed.client_id,
             worker_id: worker_id.to_string(),
             query_id: query.query_id,
@@ -242,8 +250,12 @@ impl QueryExecutedRow {
             chunk_id: query.chunk_id,
             query_hash: sha3_256(query.query.as_bytes()).to_vec(),
             query: query.query,
+            parsing_time: None,
             exec_time: query_executed.exec_time_micros,
             exec_time_ms: query_executed.exec_time_micros / 1000,
+            serialization_time: None,
+            compression_time: None,
+            signing_time: None,
             result: query_result,
             num_read_chunks,
             output_size,
@@ -255,7 +267,20 @@ impl QueryExecutedRow {
             worker_timestamp: query_executed.timestamp_ms,
             collector_timestamp,
             worker_version: query_executed.worker_version,
-        })
+        });
+
+        if let Some(report) = query_executed.exec_time_report {
+            let _ = row.as_mut().map(|row| {
+                row.parsing_time = Some(report.parsing_time_micros);
+                row.exec_time = report.execution_time_micros;
+                row.exec_time_ms = report.execution_time_micros / 1000;
+                row.serialization_time = Some(report.serialization_time_micros);
+                row.compression_time = Some(report.compression_time_micros);
+                row.signing_time = Some(report.signing_time_micros);
+            });
+        }
+
+        row
     }
 }
 
@@ -493,6 +518,7 @@ mod tests {
             client_id: client_id.to_string(),
             query: Some(query),
             exec_time_micros: 2137000,
+            exec_time_report: None,
             timestamp_ms: 123456789500,
             result: Some(query_executed::Result::Ok(QueryOkSummary {
                 uncompressed_data_size: 666,

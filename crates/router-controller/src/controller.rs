@@ -309,10 +309,21 @@ impl Controller {
 
         let managed_workers: Vec<_> = workers.iter().filter(|w| w.is_managed).cloned().collect();
         if managed_workers.len() < self.managed_workers.len() {
+            let available_ids: HashSet<&WorkerId> = managed_workers.iter().map(|w| &w.id).collect();
+            let unavailable: Vec<String> = self.managed_workers.iter()
+                .filter(|id| !available_ids.contains(id))
+                .map(|id| {
+                    workers.iter()
+                        .find(|w| &w.id == id)
+                        .map(|w| w.info.get().url.clone())
+                        .unwrap_or_else(|| id.clone())
+                })
+                .collect();
             log::warn!(
-                "{} out of {} workers available. Skipping scheduling",
+                "{} out of {} workers available. Skipping scheduling. Unavailable workers: {:?}",
                 managed_workers.len(),
-                self.managed_workers.len()
+                self.managed_workers.len(),
+                unavailable
             );
             self.workers.set(Arc::new(workers));
             return;

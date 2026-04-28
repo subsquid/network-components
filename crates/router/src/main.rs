@@ -8,6 +8,7 @@ use std::time::Duration;
 use storage::{S3Storage, Storage};
 use url::Url;
 
+mod auth;
 mod cli;
 mod logger;
 mod metrics;
@@ -39,7 +40,19 @@ async fn main() {
     let scheduling_interval = Duration::from_secs(args.scheduling_interval);
     scheduler::start(controller.clone(), args.dataset, scheduling_interval);
 
-    Server::new(controller).run().await;
+    let api_client = match args.network_api_url {
+        Some(url) => auth::NetworkApiClient::new(url),
+        None => auth::NetworkApiClient::disabled(),
+    };
+    let auth_state = auth::AuthState::new(
+        api_client,
+        args.disable_v2_auth,
+        args.enforce_v2_auth_for_ips.0,
+        args.trusted_ips.0,
+        args.internal_allowlist.0,
+    );
+
+    Server::new(controller).run(auth_state).await;
 }
 
 async fn create_storage(dataset: &str) -> Arc<dyn Storage + Sync + Send> {

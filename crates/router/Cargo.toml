@@ -11,7 +11,7 @@ aws-config = "0.51.0"
 axum = "0.5.17"
 axum-macros = "0.2.3"
 async-trait = "0.1.74"
-clap = { version = "4.0.18", features = ["derive"] }
+clap = { version = "4.0.18", features = ["derive", "env"] }
 tokio = { version = "1.21.2", features = ["full"] }
 url = "2.3.1"
 tracing = "0.1"
@@ -19,5 +19,17 @@ tracing-subscriber = { version = "0.3.0", features = ["env-filter", "json"] }
 libc = "0.2"
 lazy_static = "1.4.0"
 prometheus = { version = "0.13.3", features = ["process"] }
+moka = { version = "0.12", features = ["sync"] }
+dashmap = "5"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ipnet = "2"
 
 router-controller = { version = "0.1", path = "../router-controller" }
+
+[dev-dependencies]
+wiremock = "0.5"
+tower = { version = "0.4", features = ["util"] }
+tracing-test = "0.2"
+hyper = "0.14"

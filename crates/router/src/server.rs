@@ -42,14 +42,19 @@ async fn get_worker(
     Extension(controller): Extension<Arc<Controller>>,
 ) -> Response {
     match controller.get_worker(&dataset, start_block) {
-        Ok(Some(url)) => url.into_response(),
+        Ok(Some(url)) => {
+            crate::metrics::WORKER_URLS_HANDED_TOTAL
+                .with_label_values(&[dataset.as_str()])
+                .inc();
+            url.into_response()
+        }
         Ok(None) => {
             let status = StatusCode::SERVICE_UNAVAILABLE;
             let msg = format!("not ready to serve block {} of dataset {}", start_block, dataset);
             NETWORK_ERRORS.with_label_values(&[&dataset, "get_worker", status.as_str()]).inc();
             (status, msg).into_response()
         },
-        Err(err) => (StatusCode::NOT_FOUND, err).into_response()
+        Err(err) => (StatusCode::NOT_FOUND, err).into_response(),
     }
 }
 
@@ -93,18 +98,56 @@ impl Server {
         Server { controller }
     }
 
-    pub async fn run(&self) {
+    pub async fn run(&self, auth_state: Arc<crate::auth::AuthState>) {
         let app = Router::new()
             .route("/ping", post(ping))
-            .route("/network/:dataset/:start_block/worker", get(get_worker))
+            .route(
+                "/network/:dataset/:start_block/worker",
+                get(get_worker).layer(from_fn(crate::auth::middleware::auth)),
+            )
             .route("/network/:dataset/height", get(get_height))
             .route("/metrics", get(get_metrics))
             .layer(from_fn(logging))
-            .layer(Extension(self.controller.clone()));
+            .layer(Extension(self.controller.clone()))
+            .layer(Extension(auth_state));
         let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+        // `into_make_service_with_connect_info::<SocketAddr>` is required so
+        // `ConnectInfo<SocketAddr>` is available as a request extension —
+        // the auth middleware reads it as the fallback "real client IP" when
+        // no `X-Original-Forwarded-For` is present (direct ClusterIP path).
         axum::Server::bind(&addr)
-            .serve(app.into_make_service())
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use router_controller::controller::ControllerBuilder;
+
+    // Failure paths (404 unknown dataset, 503 not-ready) must not bump the
+    // worker-URL handout counter — only successful Ok(Some(url)) does.
+    #[tokio::test]
+    async fn worker_url_handout_does_not_increment_on_failure() {
+        let controller = Arc::new(ControllerBuilder::new().build());
+        let dataset = "ds-no-such-thing";
+        let before = crate::metrics::WORKER_URLS_HANDED_TOTAL
+            .with_label_values(&[dataset])
+            .get();
+        let resp = get_worker(
+            Path((dataset.to_string(), 0)),
+            Extension(controller),
+        )
+        .await;
+        assert_ne!(resp.status(), StatusCode::OK);
+        let after = crate::metrics::WORKER_URLS_HANDED_TOTAL
+            .with_label_values(&[dataset])
+            .get();
+        assert_eq!(
+            after, before,
+            "failure paths must not increment the handout counter"
+        );
     }
 }

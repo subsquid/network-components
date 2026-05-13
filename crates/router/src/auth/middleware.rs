@@ -109,12 +109,8 @@ where
     }
 
     if allowed {
-        let ctx = match &outcome {
-            Outcome::Ok(ctx) => Some(ctx.clone()),
-            _ => None,
-        };
         let mut resp = next.run(req).await;
-        if let Some(ctx) = ctx {
+        if let Outcome::Ok(ctx) = &outcome {
             match HeaderValue::from_str(&ctx.user_id) {
                 Ok(value) => {
                     resp.headers_mut().insert(USER_ID_HEADER, value);

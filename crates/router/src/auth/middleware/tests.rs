@@ -47,11 +47,28 @@ async fn body_string(resp: Response) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
+fn assert_user_id_header(resp: &Response, expected: &str) {
+    assert_eq!(
+        resp.headers()
+            .get(USER_ID_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected)
+    );
+}
+
+fn assert_no_user_id_header(resp: &Response) {
+    assert!(
+        resp.headers().get(USER_ID_HEADER).is_none(),
+        "{USER_ID_HEADER} must not be present"
+    );
+}
+
 fn good_validate_mock(user_id: &str) -> Mock {
-    Mock::given(method("POST")).and(path("/internal/validate")).respond_with(
-        ResponseTemplate::new(200)
-            .set_body_json(serde_json::json!({"user_id": user_id})),
-    )
+    Mock::given(method("POST"))
+        .and(path("/internal/validate"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"user_id": user_id})),
+        )
 }
 
 fn nf_validate_mock() -> Mock {
@@ -83,8 +100,7 @@ async fn bearer_header_extracts_key() {
     let _g = metrics_lock().await;
     let s = MockServer::start().await;
     good_validate_mock("u1").mount(&s).await;
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
 
     let before_ok = count_auth("ok");
     let resp = app(state.clone())
@@ -97,6 +113,7 @@ async fn bearer_header_extracts_key() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+    assert_user_id_header(&resp, "u1");
     assert_eq!(body_string(resp).await, "ok:u1");
     assert_eq!(count_auth("ok") - before_ok, 1);
 }
@@ -107,8 +124,7 @@ async fn no_token_header_fallback() {
     let _g = metrics_lock().await;
     let s = MockServer::start().await;
     good_validate_mock("u1").mount(&s).await;
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
 
     let resp = app(state)
         .oneshot(
@@ -121,6 +137,7 @@ async fn no_token_header_fallback() {
         .unwrap();
     // No Authorization header -> Missing -> 403 (enforce=true).
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_no_user_id_header(&resp);
     // Wiremock must not have been hit.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
 }
@@ -165,7 +182,11 @@ async fn missing_prefix_short_circuits() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     assert_eq!(count_auth("invalid") - before_invalid, 1);
-    assert_eq!(s.received_requests().await.unwrap().len(), 0, "cheap-reject must not call API");
+    assert_eq!(
+        s.received_requests().await.unwrap().len(),
+        0,
+        "cheap-reject must not call API"
+    );
 }
 
 #[tokio::test]
@@ -212,8 +233,7 @@ async fn enforce_disabled_still_does_full_work() {
     let _g = metrics_lock().await;
     let s = MockServer::start().await;
     nf_validate_mock().mount(&s).await; // 404 -> Deleted
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), false, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), false, TestClock::new());
 
     let before_calls = count_validate("deleted");
     let before_invalid = count_auth("invalid");
@@ -241,8 +261,7 @@ async fn bad_key_flood_one_call_per_15s() {
     let s = MockServer::start().await;
     nf_validate_mock().mount(&s).await;
     let clock = TestClock::new();
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, clock.clone());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, clock.clone());
 
     for _ in 0..100 {
         let resp = app(state.clone())
@@ -289,8 +308,7 @@ async fn network_api_timeout_fails_open() {
         .mount(&s)
         .await;
     let clock = TestClock::new();
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, clock.clone());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, clock.clone());
 
     let before_fail = count_auth("fail_open");
     let resp = app(state.clone())
@@ -358,6 +376,7 @@ async fn cached_deleted_denies_during_outage() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_no_user_id_header(&resp);
 }
 
 #[tokio::test]
@@ -369,14 +388,18 @@ async fn breaker_open_passes_through_without_dial() {
         .respond_with(ResponseTemplate::new(500))
         .mount(&s)
         .await;
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
 
     // Drive 50 distinct keys to get 50 cache misses + 50 errors -> breaker opens.
     for i in 0..50 {
         let token = format!("Bearer sqd_data_k{i}_xxx");
         let _ = app(state.clone())
-            .oneshot(req("/test").header(header::AUTHORIZATION, token).body(Body::empty()).unwrap())
+            .oneshot(
+                req("/test")
+                    .header(header::AUTHORIZATION, token)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
     }
@@ -394,7 +417,12 @@ async fn breaker_open_passes_through_without_dial() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(s.received_requests().await.unwrap().len(), 50, "breaker must short-circuit");
+    assert_no_user_id_header(&resp);
+    assert_eq!(
+        s.received_requests().await.unwrap().len(),
+        50,
+        "breaker must short-circuit"
+    );
 }
 
 #[tokio::test]
@@ -402,8 +430,7 @@ async fn key_id_in_request_extensions() {
     let _g = metrics_lock().await;
     let s = MockServer::start().await;
     good_validate_mock("user42").mount(&s).await;
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
 
     let resp = app(state)
         .oneshot(
@@ -415,6 +442,7 @@ async fn key_id_in_request_extensions() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+    assert_user_id_header(&resp, "user42");
     assert_eq!(body_string(resp).await, "ok:user42");
 }
 
@@ -423,8 +451,7 @@ async fn cache_miss_then_hit() {
     let _g = metrics_lock().await;
     let s = MockServer::start().await;
     good_validate_mock("u").mount(&s).await;
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
 
     let before_miss = CACHE_MISS_TOTAL.get();
     let before_hit = count_cache_hit("exists");
@@ -439,8 +466,13 @@ async fn cache_miss_then_hit() {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+        assert_user_id_header(&resp, "u");
     }
-    assert_eq!(s.received_requests().await.unwrap().len(), 1, "second req must be cached");
+    assert_eq!(
+        s.received_requests().await.unwrap().len(),
+        1,
+        "second req must be cached"
+    );
     assert_eq!(CACHE_MISS_TOTAL.get() - before_miss, 1);
     assert_eq!(count_cache_hit("exists") - before_hit, 1);
 }
@@ -468,16 +500,26 @@ async fn full_token_never_logged() {
         .respond_with(ResponseTemplate::new(500))
         .mount(&s)
         .await;
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
     let secret = "VERYRANDOMSECRET12345";
     let token = format!("Bearer sqd_data_abc_{secret}");
     let _ = app(state)
-        .oneshot(req("/test").header(header::AUTHORIZATION, &token).body(Body::empty()).unwrap())
+        .oneshot(
+            req("/test")
+                .header(header::AUTHORIZATION, &token)
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
-    assert!(!logs_contain(secret), "log captured the random token suffix");
-    assert!(!logs_contain(&token), "log captured the full Authorization header");
+    assert!(
+        !logs_contain(secret),
+        "log captured the random token suffix"
+    );
+    assert!(
+        !logs_contain(&token),
+        "log captured the full Authorization header"
+    );
 }
 
 // concurrent miss flood: the singleflight + cache combine to make
@@ -497,8 +539,7 @@ async fn concurrent_miss_flood_coalesces_to_one_call() {
         )
         .mount(&s)
         .await;
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
 
     let mut handles = Vec::new();
     for _ in 0..32 {
@@ -532,8 +573,7 @@ async fn empty_token_after_prefix_is_invalid() {
     let _g = metrics_lock().await;
     let s = MockServer::start().await;
     good_validate_mock("u").mount(&s).await;
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
     let resp = app(state)
         .oneshot(
             req("/test")
@@ -558,8 +598,7 @@ async fn malformed_validate_body_does_not_cache_exists() {
         .respond_with(ResponseTemplate::new(200).set_body_string("garbage"))
         .mount(&s)
         .await;
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
     let _ = app(state.clone())
         .oneshot(
             req("/test")
@@ -590,8 +629,7 @@ async fn fail_open_sentinel_drains_queue_without_serialised_timeouts() {
         .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(500)))
         .mount(&s)
         .await;
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
 
     let mut handles = Vec::new();
     for _ in 0..32 {
@@ -626,11 +664,7 @@ async fn duplicate_authorization_headers_rejected() {
     let _g = metrics_lock().await;
     let s = MockServer::start().await;
     good_validate_mock("u").mount(&s).await;
-    let state = AuthState::for_test(
-        Some(Url::parse(&s.uri()).unwrap()),
-        true,
-        TestClock::new(),
-    );
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
     let resp = app(state)
         .oneshot(
             req("/test")
@@ -656,11 +690,7 @@ async fn distinct_tokens_are_isolated_cache_entries() {
     let _g = metrics_lock().await;
     let s = MockServer::start().await;
     good_validate_mock("u").mount(&s).await;
-    let state = AuthState::for_test(
-        Some(Url::parse(&s.uri()).unwrap()),
-        true,
-        TestClock::new(),
-    );
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
     state.cache.put_deleted("sqd_data_OLD".into());
     // A different token is a different cache key — must validate via API.
     let resp = app(state)
@@ -684,8 +714,7 @@ async fn cache_miss_counter_does_not_double_count_under_singleflight() {
     let _g = metrics_lock().await;
     let s = MockServer::start().await;
     good_validate_mock("u").mount(&s).await;
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
 
     let before_miss = CACHE_MISS_TOTAL.get();
     let before_hit = count_cache_hit("exists");
@@ -724,8 +753,7 @@ async fn warn_log_does_not_carry_token() {
         .respond_with(ResponseTemplate::new(500))
         .mount(&s)
         .await;
-    let state =
-        AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
     let secret = "VERYSECRETMATERIAL12345";
     let _ = app(state)
         .oneshot(
@@ -812,6 +840,7 @@ async fn bypass_xoff_real_client_in_allowlist() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
+    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
     assert_eq!(body_string(resp).await, "ok:internal");
     // Bypass must NOT touch the Network API.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
@@ -910,10 +939,7 @@ async fn bypass_clusterip_peer_outside_allowlist() {
 
     let state = bypass_state(&s, true, vec![], vec![netv("10.0.0.0/8")]);
 
-    let request = with_connect_info(
-        req("/test").body(Body::empty()).unwrap(),
-        "8.8.8.8:443",
-    );
+    let request = with_connect_info(req("/test").body(Body::empty()).unwrap(), "8.8.8.8:443");
     let resp = app(state).oneshot(request).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
@@ -1120,6 +1146,7 @@ async fn bypass_takes_precedence_over_valid_bearer() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
+    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
     assert_eq!(body_string(resp).await, "ok:internal");
     // Network API must NOT have been called — we short-circuited on IP.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
@@ -1310,10 +1337,7 @@ async fn canary_enforces_for_ip_in_scope() {
         vec![],
     );
 
-    let request = with_connect_info(
-        req("/test").body(Body::empty()).unwrap(),
-        "10.4.5.5:54321",
-    );
+    let request = with_connect_info(req("/test").body(Body::empty()).unwrap(), "10.4.5.5:54321");
     let resp = app(state).oneshot(request).await.unwrap();
 
     // In-scope source, no token -> Missing -> deny.
@@ -1335,10 +1359,7 @@ async fn canary_passes_for_ip_out_of_scope() {
         vec![],
     );
 
-    let request = with_connect_info(
-        req("/test").body(Body::empty()).unwrap(),
-        "8.8.8.8:443",
-    );
+    let request = with_connect_info(req("/test").body(Body::empty()).unwrap(), "8.8.8.8:443");
     let resp = app(state).oneshot(request).await.unwrap();
 
     // Out-of-scope source -> fail open even though the policy is "enforce".
@@ -1365,10 +1386,7 @@ async fn canary_meters_outcome_even_when_not_enforcing() {
     );
 
     let before_missing = count_auth("missing");
-    let request = with_connect_info(
-        req("/test").body(Body::empty()).unwrap(),
-        "8.8.8.8:443",
-    );
+    let request = with_connect_info(req("/test").body(Body::empty()).unwrap(), "8.8.8.8:443");
     let _ = app(state).oneshot(request).await.unwrap();
 
     assert_eq!(
@@ -1396,10 +1414,7 @@ async fn canary_wildcard_enforces_for_every_source() {
     );
 
     // Out-of-RFC1918 source still gets denied — wildcard catches it.
-    let request = with_connect_info(
-        req("/test").body(Body::empty()).unwrap(),
-        "8.8.8.8:443",
-    );
+    let request = with_connect_info(req("/test").body(Body::empty()).unwrap(), "8.8.8.8:443");
     let resp = app(state).oneshot(request).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
@@ -1578,15 +1593,12 @@ async fn canary_internal_allowlist_takes_precedence() {
         Some(Url::parse(&s.uri()).unwrap()),
         TestClock::new(),
         false,
-        all_ips_v(),                  // would deny everyone…
+        all_ips_v(), // would deny everyone…
         vec![],
-        vec![netv("10.0.0.0/8")],    // …but internal pods bypass.
+        vec![netv("10.0.0.0/8")], // …but internal pods bypass.
     );
 
-    let request = with_connect_info(
-        req("/test").body(Body::empty()).unwrap(),
-        "10.4.5.5:54321",
-    );
+    let request = with_connect_info(req("/test").body(Body::empty()).unwrap(), "10.4.5.5:54321");
     let resp = app(state).oneshot(request).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);

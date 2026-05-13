@@ -17,6 +17,7 @@ use crate::metrics::{
 };
 
 const TOKEN_PREFIX: &str = "sqd_data_";
+const USER_ID_HEADER: &str = "x-sqd-user-id";
 
 /// Fixed user_id for IP-allowlist bypass requests. Single label keeps the
 /// top-keys sketch (REQUESTS_BY_KEY) bounded — see `decide` step 3.
@@ -81,7 +82,9 @@ where
     // disabled path is genuinely ~zero work. We still emit one metric
     // sample so dashboards can see the switch is engaged.
     if state.disabled {
-        AUTH_TOTAL.with_label_values(&[Outcome::Disabled.label()]).inc();
+        AUTH_TOTAL
+            .with_label_values(&[Outcome::Disabled.label()])
+            .inc();
         return next.run(req).await;
     }
 
@@ -106,7 +109,22 @@ where
     }
 
     if allowed {
-        next.run(req).await
+        let ctx = match &outcome {
+            Outcome::Ok(ctx) => Some(ctx.clone()),
+            _ => None,
+        };
+        let mut resp = next.run(req).await;
+        if let Some(ctx) = ctx {
+            match HeaderValue::from_str(&ctx.user_id) {
+                Ok(value) => {
+                    resp.headers_mut().insert(USER_ID_HEADER, value);
+                }
+                Err(_) => {
+                    warn!("validated user_id cannot be encoded as response header");
+                }
+            }
+        }
+        resp
     } else {
         deny()
     }
@@ -130,7 +148,10 @@ fn should_enforce(state: &AuthState, real_ip: Option<std::net::IpAddr>) -> bool 
     }
     match real_ip {
         Some(ip) => state.enforce_for_ips.iter().any(|net| net.contains(&ip)),
-        None => state.enforce_for_ips.iter().any(|net| net.prefix_len() == 0),
+        None => state
+            .enforce_for_ips
+            .iter()
+            .any(|net| net.prefix_len() == 0),
     }
 }
 
@@ -182,10 +203,7 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
         }
     }
 
-    let Some(token) = first
-        .and_then(|v| v.to_str().ok())
-        .and_then(extract_bearer)
-    else {
+    let Some(token) = first.and_then(|v| v.to_str().ok()).and_then(extract_bearer) else {
         return (Outcome::Missing, real_ip);
     };
 
@@ -215,7 +233,10 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
     // on outcomes that actually attempted a network round-trip. Local
     // short-circuits (auth disabled, breaker open) don't inflate it.
     let outcome = match state.client.validate(token).await {
-        ValidateResult::Exists { user_id, expires_at } => {
+        ValidateResult::Exists {
+            user_id,
+            expires_at,
+        } => {
             state
                 .cache
                 .put_exists(token.to_string(), user_id.clone(), expires_at);
@@ -325,7 +346,6 @@ fn deny() -> Response {
     );
     resp
 }
-
 
 #[cfg(test)]
 mod tests;

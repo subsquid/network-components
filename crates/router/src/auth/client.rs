@@ -19,6 +19,7 @@ pub enum ValidateResult {
     /// `TTL_EXISTS` (60s) cache TTL.
     Exists {
         user_id: String,
+        api_key_id: String,
         expires_at: Option<Instant>,
     },
     Deleted,
@@ -28,6 +29,8 @@ pub enum ValidateResult {
 #[derive(Deserialize)]
 struct ValidateResponse {
     user_id: String,
+    #[serde(rename = "apiKeyId")]
+    api_key_id: String,
     /// Optional Unix timestamp (seconds) at which the server says this key
     /// stops being valid. Wired through to the cache so the entry expires
     /// at `min(now + TTL_EXISTS, expires_at)`. Server may omit it; the
@@ -39,7 +42,9 @@ struct ValidateResponse {
 #[derive(Clone, Copy)]
 enum OpenState {
     Closed,
-    Open { until: Instant },
+    Open {
+        until: Instant,
+    },
     /// A probe is in flight after the open window elapsed. No other
     /// requests are admitted until the probe records success or failure.
     HalfOpen,
@@ -265,6 +270,7 @@ impl NetworkApiClient {
                     });
                     ValidateResult::Exists {
                         user_id: body.user_id,
+                        api_key_id: body.api_key_id,
                         expires_at,
                     }
                 }

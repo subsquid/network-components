@@ -26,7 +26,9 @@ async fn validate_200_returns_exists() {
     let s = server().await;
     Mock::given(method("POST"))
         .and(path("/internal/validate"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"user_id": "u1"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u1", "apiKeyId": "key1"})),
+        )
         .mount(&s)
         .await;
     let c = client(&s, TestClock::new());
@@ -34,6 +36,7 @@ async fn validate_200_returns_exists() {
         c.validate("sqd_data_abc_xyz").await,
         ValidateResult::Exists {
             user_id: "u1".into(),
+            api_key_id: "key1".into(),
             expires_at: None,
         }
     );
@@ -57,7 +60,7 @@ async fn validate_200_propagates_expires_at() {
         .and(path("/internal/validate"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_json(json!({"user_id": "u1", "expires_at": exp})),
+                .set_body_json(json!({"user_id": "u1", "apiKeyId": "key1", "expires_at": exp})),
         )
         .mount(&s)
         .await;
@@ -65,9 +68,11 @@ async fn validate_200_propagates_expires_at() {
     match c.validate("sqd_data_abc_xyz").await {
         ValidateResult::Exists {
             user_id,
+            api_key_id,
             expires_at: Some(_),
         } => {
             assert_eq!(user_id, "u1");
+            assert_eq!(api_key_id, "key1");
             // Specific value depends on TestClock starting reference;
             // the existence of Some(_) is what we assert here, plus the
             // cache test below which exercises the clamping behaviour.
@@ -90,7 +95,7 @@ async fn validate_200_past_expires_at_returns_now() {
         .and(path("/internal/validate"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_json(json!({"user_id": "u1", "expires_at": past})),
+                .set_body_json(json!({"user_id": "u1", "apiKeyId": "key1", "expires_at": past})),
         )
         .mount(&s)
         .await;
@@ -213,7 +218,10 @@ async fn breaker_opens_after_50_consecutive_errors() {
     // 51st must short-circuit (no HTTP call).
     assert_eq!(c.validate("sqd_data_x_y").await, ValidateResult::FailOpen);
     let received_after = s.received_requests().await.unwrap().len();
-    assert_eq!(received_after, 50, "breaker must short-circuit the 51st call");
+    assert_eq!(
+        received_after, 50,
+        "breaker must short-circuit the 51st call"
+    );
 }
 
 #[tokio::test]
@@ -245,7 +253,9 @@ async fn breaker_resets_on_success() {
         .mount(&s)
         .await;
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"user_id": "u"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u", "apiKeyId": "key"})),
+        )
         .mount(&s)
         .await;
     let clock = TestClock::new();
@@ -321,7 +331,9 @@ async fn breaker_half_open_admits_exactly_one_probe() {
     let c = Arc::new(c);
     for _ in 0..10 {
         let c = c.clone();
-        handles.push(tokio::spawn(async move { c.validate("sqd_data_x_y").await }));
+        handles.push(tokio::spawn(
+            async move { c.validate("sqd_data_x_y").await },
+        ));
     }
     for h in handles {
         let _ = h.await;
@@ -342,8 +354,16 @@ fn build_url_preserves_subpath_with_trailing_slash() {
         Some(Url::parse("http://auth.example.com/api/v2/").unwrap()),
         TestClock::new(),
     );
-    let joined = c.base_url.as_ref().unwrap().join("internal/validate").unwrap();
-    assert_eq!(joined.as_str(), "http://auth.example.com/api/v2/internal/validate");
+    let joined = c
+        .base_url
+        .as_ref()
+        .unwrap()
+        .join("internal/validate")
+        .unwrap();
+    assert_eq!(
+        joined.as_str(),
+        "http://auth.example.com/api/v2/internal/validate"
+    );
 }
 
 /// Without a trailing slash on the input, the client should still
@@ -354,8 +374,16 @@ fn build_url_preserves_subpath_without_trailing_slash() {
         Some(Url::parse("http://auth.example.com/api/v2").unwrap()),
         TestClock::new(),
     );
-    let joined = c.base_url.as_ref().unwrap().join("internal/validate").unwrap();
-    assert_eq!(joined.as_str(), "http://auth.example.com/api/v2/internal/validate");
+    let joined = c
+        .base_url
+        .as_ref()
+        .unwrap()
+        .join("internal/validate")
+        .unwrap();
+    assert_eq!(
+        joined.as_str(),
+        "http://auth.example.com/api/v2/internal/validate"
+    );
 }
 
 /// Plain root-only base still resolves correctly.
@@ -365,7 +393,12 @@ fn build_url_root_base() {
         Some(Url::parse("http://auth.example.com").unwrap()),
         TestClock::new(),
     );
-    let joined = c.base_url.as_ref().unwrap().join("internal/validate").unwrap();
+    let joined = c
+        .base_url
+        .as_ref()
+        .unwrap()
+        .join("internal/validate")
+        .unwrap();
     assert_eq!(joined.as_str(), "http://auth.example.com/internal/validate");
 }
 
@@ -376,7 +409,9 @@ async fn validate_calls_subpath_route() {
     let s = server().await;
     Mock::given(method("POST"))
         .and(path("/api/v2/internal/validate"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"user_id": "u1"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u1", "apiKeyId": "key1"})),
+        )
         .mount(&s)
         .await;
     let c = NetworkApiClient::with_clock(
@@ -444,7 +479,9 @@ async fn validate_issues_a_real_send() {
     let s = server().await;
     Mock::given(method("POST"))
         .and(path("/internal/validate"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"user_id": "u1"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u1", "apiKeyId": "key1"})),
+        )
         .mount(&s)
         .await;
     let c = client(&s, TestClock::new());
@@ -561,7 +598,9 @@ async fn request_body_is_token_only() {
     Mock::given(method("POST"))
         .and(path("/internal/validate"))
         .and(body_json(json!({"token": "sqd_data_abc_xyz"})))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"user_id": "u"})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u", "apiKeyId": "key"})),
+        )
         .mount(&s)
         .await;
     let c = client(&s, TestClock::new());

@@ -5,7 +5,10 @@ use super::clock::{Clock, SystemClock};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KeyState {
-    Exists { user_id: String },
+    Exists {
+        user_id: String,
+        api_key_id: String,
+    },
     Deleted,
     /// Network API was unreachable on the most recent attempt for this key.
     /// Cached briefly so the singleflight queue can drain without each
@@ -78,7 +81,13 @@ impl KeyCache {
         }
     }
 
-    pub fn put_exists(&self, token: String, user_id: String, expires_at: Option<Instant>) {
+    pub fn put_exists(
+        &self,
+        token: String,
+        user_id: String,
+        api_key_id: String,
+        expires_at: Option<Instant>,
+    ) {
         let now = self.clock.now();
         if let Some(exp) = expires_at {
             if exp <= now {
@@ -92,7 +101,10 @@ impl KeyCache {
             None => default_deadline,
         };
         let entry = Entry {
-            state: KeyState::Exists { user_id },
+            state: KeyState::Exists {
+                user_id,
+                api_key_id,
+            },
             deadline,
         };
         self.inner.insert(token, entry);
@@ -136,23 +148,28 @@ mod tests {
         (cache, clock)
     }
 
-    fn exists(user: &str) -> KeyState {
+    fn exists(user: &str, api_key: &str) -> KeyState {
         KeyState::Exists {
             user_id: user.into(),
+            api_key_id: api_key.into(),
         }
     }
 
     #[test]
     fn get_undefined_returns_none() {
         let (c, _) = cache();
-        assert_eq!(c.get("unknown"), None, "UNDEFINED must be None, not Deleted");
+        assert_eq!(
+            c.get("unknown"),
+            None,
+            "UNDEFINED must be None, not Deleted"
+        );
     }
 
     #[test]
     fn put_exists_then_get() {
         let (c, _) = cache();
-        c.put_exists("tok".into(), "u1".into(), None);
-        assert_eq!(c.get("tok"), Some(exists("u1")));
+        c.put_exists("tok".into(), "u1".into(), "key1".into(), None);
+        assert_eq!(c.get("tok"), Some(exists("u1", "key1")));
     }
 
     #[test]
@@ -165,9 +182,9 @@ mod tests {
     #[test]
     fn exists_default_ttl_60s() {
         let (c, clock) = cache();
-        c.put_exists("tok".into(), "u".into(), None);
+        c.put_exists("tok".into(), "u".into(), "key".into(), None);
         clock.advance(Duration::from_secs(59));
-        assert_eq!(c.get("tok"), Some(exists("u")));
+        assert_eq!(c.get("tok"), Some(exists("u", "key")));
         clock.advance(Duration::from_secs(2));
         assert_eq!(c.get("tok"), None);
     }
@@ -186,9 +203,9 @@ mod tests {
     fn expires_at_clamped_inside_window() {
         let (c, clock) = cache();
         let exp = clock.now() + Duration::from_secs(30);
-        c.put_exists("tok".into(), "u".into(), Some(exp));
+        c.put_exists("tok".into(), "u".into(), "key".into(), Some(exp));
         clock.advance(Duration::from_secs(29));
-        assert_eq!(c.get("tok"), Some(exists("u")));
+        assert_eq!(c.get("tok"), Some(exists("u", "key")));
         clock.advance(Duration::from_secs(2));
         assert_eq!(c.get("tok"), None, "clamp should expire at 30s, not 60s");
     }
@@ -197,7 +214,7 @@ mod tests {
     fn expires_at_already_expired_stores_deleted() {
         let (c, clock) = cache();
         let exp = clock.now() - Duration::from_secs(1);
-        c.put_exists("tok".into(), "u".into(), Some(exp));
+        c.put_exists("tok".into(), "u".into(), "key".into(), Some(exp));
         assert_eq!(
             c.get("tok"),
             Some(KeyState::Deleted),
@@ -213,7 +230,7 @@ mod tests {
     fn undefined_ne_deleted_regression() {
         let (c, _) = cache();
         assert_eq!(c.get("tok"), None);
-        c.put_exists("tok".into(), "u".into(), None);
+        c.put_exists("tok".into(), "u".into(), "key".into(), None);
         let g = c.get("tok");
         assert!(matches!(g, Some(KeyState::Exists { .. })));
         assert_ne!(g, Some(KeyState::Deleted));
@@ -225,7 +242,7 @@ mod tests {
         let clock = TestClock::new();
         let cache = KeyCache::with_clock(100, clock.clone());
         for i in 0..1_000 {
-            cache.put_exists(format!("tok{i}"), "u".into(), None);
+            cache.put_exists(format!("tok{i}"), "u".into(), "key".into(), None);
         }
         let count = cache.entry_count();
         assert!(

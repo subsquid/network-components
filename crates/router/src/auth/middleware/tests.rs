@@ -27,7 +27,12 @@ async fn metrics_lock() -> MutexGuard<'static, ()> {
 
 async fn downstream_handler(req: Request<Body>) -> Response {
     match req.extensions().get::<AuthContext>() {
-        Some(ctx) => format!("ok:{}", ctx.user_id).into_response(),
+        Some(ctx) => format!(
+            "ok:{}:{}",
+            ctx.user_id.as_deref().unwrap_or("null"),
+            ctx.api_key_id.as_deref().unwrap_or("null")
+        )
+        .into_response(),
         None => "ok:no-ctx".into_response(),
     }
 }
@@ -63,12 +68,29 @@ fn assert_no_user_id_header(resp: &Response) {
     );
 }
 
+fn assert_api_key_id_header(resp: &Response, expected: &str) {
+    assert_eq!(
+        resp.headers()
+            .get(API_KEY_ID_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected)
+    );
+}
+
+fn assert_no_api_key_id_header(resp: &Response) {
+    assert!(
+        resp.headers().get(API_KEY_ID_HEADER).is_none(),
+        "{API_KEY_ID_HEADER} must not be present"
+    );
+}
+
 fn good_validate_mock(user_id: &str) -> Mock {
     Mock::given(method("POST"))
         .and(path("/internal/validate"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({"user_id": user_id})),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "user_id": user_id,
+            "apiKeyId": "key1"
+        })))
 }
 
 fn nf_validate_mock() -> Mock {
@@ -114,7 +136,8 @@ async fn bearer_header_extracts_key() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_user_id_header(&resp, "u1");
-    assert_eq!(body_string(resp).await, "ok:u1");
+    assert_api_key_id_header(&resp, "key1");
+    assert_eq!(body_string(resp).await, "ok:u1:key1");
     assert_eq!(count_auth("ok") - before_ok, 1);
 }
 
@@ -138,6 +161,7 @@ async fn no_token_header_fallback() {
     // No Authorization header -> Missing -> 403 (enforce=true).
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     assert_no_user_id_header(&resp);
+    assert_no_api_key_id_header(&resp);
     // Wiremock must not have been hit.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
 }
@@ -377,6 +401,7 @@ async fn cached_deleted_denies_during_outage() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     assert_no_user_id_header(&resp);
+    assert_no_api_key_id_header(&resp);
 }
 
 #[tokio::test]
@@ -418,6 +443,7 @@ async fn breaker_open_passes_through_without_dial() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_no_user_id_header(&resp);
+    assert_no_api_key_id_header(&resp);
     assert_eq!(
         s.received_requests().await.unwrap().len(),
         50,
@@ -443,7 +469,8 @@ async fn key_id_in_request_extensions() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_user_id_header(&resp, "user42");
-    assert_eq!(body_string(resp).await, "ok:user42");
+    assert_api_key_id_header(&resp, "key1");
+    assert_eq!(body_string(resp).await, "ok:user42:key1");
 }
 
 #[tokio::test]
@@ -467,6 +494,7 @@ async fn cache_miss_then_hit() {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         assert_user_id_header(&resp, "u");
+        assert_api_key_id_header(&resp, "key1");
     }
     assert_eq!(
         s.received_requests().await.unwrap().len(),
@@ -534,7 +562,7 @@ async fn concurrent_miss_flood_coalesces_to_one_call() {
         .and(path("/internal/validate"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({"user_id": "u1"}))
+                .set_body_json(serde_json::json!({"user_id": "u1", "apiKeyId": "key1"}))
                 .set_delay(Duration::from_millis(50)),
         )
         .mount(&s)
@@ -841,7 +869,8 @@ async fn bypass_xoff_real_client_in_allowlist() {
 
     assert_eq!(resp.status(), StatusCode::OK);
     assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_eq!(body_string(resp).await, "ok:internal");
+    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    assert_eq!(body_string(resp).await, "ok:internal:internal");
     // Bypass must NOT touch the Network API.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
 }
@@ -927,7 +956,9 @@ async fn bypass_clusterip_peer_in_allowlist() {
     let resp = app(state).oneshot(request).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(body_string(resp).await, "ok:internal");
+    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    assert_eq!(body_string(resp).await, "ok:internal:internal");
 }
 
 // ConnectInfo present but peer NOT in allowlist -> standard auth.
@@ -1026,7 +1057,9 @@ async fn bypass_malformed_xoff_falls_back_to_connect_info() {
     // Malformed entries skipped; chain yields no valid IP; fall back to
     // peer (ConnectInfo) which IS in allowlist.
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(body_string(resp).await, "ok:internal");
+    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    assert_eq!(body_string(resp).await, "ok:internal:internal");
 }
 
 // Chain consisting entirely of trusted IPs -> no real-client extraction
@@ -1083,7 +1116,9 @@ async fn bypass_multiple_allowlist_cidrs() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(body_string(resp).await, "ok:internal");
+    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    assert_eq!(body_string(resp).await, "ok:internal:internal");
 }
 
 // Duplicate-Authorization rejection runs FIRST, even when the source IP
@@ -1147,7 +1182,8 @@ async fn bypass_takes_precedence_over_valid_bearer() {
 
     assert_eq!(resp.status(), StatusCode::OK);
     assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_eq!(body_string(resp).await, "ok:internal");
+    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    assert_eq!(body_string(resp).await, "ok:internal:internal");
     // Network API must NOT have been called — we short-circuited on IP.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
 }
@@ -1602,5 +1638,7 @@ async fn canary_internal_allowlist_takes_precedence() {
     let resp = app(state).oneshot(request).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(body_string(resp).await, "ok:internal");
+    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    assert_eq!(body_string(resp).await, "ok:internal:internal");
 }

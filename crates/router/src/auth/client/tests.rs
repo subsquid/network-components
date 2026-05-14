@@ -27,7 +27,7 @@ async fn validate_200_returns_exists() {
     Mock::given(method("POST"))
         .and(path("/internal/validate"))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u1", "apiKeyId": "key1"})),
+            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u1", "api_key_id": "key1"})),
         )
         .mount(&s)
         .await;
@@ -60,7 +60,7 @@ async fn validate_200_propagates_expires_at() {
         .and(path("/internal/validate"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_json(json!({"user_id": "u1", "apiKeyId": "key1", "expires_at": exp})),
+                .set_body_json(json!({"user_id": "u1", "api_key_id": "key1", "expires_at": exp})),
         )
         .mount(&s)
         .await;
@@ -95,7 +95,7 @@ async fn validate_200_past_expires_at_returns_now() {
         .and(path("/internal/validate"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_json(json!({"user_id": "u1", "apiKeyId": "key1", "expires_at": past})),
+                .set_body_json(json!({"user_id": "u1", "api_key_id": "key1", "expires_at": past})),
         )
         .mount(&s)
         .await;
@@ -254,7 +254,7 @@ async fn breaker_resets_on_success() {
         .await;
     Mock::given(method("POST"))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u", "apiKeyId": "key"})),
+            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u", "api_key_id": "key"})),
         )
         .mount(&s)
         .await;
@@ -410,7 +410,7 @@ async fn validate_calls_subpath_route() {
     Mock::given(method("POST"))
         .and(path("/api/v2/internal/validate"))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u1", "apiKeyId": "key1"})),
+            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u1", "api_key_id": "key1"})),
         )
         .mount(&s)
         .await;
@@ -480,7 +480,7 @@ async fn validate_issues_a_real_send() {
     Mock::given(method("POST"))
         .and(path("/internal/validate"))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u1", "apiKeyId": "key1"})),
+            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u1", "api_key_id": "key1"})),
         )
         .mount(&s)
         .await;
@@ -599,7 +599,7 @@ async fn request_body_is_token_only() {
         .and(path("/internal/validate"))
         .and(body_json(json!({"token": "sqd_data_abc_xyz"})))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u", "apiKeyId": "key"})),
+            ResponseTemplate::new(200).set_body_json(json!({"user_id": "u", "api_key_id": "key"})),
         )
         .mount(&s)
         .await;

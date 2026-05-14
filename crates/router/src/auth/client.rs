@@ -29,7 +29,6 @@ pub enum ValidateResult {
 #[derive(Deserialize)]
 struct ValidateResponse {
     user_id: String,
-    #[serde(rename = "apiKeyId")]
     api_key_id: String,
     /// Optional Unix timestamp (seconds) at which the server says this key
     /// stops being valid. Wired through to the cache so the entry expires

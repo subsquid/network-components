@@ -84,7 +84,7 @@ fn good_validate_mock(user_id: &str) -> Mock {
         .and(path("/internal/validate"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "user_id": user_id,
-            "apiKeyId": "key1"
+            "api_key_id": "key1"
         })))
 }
 
@@ -557,7 +557,7 @@ async fn concurrent_miss_flood_coalesces_to_one_call() {
         .and(path("/internal/validate"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({"user_id": "u1", "apiKeyId": "key1"}))
+                .set_body_json(serde_json::json!({"user_id": "u1", "api_key_id": "key1"}))
                 .set_delay(Duration::from_millis(50)),
         )
         .mount(&s)

@@ -18,6 +18,7 @@ use crate::metrics::{
 
 const TOKEN_PREFIX: &str = "sqd_data_";
 const USER_ID_HEADER: &str = "x-sqd-user-id";
+const API_KEY_ID_HEADER: &str = "x-sqd-api-key-id";
 
 /// Fixed user_id for IP-allowlist bypass requests. Single label keeps the
 /// top-keys sketch (REQUESTS_BY_KEY) bounded — see `decide` step 3.
@@ -37,11 +38,14 @@ const INTERNAL_BYPASS_USER_ID: &str = "internal";
 const ORIGINAL_FORWARDED_FOR: &str = "X-Original-Forwarded-For";
 
 /// Value attached to the request via Extensions on a successful auth pass.
-/// Downstream handlers can read `user_id` for audit attribution.
+/// Downstream handlers can read validated key identity for audit attribution.
+/// IP-allowlist bypass uses the fixed `internal` identity.
 #[derive(Clone, Debug)]
 pub struct AuthContext {
     #[allow(dead_code)]
     pub user_id: String,
+    #[allow(dead_code)]
+    pub api_key_id: String,
 }
 
 #[derive(Debug)]
@@ -102,8 +106,9 @@ where
         // Sketch update + label add/remove are performed under the
         // top-keys lock so that a concurrent eviction can't be silently
         // undone by a stale `with_label_values` call from another task.
-        // We label by user_id (the only token-derived value safe to
-        // expose: it identifies the tenant, not the secret material).
+        // We label validated requests by user_id (the only token-derived value
+        // safe to expose: it identifies the tenant, not the secret material).
+        // IP-bypass requests use the bounded synthetic `internal` identity.
         state.top_keys.observe_into(&ctx.user_id, &REQUESTS_BY_KEY);
         req.extensions_mut().insert(ctx.clone());
     }
@@ -117,6 +122,14 @@ where
                 }
                 Err(_) => {
                     warn!("validated user_id cannot be encoded as response header");
+                }
+            }
+            match HeaderValue::from_str(&ctx.api_key_id) {
+                Ok(value) => {
+                    resp.headers_mut().insert(API_KEY_ID_HEADER, value);
+                }
+                Err(_) => {
+                    warn!("validated api_key_id cannot be encoded as response header");
                 }
             }
         }
@@ -192,6 +205,7 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
                 return (
                     Outcome::Ok(AuthContext {
                         user_id: INTERNAL_BYPASS_USER_ID.to_string(),
+                        api_key_id: INTERNAL_BYPASS_USER_ID.to_string(),
                     }),
                     Some(ip),
                 );
@@ -231,12 +245,19 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
     let outcome = match state.client.validate(token).await {
         ValidateResult::Exists {
             user_id,
+            api_key_id,
             expires_at,
         } => {
-            state
-                .cache
-                .put_exists(token.to_string(), user_id.clone(), expires_at);
-            Outcome::Ok(AuthContext { user_id })
+            state.cache.put_exists(
+                token.to_string(),
+                user_id.clone(),
+                api_key_id.clone(),
+                expires_at,
+            );
+            Outcome::Ok(AuthContext {
+                user_id,
+                api_key_id,
+            })
         }
         ValidateResult::Deleted => {
             state.cache.put_deleted(token.to_string());
@@ -254,9 +275,15 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
 /// Cache lookup translated to an Outcome, or `None` if the slot is UNDEFINED.
 fn lookup(state: &AuthState, token: &str) -> Option<Outcome> {
     match state.cache.get(token)? {
-        KeyState::Exists { user_id } => {
+        KeyState::Exists {
+            user_id,
+            api_key_id,
+        } => {
             CACHE_HIT_TOTAL.with_label_values(&["exists"]).inc();
-            Some(Outcome::Ok(AuthContext { user_id }))
+            Some(Outcome::Ok(AuthContext {
+                user_id,
+                api_key_id,
+            }))
         }
         KeyState::Deleted => {
             CACHE_HIT_TOTAL.with_label_values(&["deleted"]).inc();

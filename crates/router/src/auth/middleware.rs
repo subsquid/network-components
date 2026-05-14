@@ -43,9 +43,9 @@ const ORIGINAL_FORWARDED_FOR: &str = "X-Original-Forwarded-For";
 #[derive(Clone, Debug)]
 pub struct AuthContext {
     #[allow(dead_code)]
-    pub user_id: Option<String>,
+    pub user_id: String,
     #[allow(dead_code)]
-    pub api_key_id: Option<String>,
+    pub api_key_id: String,
 }
 
 #[derive(Debug)]
@@ -109,34 +109,27 @@ where
         // We label validated requests by user_id (the only token-derived value
         // safe to expose: it identifies the tenant, not the secret material).
         // IP-bypass requests use the bounded synthetic `internal` identity.
-        let metric_user_id = ctx.user_id.as_deref().unwrap_or(INTERNAL_BYPASS_USER_ID);
-        state
-            .top_keys
-            .observe_into(metric_user_id, &REQUESTS_BY_KEY);
+        state.top_keys.observe_into(&ctx.user_id, &REQUESTS_BY_KEY);
         req.extensions_mut().insert(ctx.clone());
     }
 
     if allowed {
         let mut resp = next.run(req).await;
         if let Outcome::Ok(ctx) = &outcome {
-            if let Some(user_id) = &ctx.user_id {
-                match HeaderValue::from_str(user_id) {
-                    Ok(value) => {
-                        resp.headers_mut().insert(USER_ID_HEADER, value);
-                    }
-                    Err(_) => {
-                        warn!("validated user_id cannot be encoded as response header");
-                    }
+            match HeaderValue::from_str(&ctx.user_id) {
+                Ok(value) => {
+                    resp.headers_mut().insert(USER_ID_HEADER, value);
+                }
+                Err(_) => {
+                    warn!("validated user_id cannot be encoded as response header");
                 }
             }
-            if let Some(api_key_id) = &ctx.api_key_id {
-                match HeaderValue::from_str(api_key_id) {
-                    Ok(value) => {
-                        resp.headers_mut().insert(API_KEY_ID_HEADER, value);
-                    }
-                    Err(_) => {
-                        warn!("validated api_key_id cannot be encoded as response header");
-                    }
+            match HeaderValue::from_str(&ctx.api_key_id) {
+                Ok(value) => {
+                    resp.headers_mut().insert(API_KEY_ID_HEADER, value);
+                }
+                Err(_) => {
+                    warn!("validated api_key_id cannot be encoded as response header");
                 }
             }
         }
@@ -211,8 +204,8 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
             if state.internal_allowlist.iter().any(|net| net.contains(&ip)) {
                 return (
                     Outcome::Ok(AuthContext {
-                        user_id: Some(INTERNAL_BYPASS_USER_ID.to_string()),
-                        api_key_id: Some(INTERNAL_BYPASS_USER_ID.to_string()),
+                        user_id: INTERNAL_BYPASS_USER_ID.to_string(),
+                        api_key_id: INTERNAL_BYPASS_USER_ID.to_string(),
                     }),
                     Some(ip),
                 );
@@ -262,8 +255,8 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
                 expires_at,
             );
             Outcome::Ok(AuthContext {
-                user_id: Some(user_id),
-                api_key_id: Some(api_key_id),
+                user_id,
+                api_key_id,
             })
         }
         ValidateResult::Deleted => {
@@ -288,8 +281,8 @@ fn lookup(state: &AuthState, token: &str) -> Option<Outcome> {
         } => {
             CACHE_HIT_TOTAL.with_label_values(&["exists"]).inc();
             Some(Outcome::Ok(AuthContext {
-                user_id: Some(user_id),
-                api_key_id: Some(api_key_id),
+                user_id,
+                api_key_id,
             }))
         }
         KeyState::Deleted => {

@@ -27,12 +27,7 @@ async fn metrics_lock() -> MutexGuard<'static, ()> {
 
 async fn downstream_handler(req: Request<Body>) -> Response {
     match req.extensions().get::<AuthContext>() {
-        Some(ctx) => format!(
-            "ok:{}:{}",
-            ctx.user_id.as_deref().unwrap_or("null"),
-            ctx.api_key_id.as_deref().unwrap_or("null")
-        )
-        .into_response(),
+        Some(ctx) => format!("ok:{}:{}", ctx.user_id, ctx.api_key_id).into_response(),
         None => "ok:no-ctx".into_response(),
     }
 }

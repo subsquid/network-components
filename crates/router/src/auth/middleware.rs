@@ -54,10 +54,6 @@ enum Outcome {
     Missing,
     Invalid,
     FailOpen,
-    /// Kill switch active (`DISABLE_V2_AUTH=true`). Counted under its own
-    /// label so the dashboard makes it obvious that auth is bypassed
-    /// globally, not silently absorbed into `ok`.
-    Disabled,
 }
 
 impl Outcome {
@@ -67,7 +63,6 @@ impl Outcome {
             Outcome::Missing => "missing",
             Outcome::Invalid => "invalid",
             Outcome::FailOpen => "fail_open",
-            Outcome::Disabled => "disabled",
         }
     }
 }
@@ -82,25 +77,16 @@ where
         .cloned()
         .expect("AuthState extension is required by auth middleware");
 
-    // Kill switch — short-circuits BEFORE the latency timer / decide so the
-    // disabled path is genuinely ~zero work. We still emit one metric
-    // sample so dashboards can see the switch is engaged.
-    if state.disabled {
-        AUTH_TOTAL
-            .with_label_values(&[Outcome::Disabled.label()])
-            .inc();
-        return next.run(req).await;
-    }
-
     let timer = AUTH_LATENCY_SECONDS.start_timer();
     let (outcome, real_ip) = decide(&state, &mut req).await;
     AUTH_TOTAL.with_label_values(&[outcome.label()]).inc();
     timer.observe_duration();
 
-    let allowed = match &outcome {
-        Outcome::Ok(_) | Outcome::FailOpen | Outcome::Disabled => true,
-        Outcome::Missing | Outcome::Invalid => !should_enforce(&state, real_ip),
-    };
+    let allowed = state.disabled
+        || match &outcome {
+            Outcome::Ok(_) | Outcome::FailOpen => true,
+            Outcome::Missing | Outcome::Invalid => !should_enforce(&state, real_ip),
+        };
 
     if let Outcome::Ok(ctx) = &outcome {
         // Sketch update + label add/remove are performed under the

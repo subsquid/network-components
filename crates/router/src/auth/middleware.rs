@@ -82,24 +82,20 @@ where
         .cloned()
         .expect("AuthState extension is required by auth middleware");
 
-    // Kill switch — short-circuits BEFORE the latency timer / decide so the
-    // disabled path is genuinely ~zero work. We still emit one metric
-    // sample so dashboards can see the switch is engaged.
-    if state.disabled {
-        AUTH_TOTAL
-            .with_label_values(&[Outcome::Disabled.label()])
-            .inc();
-        return next.run(req).await;
-    }
-
     let timer = AUTH_LATENCY_SECONDS.start_timer();
     let (outcome, real_ip) = decide(&state, &mut req).await;
-    AUTH_TOTAL.with_label_values(&[outcome.label()]).inc();
     timer.observe_duration();
 
-    let allowed = match &outcome {
-        Outcome::Ok(_) | Outcome::FailOpen | Outcome::Disabled => true,
-        Outcome::Missing | Outcome::Invalid => !should_enforce(&state, real_ip),
+    let allowed = if state.disabled {
+        // We still emit one metric sample so dashboards can see the switch is engaged.
+        AUTH_TOTAL.with_label_values(&[Outcome::Disabled.label()]).inc();
+        true
+    } else {
+        AUTH_TOTAL.with_label_values(&[outcome.label()]).inc();
+        match &outcome {
+            Outcome::Ok(_) | Outcome::FailOpen | Outcome::Disabled => true,
+            Outcome::Missing | Outcome::Invalid => !should_enforce(&state, real_ip),
+        }
     };
 
     if let Outcome::Ok(ctx) = &outcome {

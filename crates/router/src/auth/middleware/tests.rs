@@ -1203,18 +1203,19 @@ async fn bypass_without_xoff_or_connect_info_falls_through() {
 
 // ─── DISABLE_V2_AUTH (kill switch) ──────────────────────────────────────
 //
-// `disabled=true` disables enforcement, not identity extraction. If an
-// Authorization bearer is present and the validate endpoint is configured,
-// the middleware still validates it so downstreams receive identity headers.
+// `disabled=true` short-circuits at the very top of `auth()`: no decide,
+// no cache work, no Network API call. One metric sample under the
+// `disabled` label so the dashboard shows the switch is engaged.
 
 fn all_ips_v() -> Vec<IpNet> {
     vec![netv("0.0.0.0/0"), netv("::/0")]
 }
 
 #[tokio::test]
-async fn disable_allows_missing_token() {
+async fn disable_short_circuits_missing_token() {
     let _g = metrics_lock().await;
     let s = MockServer::start().await;
+    // Validate API would 404 if we ever reached it; we shouldn't.
     nf_validate_mock().mount(&s).await;
 
     // Kill switch on; enforcement also globally on, but should be irrelevant.
@@ -1227,19 +1228,24 @@ async fn disable_allows_missing_token() {
         vec![],
     );
 
-    let before = count_auth("disabled");
+    let before = AUTH_TOTAL.with_label_values(&["disabled"]).get();
     let resp = app(state)
         .oneshot(req("/test").body(Body::empty()).unwrap())
         .await
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(count_auth("disabled") - before, 1);
+    assert_eq!(
+        AUTH_TOTAL.with_label_values(&["disabled"]).get() - before,
+        1,
+        "kill switch must increment auth_total{{disabled}} exactly once"
+    );
+    // Network API must NOT be called.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
 }
 
 #[tokio::test]
-async fn disable_allows_locally_invalid_token() {
+async fn disable_short_circuits_invalid_token() {
     let _g = metrics_lock().await;
     let s = MockServer::start().await;
     nf_validate_mock().mount(&s).await;
@@ -1269,70 +1275,7 @@ async fn disable_allows_locally_invalid_token() {
 }
 
 #[tokio::test]
-async fn disable_populates_identity_headers_for_valid_token() {
-    let _g = metrics_lock().await;
-    let s = MockServer::start().await;
-    good_validate_mock("u1").mount(&s).await;
-
-    let state = AuthState::for_test_full(
-        Some(Url::parse(&s.uri()).unwrap()),
-        TestClock::new(),
-        true,
-        all_ips_v(),
-        vec![],
-        vec![],
-    );
-
-    let resp = app(state)
-        .oneshot(
-            req("/test")
-                .header(header::AUTHORIZATION, "Bearer sqd_data_abc_xyz")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, "u1");
-    assert_api_key_id_header(&resp, "key1");
-    assert_eq!(body_string(resp).await, "ok:u1:key1");
-    assert_eq!(s.received_requests().await.unwrap().len(), 1);
-}
-
-#[tokio::test]
-async fn disable_allows_deleted_validate_response() {
-    let _g = metrics_lock().await;
-    let s = MockServer::start().await;
-    nf_validate_mock().mount(&s).await;
-    let state = AuthState::for_test_full(
-        Some(Url::parse(&s.uri()).unwrap()),
-        TestClock::new(),
-        true,
-        all_ips_v(),
-        vec![],
-        vec![],
-    );
-
-    let resp = app(state)
-        .oneshot(
-            req("/test")
-                .header(header::AUTHORIZATION, "Bearer sqd_data_abc_xyz")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(resp.status(), StatusCode::OK);
-    assert_no_user_id_header(&resp);
-    assert_no_api_key_id_header(&resp);
-    assert_eq!(body_string(resp).await, "ok:no-ctx");
-    assert_eq!(s.received_requests().await.unwrap().len(), 1);
-}
-
-#[tokio::test]
-async fn disable_allows_duplicate_authorization() {
+async fn disable_short_circuits_duplicate_authorization() {
     let _g = metrics_lock().await;
     let s = MockServer::start().await;
     nf_validate_mock().mount(&s).await;
@@ -1347,7 +1290,7 @@ async fn disable_allows_duplicate_authorization() {
     );
 
     // Duplicate Authorization is normally a hard 403 (RFC 6750 §3.1).
-    // With the kill switch on, even that is allowed.
+    // With the kill switch on, even that is suppressed — auth path is OFF.
     let resp = app(state)
         .oneshot(
             req("/test")
@@ -1363,12 +1306,25 @@ async fn disable_allows_duplicate_authorization() {
 }
 
 #[tokio::test]
-async fn disable_without_validate_endpoint_passes_without_identity_headers() {
+async fn disable_does_not_emit_decide_metrics() {
     let _g = metrics_lock().await;
+    let s = MockServer::start().await;
+    good_validate_mock("u1").mount(&s).await;
 
-    let state = AuthState::for_test_full(None, TestClock::new(), true, all_ips_v(), vec![], vec![]);
+    let state = AuthState::for_test_full(
+        Some(Url::parse(&s.uri()).unwrap()),
+        TestClock::new(),
+        true,
+        all_ips_v(),
+        vec![],
+        vec![],
+    );
 
-    let resp = app(state)
+    let before_ok = count_auth("ok");
+    let before_missing = count_auth("missing");
+    let before_lat = AUTH_LATENCY_SECONDS.get_sample_count();
+
+    let _ = app(state)
         .oneshot(
             req("/test")
                 .header(header::AUTHORIZATION, "Bearer sqd_data_abc_xyz")
@@ -1378,10 +1334,15 @@ async fn disable_without_validate_endpoint_passes_without_identity_headers() {
         .await
         .unwrap();
 
-    assert_eq!(resp.status(), StatusCode::OK);
-    assert_no_user_id_header(&resp);
-    assert_no_api_key_id_header(&resp);
-    assert_eq!(body_string(resp).await, "ok:no-ctx");
+    // Kill switch path emits exactly the `disabled` counter — neither
+    // `ok` (which would imply a full decide), nor the latency histogram.
+    assert_eq!(count_auth("ok"), before_ok, "no ok metric on kill switch");
+    assert_eq!(count_auth("missing"), before_missing);
+    assert_eq!(
+        AUTH_LATENCY_SECONDS.get_sample_count(),
+        before_lat,
+        "kill switch must skip the latency timer entirely"
+    );
 }
 
 // ─── ENFORCE_V2_AUTH_FOR_IPS (canary by IP) ─────────────────────────────

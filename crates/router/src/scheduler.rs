@@ -8,7 +8,7 @@ use router_controller::controller::Controller;
 use crate::dataset::Dataset;
 use crate::metrics::{DATASET_HEIGHT, DATASET_SYNC_ERRORS};
 
-async fn update_datasets(controller: &Arc<Controller>, datasets: &Vec<Dataset>) {
+async fn update_datasets(controller: &Arc<Controller>, datasets: &Vec<Dataset>) -> bool {
     let mut tasks = Vec::with_capacity(datasets.len());
 
     for dataset in datasets.clone() {
@@ -35,15 +35,19 @@ async fn update_datasets(controller: &Arc<Controller>, datasets: &Vec<Dataset>) 
                         break chunks
                     },
                     Ok(Err(err)) => {
-                        error!("failed to download new chunks for {}: {:?}", dataset.url(), err);
-                        DATASET_SYNC_ERRORS.with_label_values(&[dataset.url()]).inc();
-                        return
+                        if attempt == 5 {
+                            error!("failed to download new chunks for {}: {:?}", dataset.url(), err);
+                            DATASET_SYNC_ERRORS.with_label_values(&[dataset.url()]).inc();
+                            return false
+                        }
+                        attempt += 1;
+                        info!("{}/5 retry to download {}", attempt, dataset.url());
                     },
                     Err(_) => {
                         if attempt == 5 {
                             error!("failed to download new chunks for {} within {:?}", dataset.url(), duration);
                             DATASET_SYNC_ERRORS.with_label_values(&[dataset.url()]).inc();
-                            return
+                            return false
                         }
                         attempt += 1;
                         info!("{}/5 retry to download {}", attempt, dataset.url());
@@ -54,12 +58,16 @@ async fn update_datasets(controller: &Arc<Controller>, datasets: &Vec<Dataset>) 
             if let Err(err) = controller.update_dataset(dataset.url(), chunks) {
                 error!("failed to update dataset {}: {:?}", dataset.url(), err);
             }
+            true
         }));
     }
 
+    let mut all_ok = true;
     for task in tasks {
-        task.await.unwrap();
+        let ok = task.await.unwrap();
+        all_ok = all_ok && ok;
     }
+    all_ok
 }
 
 pub fn start(
@@ -70,8 +78,13 @@ pub fn start(
     tokio::spawn(async move {
         let schedule_time = Instant::now() + Duration::from_secs(90);
 
-        info!("updating datasets before scheduling");
-        update_datasets(&controller, &datasets).await;
+        loop {
+            info!("trying to update datasets before scheduling");
+            if update_datasets(&controller, &datasets).await {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        }
 
         let now = Instant::now();
         if let Some(duration) = schedule_time.checked_duration_since(now) {

@@ -8,7 +8,7 @@ use url::Url;
 use super::clock::{system_clock, Clock};
 use crate::metrics::VALIDATE_CALL_TOTAL;
 
-const TIMEOUT: Duration = Duration::from_millis(250);
+const TIMEOUT: Duration = Duration::from_millis(1000);
 const BREAKER_THRESHOLD: u64 = 50;
 const BREAKER_OPEN_DURATION: Duration = Duration::from_secs(30);
 

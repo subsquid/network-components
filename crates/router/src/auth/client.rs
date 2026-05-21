@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
+use tracing::{error, warn};
 use url::Url;
 
 use super::clock::{system_clock, Clock};
@@ -231,6 +232,7 @@ impl NetworkApiClient {
         let url = match base_url.join("internal/validate") {
             Ok(u) => u,
             Err(_) => {
+                error!("failed to build /internal/validate URL");
                 permit.record_failure();
                 return ValidateResult::FailOpen;
             }
@@ -273,7 +275,8 @@ impl NetworkApiClient {
                         expires_at,
                     }
                 }
-                Err(_) => {
+                Err(err) => {
+                    error!(%err, "malformed /internal/validate 200 body");
                     VALIDATE_CALL_TOTAL.with_label_values(&["fail_open"]).inc();
                     permit.record_failure();
                     ValidateResult::FailOpen
@@ -302,12 +305,20 @@ impl NetworkApiClient {
                     // Looks like a non-API 404 (misrouted, gateway error
                     // page, etc.). Fail open so a deployment problem
                     // doesn't masquerade as a flood of revoked keys.
+                    error!("/internal/validate returned non-JSON 404");
                     VALIDATE_CALL_TOTAL.with_label_values(&["fail_open"]).inc();
                     permit.record_failure();
                     ValidateResult::FailOpen
                 }
             }
-            _ => {
+            Ok(r) => {
+                warn!(status = %r.status(), "/internal/validate returned unexpected HTTP status");
+                VALIDATE_CALL_TOTAL.with_label_values(&["fail_open"]).inc();
+                permit.record_failure();
+                ValidateResult::FailOpen
+            }
+            Err(err) => {
+                warn!(%err, "/internal/validate transport failure");
                 VALIDATE_CALL_TOTAL.with_label_values(&["fail_open"]).inc();
                 permit.record_failure();
                 ValidateResult::FailOpen

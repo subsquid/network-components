@@ -265,7 +265,6 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
         }
         ValidateResult::FailOpen => {
             state.cache.put_failed_recently(token.to_string());
-            warn!("Network API unreachable; failing open");
             Outcome::FailOpen
         }
     };

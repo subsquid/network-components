@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod client;
 pub mod clock;
+pub mod jwt;
 pub mod middleware;
 pub mod singleflight;
 pub mod topkeys;
@@ -10,6 +11,7 @@ use std::sync::Arc;
 use ipnet::IpNet;
 
 pub use cache::KeyCache;
+pub use jwt::WorkerJwtIssuer;
 pub use client::NetworkApiClient;
 pub use singleflight::Singleflight;
 pub use topkeys::TopKeys;
@@ -36,6 +38,8 @@ pub struct AuthState {
     /// Source IPs allowed to bypass Bearer auth. Matched against the
     /// resolved real-client IP (see `trusted_ips`). Empty -> bypass disabled.
     pub internal_allowlist: Vec<IpNet>,
+    /// Issues short-lived credentials that clients pass to workers.
+    pub worker_jwt_issuer: Option<WorkerJwtIssuer>,
 }
 
 impl AuthState {
@@ -45,6 +49,7 @@ impl AuthState {
         enforce_for_ips: Vec<IpNet>,
         trusted_ips: Vec<IpNet>,
         internal_allowlist: Vec<IpNet>,
+        worker_jwt_issuer: Option<WorkerJwtIssuer>,
     ) -> Arc<Self> {
         Arc::new(Self {
             cache: KeyCache::new(10_000),
@@ -55,6 +60,7 @@ impl AuthState {
             enforce_for_ips,
             trusted_ips,
             internal_allowlist,
+            worker_jwt_issuer,
         })
     }
 
@@ -117,6 +123,7 @@ impl AuthState {
             enforce_for_ips,
             trusted_ips,
             internal_allowlist,
+            worker_jwt_issuer: Some(test_worker_jwt_issuer()),
         })
     }
 }
@@ -129,4 +136,13 @@ fn all_ips() -> Vec<IpNet> {
         "0.0.0.0/0".parse().unwrap(),
         "::/0".parse().unwrap(),
     ]
+}
+
+#[cfg(test)]
+fn test_worker_jwt_issuer() -> WorkerJwtIssuer {
+    WorkerJwtIssuer::from_rsa_pem(
+        jwt::tests_support::TEST_PRIVATE_KEY.as_bytes(),
+        Some("test-key".to_string()),
+    )
+    .unwrap()
 }

@@ -3,6 +3,7 @@ use cli::Cli;
 use router_controller::controller::ControllerBuilder;
 use server::Server;
 use std::env;
+use std::fs;
 use std::sync::Arc;
 use std::time::Duration;
 use storage::{S3Storage, Storage};
@@ -44,15 +45,52 @@ async fn main() {
         Some(url) => auth::NetworkApiClient::new(url),
         None => auth::NetworkApiClient::disabled(),
     };
+    let worker_jwt_issuer = create_worker_jwt_issuer(
+        args.worker_jwt_private_key_pem,
+        args.worker_jwt_private_key_file,
+        args.worker_jwt_kid,
+        !args.disable_v2_auth && !args.enforce_v2_auth_for_ips.0.is_empty(),
+    );
     let auth_state = auth::AuthState::new(
         api_client,
         args.disable_v2_auth,
         args.enforce_v2_auth_for_ips.0,
         args.trusted_ips.0,
         args.internal_allowlist.0,
+        worker_jwt_issuer,
     );
 
     Server::new(controller).run(auth_state).await;
+}
+
+fn create_worker_jwt_issuer(
+    private_key_pem: Option<String>,
+    private_key_file: Option<std::path::PathBuf>,
+    kid: Option<String>,
+    required: bool,
+) -> Option<auth::WorkerJwtIssuer> {
+    let pem = match private_key_pem {
+        Some(pem) => Some(pem),
+        None => private_key_file.map(|path| {
+            fs::read_to_string(&path).unwrap_or_else(|err| {
+                panic!("failed to read worker JWT private key file {}: {}", path.display(), err)
+            })
+        }),
+    };
+
+    let Some(pem) = pem else {
+        if required {
+            panic!(
+                "WORKER_JWT_PRIVATE_KEY_PEM or WORKER_JWT_PRIVATE_KEY_FILE is required when V2 auth enforcement is enabled"
+            );
+        }
+        return None;
+    };
+
+    Some(
+        auth::WorkerJwtIssuer::from_rsa_pem(pem.as_bytes(), kid)
+            .expect("invalid worker JWT RSA private key PEM"),
+    )
 }
 
 async fn create_storage(dataset: &str) -> Arc<dyn Storage + Sync + Send> {

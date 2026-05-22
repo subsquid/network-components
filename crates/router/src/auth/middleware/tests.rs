@@ -9,6 +9,8 @@ use axum::http::{header, Request, StatusCode};
 use axum::middleware::from_fn;
 use axum::routing::get;
 use axum::Router;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use serde_json::Value;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -47,28 +49,10 @@ async fn body_string(resp: Response) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
-fn assert_user_id_header(resp: &Response, expected: &str) {
-    assert_eq!(
-        resp.headers()
-            .get(USER_ID_HEADER)
-            .and_then(|value| value.to_str().ok()),
-        Some(expected)
-    );
-}
-
 fn assert_no_user_id_header(resp: &Response) {
     assert!(
         resp.headers().get(USER_ID_HEADER).is_none(),
         "{USER_ID_HEADER} must not be present"
-    );
-}
-
-fn assert_api_key_id_header(resp: &Response, expected: &str) {
-    assert_eq!(
-        resp.headers()
-            .get(API_KEY_ID_HEADER)
-            .and_then(|value| value.to_str().ok()),
-        Some(expected)
     );
 }
 
@@ -77,6 +61,23 @@ fn assert_no_api_key_id_header(resp: &Response) {
         resp.headers().get(API_KEY_ID_HEADER).is_none(),
         "{API_KEY_ID_HEADER} must not be present"
     );
+}
+
+fn worker_jwt(resp: &Response) -> Option<&str> {
+    resp.headers()
+        .get(WORKER_JWT_HEADER)
+        .and_then(|value| value.to_str().ok())
+}
+
+fn decode_worker_jwt(token: &str) -> crate::auth::jwt::WorkerJwtClaims {
+    let parts: Vec<&str> = token.split('.').collect();
+    assert_eq!(parts.len(), 3);
+    URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
+    let claims: crate::auth::jwt::WorkerJwtClaims =
+        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(parts[1]).unwrap()).unwrap();
+    assert_eq!(claims.iss, "sqd-router");
+    assert_eq!(claims.aud, "sqd-worker");
+    claims
 }
 
 fn good_validate_mock(user_id: &str) -> Mock {
@@ -130,8 +131,10 @@ async fn bearer_header_extracts_key() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, "u1");
-    assert_api_key_id_header(&resp, "key1");
+    let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
+    assert_eq!(claims.user_id, "u1");
+    assert_eq!(claims.api_key_id, "key1");
+    assert_eq!(claims.exp - claims.iat, 300);
     assert_eq!(body_string(resp).await, "ok:u1:key1");
     assert_eq!(count_auth("ok") - before_ok, 1);
 }
@@ -463,8 +466,6 @@ async fn key_id_in_request_extensions() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, "user42");
-    assert_api_key_id_header(&resp, "key1");
     assert_eq!(body_string(resp).await, "ok:user42:key1");
 }
 
@@ -488,8 +489,6 @@ async fn cache_miss_then_hit() {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_user_id_header(&resp, "u");
-        assert_api_key_id_header(&resp, "key1");
     }
     assert_eq!(
         s.received_requests().await.unwrap().len(),
@@ -863,8 +862,6 @@ async fn bypass_xoff_real_client_in_allowlist() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
     assert_eq!(body_string(resp).await, "ok:internal:internal");
     // Bypass must NOT touch the Network API.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
@@ -951,8 +948,6 @@ async fn bypass_clusterip_peer_in_allowlist() {
     let resp = app(state).oneshot(request).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
     assert_eq!(body_string(resp).await, "ok:internal:internal");
 }
 
@@ -1052,8 +1047,6 @@ async fn bypass_malformed_xoff_falls_back_to_connect_info() {
     // Malformed entries skipped; chain yields no valid IP; fall back to
     // peer (ConnectInfo) which IS in allowlist.
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
     assert_eq!(body_string(resp).await, "ok:internal:internal");
 }
 
@@ -1111,8 +1104,6 @@ async fn bypass_multiple_allowlist_cidrs() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
     assert_eq!(body_string(resp).await, "ok:internal:internal");
 }
 
@@ -1176,8 +1167,6 @@ async fn bypass_takes_precedence_over_valid_bearer() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
     assert_eq!(body_string(resp).await, "ok:internal:internal");
     // Network API must NOT have been called — we short-circuited on IP.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
@@ -1633,7 +1622,5 @@ async fn canary_internal_allowlist_takes_precedence() {
     let resp = app(state).oneshot(request).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
     assert_eq!(body_string(resp).await, "ok:internal:internal");
 }

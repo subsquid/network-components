@@ -129,4 +129,19 @@ pub struct Cli {
     /// every request goes through the standard Bearer path.
     #[clap(long, env = "INTERNAL_ALLOWLIST", value_name = "CIDR,CIDR,...", default_value = "")]
     pub internal_allowlist: CidrList,
+
+    /// RSA private key PEM used to sign short-lived worker JWTs. Required
+    /// when V2 auth enforcement is enabled so clients can authenticate to
+    /// workers after receiving a worker URL from the router.
+    #[clap(long, env = "WORKER_JWT_PRIVATE_KEY_PEM", value_name = "PEM")]
+    pub worker_jwt_private_key_pem: Option<String>,
+
+    /// Path to the RSA private key PEM used to sign short-lived worker JWTs.
+    /// Ignored when WORKER_JWT_PRIVATE_KEY_PEM is set.
+    #[clap(long, env = "WORKER_JWT_PRIVATE_KEY_FILE", value_name = "PATH")]
+    pub worker_jwt_private_key_file: Option<std::path::PathBuf>,
+
+    /// Optional key id included in the JWT header for worker key rotation.
+    #[clap(long, env = "WORKER_JWT_KID", value_name = "KID")]
+    pub worker_jwt_kid: Option<String>,
 }

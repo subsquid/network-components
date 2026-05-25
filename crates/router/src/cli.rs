@@ -144,4 +144,8 @@ pub struct Cli {
     /// Optional key id included in the JWT header for worker key rotation.
     #[clap(long, env = "WORKER_JWT_KID", value_name = "KID")]
     pub worker_jwt_kid: Option<String>,
+
+    /// Worker JWT lifetime in seconds.
+    #[clap(long, env = "WORKER_JWT_TTL_SECS", value_name = "SECONDS", default_value = "3600")]
+    pub worker_jwt_ttl_secs: u64,
 }

@@ -134,9 +134,34 @@ async fn bearer_header_extracts_key() {
     let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
     assert_eq!(claims.user_id, "u1");
     assert_eq!(claims.api_key_id, "key1");
-    assert_eq!(claims.exp - claims.iat, 300);
+    assert_eq!(claims.exp - claims.iat, 3600);
     assert_eq!(body_string(resp).await, "ok:u1:key1");
     assert_eq!(count_auth("ok") - before_ok, 1);
+}
+
+#[tokio::test]
+async fn worker_jwt_is_reused_for_same_identity() {
+    let _g = metrics_lock().await;
+    let s = MockServer::start().await;
+    good_validate_mock("u1").mount(&s).await;
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+
+    let mut tokens = Vec::new();
+    for _ in 0..2 {
+        let resp = app(state.clone())
+            .oneshot(
+                req("/test")
+                    .header(header::AUTHORIZATION, "Bearer sqd_data_abc_xyz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        tokens.push(worker_jwt(&resp).expect("worker jwt header").to_string());
+    }
+
+    assert_eq!(tokens[0], tokens[1]);
 }
 
 // `Token:` header is NOT a fallback. Treated as missing.

@@ -48,7 +48,6 @@ async fn main() {
     let worker_jwt_issuer = create_worker_jwt_issuer(
         args.worker_jwt_private_key_pem,
         args.worker_jwt_private_key_file,
-        args.worker_jwt_kid,
         Duration::from_secs(args.worker_jwt_ttl_secs),
         !args.disable_v2_auth && !args.enforce_v2_auth_for_ips.0.is_empty(),
     );
@@ -67,7 +66,6 @@ async fn main() {
 fn create_worker_jwt_issuer(
     private_key_pem: Option<String>,
     private_key_file: Option<std::path::PathBuf>,
-    kid: Option<String>,
     ttl: Duration,
     required: bool,
 ) -> Option<auth::WorkerJwtIssuer> {
@@ -90,7 +88,7 @@ fn create_worker_jwt_issuer(
     };
 
     Some(
-        auth::WorkerJwtIssuer::from_rsa_pem_with_ttl(pem.as_bytes(), kid, ttl)
+        auth::WorkerJwtIssuer::from_rsa_pem_with_ttl(pem.as_bytes(), ttl)
             .expect("invalid worker JWT RSA private key PEM or TTL"),
     )
 }

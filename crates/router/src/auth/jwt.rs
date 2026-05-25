@@ -7,17 +7,13 @@ use base64::Engine;
 use ring::rand::SystemRandom;
 use ring::signature::{RsaKeyPair, RSA_PKCS1_SHA256};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
-const ISSUER: &str = "sqd-router";
-const AUDIENCE: &str = "sqd-worker";
 const DEFAULT_TTL: Duration = Duration::from_secs(60 * 60);
 const REFRESH_BEFORE_EXPIRY: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct WorkerJwtIssuer {
     key: Arc<RsaKeyPair>,
-    kid: Option<String>,
     ttl: Duration,
     cache: Arc<Mutex<HashMap<CacheKey, CachedToken>>>,
 }
@@ -34,26 +30,26 @@ struct CachedToken {
     exp: u64,
 }
 
+#[derive(Serialize)]
+struct WorkerJwtHeader {
+    alg: &'static str,
+    typ: &'static str,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkerJwtClaims {
     pub user_id: String,
     pub api_key_id: String,
     pub iat: u64,
     pub exp: u64,
-    pub iss: String,
-    pub aud: String,
 }
 
 impl WorkerJwtIssuer {
-    pub fn from_rsa_pem(pem: &[u8], kid: Option<String>) -> Result<Self, String> {
-        Self::from_rsa_pem_with_ttl(pem, kid, DEFAULT_TTL)
+    pub fn from_rsa_pem(pem: &[u8]) -> Result<Self, String> {
+        Self::from_rsa_pem_with_ttl(pem, DEFAULT_TTL)
     }
 
-    pub fn from_rsa_pem_with_ttl(
-        pem: &[u8],
-        kid: Option<String>,
-        ttl: Duration,
-    ) -> Result<Self, String> {
+    pub fn from_rsa_pem_with_ttl(pem: &[u8], ttl: Duration) -> Result<Self, String> {
         if ttl.is_zero() {
             return Err("worker JWT TTL must be greater than zero".to_string());
         }
@@ -67,35 +63,43 @@ impl WorkerJwtIssuer {
         .map_err(|err| format!("invalid RSA key: {err}"))?;
         Ok(Self {
             key: Arc::new(key),
-            kid,
             ttl,
             cache: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
-    pub fn issue(&self, user_id: &str, api_key_id: &str) -> Result<String, String> {
+    pub fn issue(
+        &self,
+        user_id: &str,
+        api_key_id: &str,
+        expires_at: Option<u64>,
+    ) -> Result<String, String> {
         let iat = now_secs();
         let key = CacheKey {
             user_id: user_id.to_string(),
             api_key_id: api_key_id.to_string(),
         };
-        if let Some(token) = self.cached_token(&key, iat) {
+        if let Some(token) = self.cached_token(&key, iat, expires_at) {
             return Ok(token);
+        }
+        let exp = match expires_at {
+            Some(expires_at) => iat.saturating_add(self.ttl.as_secs()).min(expires_at),
+            None => iat.saturating_add(self.ttl.as_secs()),
+        };
+        if exp <= iat {
+            return Err("worker JWT expiry deadline has passed".to_string());
         }
 
         let claims = WorkerJwtClaims {
             user_id: user_id.to_string(),
             api_key_id: api_key_id.to_string(),
             iat,
-            exp: iat.saturating_add(self.ttl.as_secs()),
-            iss: ISSUER.to_string(),
-            aud: AUDIENCE.to_string(),
+            exp,
         };
-        let header = json!({
-            "alg": "RS256",
-            "typ": "JWT",
-            "kid": self.kid.as_ref(),
-        });
+        let header = WorkerJwtHeader {
+            alg: "RS256",
+            typ: "JWT",
+        };
         let header = encode_json(&header)?;
         let payload = encode_json(&claims)?;
         let signing_input = format!("{header}.{payload}");
@@ -109,13 +113,14 @@ impl WorkerJwtIssuer {
         Ok(token)
     }
 
-    fn cached_token(&self, key: &CacheKey, now: u64) -> Option<String> {
+    fn cached_token(&self, key: &CacheKey, now: u64, expires_at: Option<u64>) -> Option<String> {
         let refresh_at = now.saturating_add(REFRESH_BEFORE_EXPIRY.as_secs());
+        let max_exp = expires_at.unwrap_or(u64::MAX);
         self.cache
             .lock()
             .expect("worker JWT cache mutex poisoned")
             .get(key)
-            .filter(|cached| cached.exp > refresh_at)
+            .filter(|cached| cached.exp > refresh_at && cached.exp <= max_exp)
             .map(|cached| cached.token.clone())
     }
 
@@ -204,13 +209,42 @@ mod tests {
     fn configured_ttl_sets_expiry() {
         let issuer = WorkerJwtIssuer::from_rsa_pem_with_ttl(
             tests_support::TEST_PRIVATE_KEY.as_bytes(),
-            None,
             Duration::from_secs(42),
         )
         .unwrap();
 
-        let claims = decode_claims(&issuer.issue("u1", "key1").unwrap());
+        let claims = decode_claims(&issuer.issue("u1", "key1", None).unwrap());
 
         assert_eq!(claims.exp - claims.iat, 42);
+    }
+
+    #[test]
+    fn validation_deadline_caps_expiry() {
+        let issuer = WorkerJwtIssuer::from_rsa_pem_with_ttl(
+            tests_support::TEST_PRIVATE_KEY.as_bytes(),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
+        let deadline = now_secs() + 42;
+
+        let claims = decode_claims(&issuer.issue("u1", "key1", Some(deadline)).unwrap());
+
+        assert_eq!(claims.exp, deadline);
+    }
+
+    #[test]
+    fn cached_token_is_not_reused_past_validation_deadline() {
+        let issuer = WorkerJwtIssuer::from_rsa_pem_with_ttl(
+            tests_support::TEST_PRIVATE_KEY.as_bytes(),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
+        let uncapped = issuer.issue("u1", "key1", None).unwrap();
+        let deadline = now_secs() + 42;
+
+        let capped = issuer.issue("u1", "key1", Some(deadline)).unwrap();
+
+        assert_ne!(uncapped, capped);
+        assert_eq!(decode_claims(&capped).exp, deadline);
     }
 }

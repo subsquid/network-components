@@ -21,7 +21,7 @@ pub enum ValidateResult {
     Exists {
         user_id: String,
         api_key_id: String,
-        expires_at: Option<Instant>,
+        expires_at: Option<u64>,
     },
     Deleted,
     FailOpen,
@@ -167,11 +167,6 @@ pub struct NetworkApiClient {
     http: reqwest::Client,
     base_url: Option<Url>,
     breaker: Arc<CircuitBreaker>,
-    /// Same clock the breaker uses, kept here so we can project absolute
-    /// server-side `expires_at` (unix seconds) onto the monotonic timeline
-    /// the cache is keyed on. Tests inject a `TestClock` so deterministic
-    /// expiry is observable without `tokio::time::pause`.
-    clock: Arc<dyn Clock>,
 }
 
 impl NetworkApiClient {
@@ -208,7 +203,6 @@ impl NetworkApiClient {
         Self {
             http,
             base_url,
-            clock: clock.clone(),
             breaker: Arc::new(CircuitBreaker::new(
                 BREAKER_THRESHOLD,
                 BREAKER_OPEN_DURATION,
@@ -250,29 +244,10 @@ impl NetworkApiClient {
                 Ok(body) => {
                     VALIDATE_CALL_TOTAL.with_label_values(&["ok"]).inc();
                     permit.record_success();
-                    let expires_at = body.expires_at.and_then(|exp_unix| {
-                        // unix -> Instant requires anchoring on a "now"
-                        // pair. We compute the offset between server-time
-                        // (unix seconds) and our clock's now() and project
-                        // the absolute expiry into the same monotonic
-                        // reference frame the cache uses.
-                        let now_unix = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .ok()?
-                            .as_secs();
-                        if exp_unix <= now_unix {
-                            // Already expired by server's clock — let the
-                            // cache see the past instant and demote it to
-                            // `Deleted` immediately (see `put_exists`).
-                            return Some(self.clock.now());
-                        }
-                        let remaining = Duration::from_secs(exp_unix - now_unix);
-                        Some(self.clock.now() + remaining)
-                    });
                     ValidateResult::Exists {
                         user_id: body.user_id,
                         api_key_id: body.api_key_id,
-                        expires_at,
+                        expires_at: body.expires_at,
                     }
                 }
                 Err(err) => {

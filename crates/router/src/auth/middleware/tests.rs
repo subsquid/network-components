@@ -73,11 +73,7 @@ fn decode_worker_jwt(token: &str) -> crate::auth::jwt::WorkerJwtClaims {
     let parts: Vec<&str> = token.split('.').collect();
     assert_eq!(parts.len(), 3);
     URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
-    let claims: crate::auth::jwt::WorkerJwtClaims =
-        serde_json::from_slice(&URL_SAFE_NO_PAD.decode(parts[1]).unwrap()).unwrap();
-    assert_eq!(claims.iss, "sqd-router");
-    assert_eq!(claims.aud, "sqd-worker");
-    claims
+    serde_json::from_slice(&URL_SAFE_NO_PAD.decode(parts[1]).unwrap()).unwrap()
 }
 
 fn good_validate_mock(user_id: &str) -> Mock {
@@ -137,6 +133,41 @@ async fn bearer_header_extracts_key() {
     assert_eq!(claims.exp - claims.iat, 3600);
     assert_eq!(body_string(resp).await, "ok:u1:key1");
     assert_eq!(count_auth("ok") - before_ok, 1);
+}
+
+#[tokio::test]
+async fn worker_jwt_expiry_is_capped_by_validate_expires_at() {
+    let _g = metrics_lock().await;
+    let s = MockServer::start().await;
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 120;
+    Mock::given(method("POST"))
+        .and(path("/internal/validate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "user_id": "u1",
+            "api_key_id": "key1",
+            "expires_at": exp,
+        })))
+        .mount(&s)
+        .await;
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+
+    let resp = app(state)
+        .oneshot(
+            req("/test")
+                .header(header::AUTHORIZATION, "Bearer sqd_data_abc_xyz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
+    assert_eq!(claims.exp, exp);
 }
 
 #[tokio::test]

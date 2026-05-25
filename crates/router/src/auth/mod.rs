@@ -140,9 +140,5 @@ fn all_ips() -> Vec<IpNet> {
 
 #[cfg(test)]
 fn test_worker_jwt_issuer() -> WorkerJwtIssuer {
-    WorkerJwtIssuer::from_rsa_pem(
-        jwt::tests_support::TEST_PRIVATE_KEY.as_bytes(),
-        Some("test-key".to_string()),
-    )
-    .unwrap()
+    WorkerJwtIssuer::from_rsa_pem(jwt::tests_support::TEST_PRIVATE_KEY.as_bytes()).unwrap()
 }

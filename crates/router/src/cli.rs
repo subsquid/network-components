@@ -141,10 +141,6 @@ pub struct Cli {
     #[clap(long, env = "WORKER_JWT_PRIVATE_KEY_FILE", value_name = "PATH")]
     pub worker_jwt_private_key_file: Option<std::path::PathBuf>,
 
-    /// Optional key id included in the JWT header for worker key rotation.
-    #[clap(long, env = "WORKER_JWT_KID", value_name = "KID")]
-    pub worker_jwt_kid: Option<String>,
-
     /// Worker JWT lifetime in seconds.
     #[clap(long, env = "WORKER_JWT_TTL_SECS", value_name = "SECONDS", default_value = "3600")]
     pub worker_jwt_ttl_secs: u64,

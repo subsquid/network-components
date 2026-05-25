@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::clock::{Clock, SystemClock};
 
@@ -8,6 +8,7 @@ pub enum KeyState {
     Exists {
         user_id: String,
         api_key_id: String,
+        expires_at: Option<u64>,
     },
     Deleted,
     /// Network API was unreachable on the most recent attempt for this key.
@@ -86,17 +87,18 @@ impl KeyCache {
         token: String,
         user_id: String,
         api_key_id: String,
-        expires_at: Option<Instant>,
+        expires_at: Option<u64>,
     ) {
         let now = self.clock.now();
-        if let Some(exp) = expires_at {
+        let expires_at_deadline = expires_at.and_then(|exp| self.project_unix_expiry(exp, now));
+        if let Some(exp) = expires_at_deadline {
             if exp <= now {
                 self.put_deleted(token);
                 return;
             }
         }
         let default_deadline = now + TTL_EXISTS;
-        let deadline = match expires_at {
+        let deadline = match expires_at_deadline {
             Some(exp) => default_deadline.min(exp),
             None => default_deadline,
         };
@@ -104,10 +106,22 @@ impl KeyCache {
             state: KeyState::Exists {
                 user_id,
                 api_key_id,
+                expires_at,
             },
             deadline,
         };
         self.inner.insert(token, entry);
+    }
+
+    fn project_unix_expiry(&self, expires_at: u64, now: Instant) -> Option<Instant> {
+        let now_unix = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+        if expires_at <= now_unix {
+            Some(now)
+        } else if expires_at - now_unix >= TTL_EXISTS.as_secs() {
+            None
+        } else {
+            Some(now + Duration::from_secs(expires_at - now_unix))
+        }
     }
 
     pub fn put_deleted(&self, token: String) {
@@ -152,6 +166,7 @@ mod tests {
         KeyState::Exists {
             user_id: user.into(),
             api_key_id: api_key.into(),
+            expires_at: None,
         }
     }
 
@@ -202,10 +217,21 @@ mod tests {
     #[test]
     fn expires_at_clamped_inside_window() {
         let (c, clock) = cache();
-        let exp = clock.now() + Duration::from_secs(30);
+        let exp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 30;
         c.put_exists("tok".into(), "u".into(), "key".into(), Some(exp));
         clock.advance(Duration::from_secs(29));
-        assert_eq!(c.get("tok"), Some(exists("u", "key")));
+        assert_eq!(
+            c.get("tok"),
+            Some(KeyState::Exists {
+                user_id: "u".into(),
+                api_key_id: "key".into(),
+                expires_at: Some(exp),
+            })
+        );
         clock.advance(Duration::from_secs(2));
         assert_eq!(c.get("tok"), None, "clamp should expire at 30s, not 60s");
     }
@@ -213,7 +239,11 @@ mod tests {
     #[test]
     fn expires_at_already_expired_stores_deleted() {
         let (c, clock) = cache();
-        let exp = clock.now() - Duration::from_secs(1);
+        let exp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - 1;
         c.put_exists("tok".into(), "u".into(), "key".into(), Some(exp));
         assert_eq!(
             c.get("tok"),

@@ -47,6 +47,7 @@ pub struct AuthContext {
     pub user_id: String,
     #[allow(dead_code)]
     pub api_key_id: String,
+    pub expires_at: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -118,7 +119,7 @@ where
         let mut resp = next.run(req).await;
         if let Outcome::Ok(ctx) = &outcome {
             if let Some(issuer) = &state.worker_jwt_issuer {
-                match issuer.issue(&ctx.user_id, &ctx.api_key_id) {
+                match issuer.issue(&ctx.user_id, &ctx.api_key_id, ctx.expires_at) {
                     Ok(token) => match HeaderValue::from_str(&token) {
                         Ok(value) => {
                             resp.headers_mut().insert(WORKER_JWT_HEADER, value);
@@ -206,6 +207,7 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
                     Outcome::Ok(AuthContext {
                         user_id: INTERNAL_BYPASS_USER_ID.to_string(),
                         api_key_id: INTERNAL_BYPASS_USER_ID.to_string(),
+                        expires_at: None,
                     }),
                     Some(ip),
                 );
@@ -248,15 +250,13 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
             api_key_id,
             expires_at,
         } => {
-            state.cache.put_exists(
-                token.to_string(),
-                user_id.clone(),
-                api_key_id.clone(),
-                expires_at,
-            );
+            state
+                .cache
+                .put_exists(token.to_string(), user_id.clone(), api_key_id.clone(), expires_at);
             Outcome::Ok(AuthContext {
                 user_id,
                 api_key_id,
+                expires_at,
             })
         }
         ValidateResult::Deleted => {
@@ -277,11 +277,13 @@ fn lookup(state: &AuthState, token: &str) -> Option<Outcome> {
         KeyState::Exists {
             user_id,
             api_key_id,
+            expires_at,
         } => {
             CACHE_HIT_TOTAL.with_label_values(&["exists"]).inc();
             Some(Outcome::Ok(AuthContext {
                 user_id,
                 api_key_id,
+                expires_at,
             }))
         }
         KeyState::Deleted => {

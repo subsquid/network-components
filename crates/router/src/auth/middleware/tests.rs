@@ -49,17 +49,10 @@ async fn body_string(resp: Response) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
-fn assert_no_user_id_header(resp: &Response) {
+fn assert_no_worker_jwt_header(resp: &Response) {
     assert!(
-        resp.headers().get(USER_ID_HEADER).is_none(),
-        "{USER_ID_HEADER} must not be present"
-    );
-}
-
-fn assert_no_api_key_id_header(resp: &Response) {
-    assert!(
-        resp.headers().get(API_KEY_ID_HEADER).is_none(),
-        "{API_KEY_ID_HEADER} must not be present"
+        resp.headers().get(WORKER_JWT_HEADER).is_none(),
+        "{WORKER_JWT_HEADER} must not be present"
     );
 }
 
@@ -128,8 +121,8 @@ async fn bearer_header_extracts_key() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
-    assert_eq!(claims.user_id, "u1");
-    assert_eq!(claims.api_key_id, "key1");
+    assert_eq!(claims.u, "u1");
+    assert_eq!(claims.k, "key1");
     assert_eq!(claims.exp - claims.iat, 3600);
     assert_eq!(body_string(resp).await, "ok:u1:key1");
     assert_eq!(count_auth("ok") - before_ok, 1);
@@ -168,6 +161,40 @@ async fn worker_jwt_expiry_is_capped_by_validate_expires_at() {
     assert_eq!(resp.status(), StatusCode::OK);
     let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
     assert_eq!(claims.exp, exp);
+}
+
+#[tokio::test]
+async fn expired_validate_deadline_is_denied_immediately() {
+    let _g = metrics_lock().await;
+    let s = MockServer::start().await;
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        - 1;
+    Mock::given(method("POST"))
+        .and(path("/internal/validate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "user_id": "u1",
+            "api_key_id": "key1",
+            "expires_at": exp,
+        })))
+        .mount(&s)
+        .await;
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+
+    let resp = app(state)
+        .oneshot(
+            req("/test")
+                .header(header::AUTHORIZATION, "Bearer sqd_data_expired_xyz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_no_worker_jwt_header(&resp);
 }
 
 #[tokio::test]
@@ -214,8 +241,7 @@ async fn no_token_header_fallback() {
         .unwrap();
     // No Authorization header -> Missing -> 403 (enforce=true).
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    assert_no_user_id_header(&resp);
-    assert_no_api_key_id_header(&resp);
+    assert_no_worker_jwt_header(&resp);
     // Wiremock must not have been hit.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
 }
@@ -454,8 +480,7 @@ async fn cached_deleted_denies_during_outage() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    assert_no_user_id_header(&resp);
-    assert_no_api_key_id_header(&resp);
+    assert_no_worker_jwt_header(&resp);
 }
 
 #[tokio::test]
@@ -496,8 +521,7 @@ async fn breaker_open_passes_through_without_dial() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_no_user_id_header(&resp);
-    assert_no_api_key_id_header(&resp);
+    assert_no_worker_jwt_header(&resp);
     assert_eq!(
         s.received_requests().await.unwrap().len(),
         50,

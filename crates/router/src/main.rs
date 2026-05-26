@@ -45,11 +45,12 @@ async fn main() {
         Some(url) => auth::NetworkApiClient::new(url),
         None => auth::NetworkApiClient::disabled(),
     };
+    let worker_jwt_required = !args.disable_v2_auth && !args.enforce_v2_auth_for_ips.0.is_empty();
     let worker_jwt_issuer = create_worker_jwt_issuer(
-        args.worker_jwt_private_key_pem,
+        env::var("WORKER_JWT_PRIVATE_KEY_PEM").ok(),
         args.worker_jwt_private_key_file,
         Duration::from_secs(args.worker_jwt_ttl_secs),
-        !args.disable_v2_auth && !args.enforce_v2_auth_for_ips.0.is_empty(),
+        worker_jwt_required,
     );
     let auth_state = auth::AuthState::new(
         api_client,
@@ -58,6 +59,7 @@ async fn main() {
         args.trusted_ips.0,
         args.internal_allowlist.0,
         worker_jwt_issuer,
+        worker_jwt_required,
     );
 
     Server::new(controller).run(auth_state).await;
@@ -88,8 +90,8 @@ fn create_worker_jwt_issuer(
     };
 
     Some(
-        auth::WorkerJwtIssuer::from_rsa_pem_with_ttl(pem.as_bytes(), ttl)
-            .expect("invalid worker JWT RSA private key PEM or TTL"),
+        auth::WorkerJwtIssuer::from_ed25519_pem_with_ttl(pem.as_bytes(), ttl)
+            .expect("invalid worker JWT Ed25519 private key PEM or TTL"),
     )
 }
 

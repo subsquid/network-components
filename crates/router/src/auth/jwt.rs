@@ -4,16 +4,18 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
-use ring::rand::SystemRandom;
-use ring::signature::{RsaKeyPair, RSA_PKCS1_SHA256};
+use ring::signature::Ed25519KeyPair;
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_TTL: Duration = Duration::from_secs(60 * 60);
 const REFRESH_BEFORE_EXPIRY: Duration = Duration::from_secs(30);
+#[cfg(not(test))]
+const MAX_CACHED_TOKENS: usize = 10_000;
+#[cfg(test)]
+const MAX_CACHED_TOKENS: usize = 32;
 
 #[derive(Clone)]
 pub struct WorkerJwtIssuer {
-    key: Arc<RsaKeyPair>,
+    key: Arc<Ed25519KeyPair>,
     ttl: Duration,
     cache: Arc<Mutex<HashMap<CacheKey, CachedToken>>>,
 }
@@ -33,34 +35,24 @@ struct CachedToken {
 #[derive(Serialize)]
 struct WorkerJwtHeader {
     alg: &'static str,
-    typ: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorkerJwtClaims {
-    pub user_id: String,
-    pub api_key_id: String,
+    pub u: String,
+    pub k: String,
     pub iat: u64,
     pub exp: u64,
 }
 
 impl WorkerJwtIssuer {
-    pub fn from_rsa_pem(pem: &[u8]) -> Result<Self, String> {
-        Self::from_rsa_pem_with_ttl(pem, DEFAULT_TTL)
-    }
-
-    pub fn from_rsa_pem_with_ttl(pem: &[u8], ttl: Duration) -> Result<Self, String> {
+    pub fn from_ed25519_pem_with_ttl(pem: &[u8], ttl: Duration) -> Result<Self, String> {
         if ttl.is_zero() {
             return Err("worker JWT TTL must be greater than zero".to_string());
         }
-        let key = match decode_pem(pem, "PRIVATE KEY") {
-            Ok(der) => RsaKeyPair::from_pkcs8(&der),
-            Err(_) => {
-                let der = decode_pem(pem, "RSA PRIVATE KEY")?;
-                RsaKeyPair::from_der(&der)
-            }
-        }
-        .map_err(|err| format!("invalid RSA key: {err}"))?;
+        let der = decode_pem(pem, "PRIVATE KEY")?;
+        let key = Ed25519KeyPair::from_pkcs8_maybe_unchecked(&der)
+            .map_err(|err| format!("invalid Ed25519 key: {err}"))?;
         Ok(Self {
             key: Arc::new(key),
             ttl,
@@ -91,23 +83,16 @@ impl WorkerJwtIssuer {
         }
 
         let claims = WorkerJwtClaims {
-            user_id: user_id.to_string(),
-            api_key_id: api_key_id.to_string(),
+            u: user_id.to_string(),
+            k: api_key_id.to_string(),
             iat,
             exp,
         };
-        let header = WorkerJwtHeader {
-            alg: "RS256",
-            typ: "JWT",
-        };
+        let header = WorkerJwtHeader { alg: "EdDSA" };
         let header = encode_json(&header)?;
         let payload = encode_json(&claims)?;
         let signing_input = format!("{header}.{payload}");
-        let rng = SystemRandom::new();
-        let mut signature = vec![0; self.key.public().modulus_len()];
-        self.key
-            .sign(&RSA_PKCS1_SHA256, &rng, signing_input.as_bytes(), &mut signature)
-            .map_err(|_| "failed to sign worker JWT".to_string())?;
+        let signature = self.key.sign(signing_input.as_bytes());
         let token = format!("{signing_input}.{}", URL_SAFE_NO_PAD.encode(signature));
         self.store_token(key, token.clone(), claims.exp, iat);
         Ok(token)
@@ -127,6 +112,15 @@ impl WorkerJwtIssuer {
     fn store_token(&self, key: CacheKey, token: String, exp: u64, now: u64) {
         let mut cache = self.cache.lock().expect("worker JWT cache mutex poisoned");
         cache.retain(|_, cached| cached.exp > now);
+        if !cache.contains_key(&key) && cache.len() >= MAX_CACHED_TOKENS {
+            if let Some(oldest_key) = cache
+                .iter()
+                .min_by_key(|(_, cached)| cached.exp)
+                .map(|(key, _)| key.clone())
+            {
+                cache.remove(&oldest_key);
+            }
+        }
         cache.insert(key, CachedToken { token, exp });
     }
 }
@@ -166,38 +160,14 @@ pub fn decode_pem(pem: &[u8], label: &str) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 pub mod tests_support {
     pub const TEST_PRIVATE_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDR8qHjLfYFCbIv
-7FKY7WceocTHLfW2QJGDF3yY2vrzw7ySxRDE6gqEpApaQs/pfjI+WOxONCO4bIV9
-d9GRIkda2j+nkTENGRyelU2uSb20xXDhoWtLfelYGM05OP+2IJb7jIfrFXFdhIFD
-7IxH4JsLQavQ8+78c5iPYnjvk6DKMNg4Hx9PqLytDty9clWViw6SJpBJFDmLNIDQ
-Mgxk+X5/ODgiLrgPavD9KviQqw28BcvKHopm15vdwNF1EyzecLeZ3OGCL53f/Atl
-g1yv6zVLfnKny0mFwYYQUBNBmyk6iqG5vN1I3MhYSR6xwCczvtnFDQn+enyZzgHm
-gndORDqFAgMBAAECggEAFwIQ9Wgj4NvLVXl/zcxKnkPv4DzXA4ZM9sGxVmu9JSTA
-0DwyK8T9qm6dxymGRoTyyvwMyD8/i5EHtL8s+MukZ+j+ITDbYB+YkCqK7PxI2Cbr
-yYEFVKxzpkNwONgDHLmyl4EITjOMjR6d2fdHolg+NZFuBm6330kTIYzoSv0cmbu7
-cc2YaxajD9SIYa3gC0NROQ88x9xXt9hT+oMhudj5d3JcyiDxS9J3maqI9WkHwUzW
-SQAYtN+L4/jN9vJL/s16lBrxFnFHPud7/l4KkcZOZjT1NSSBBCgldxfTK2wXfCPg
-V4Q1ZmQUpkvIgrl5rDYFE9ak/cff/3CLftRClfgruwKBgQDgZSXctadJXIFSB/Oz
-FNJAPLG48bvB4qdBO4xiLvFShD3la5DzoTw1oTFmzYuq3rhQOtKD+qN9/7n5uLUD
-5BHrg16yDlmz6VbD9FLdU/V+ePF1Jwvl2v9YJ0Q5QGrdltdTilh10nFoLV/Ik9sH
-O+QF7EUrxsdkNPS1W9WRe7fT8wKBgQDvhJFTo4PAxp0iaFQXgrwaglPVsS/6qSBY
-SyC19+RBYByG3dWEVtsscMe2CaZ4b14quCkxlR6gO+ZTb0voFDN8/b5U2logxvU1
-ROIGHgh37zOcRNWsRhOiDyOj8qkQ6HBFmUnLBi8BY5yASH1qtm36kScIAbc/731t
-5yNmEpvtpwKBgQCCODCQtJov6I7jm9nAwwSAYriAK0haa73EDVqaX8OLr1J8IMAt
-ohPey3xvvDihID610Gz6Sik2pYC3eokRiPkdQ09g5RMJZRAFB3RPHLoKewUkh1RQ
-P5aPAbqFvuxFS5QJ1u8e8ND/M9WyAJvKxua8yTAbB3AOpuybkn+Nvc4gIQKBgBuQ
-UAEmEiV/Ndod03+ZJfiPAwLWj0Tzbat7idonGveDDgVfRhEixbpJiFIkrimx905H
-P0ZbeNjLy+fSKRQeLwa1VNADCNg4zUNCGBjIIAVdW70iFszqi5vczicx587wUOtR
-hrJ8lbA9PGdu8C/1qpZpWeqL+AC9mNuq++HlRliFAoGBAI0r7FqWoPVXid4PYbFC
-SKH9D7cc6VjJWpxG8sxd0a6IbS2qh+4bGS4IBErtCZIQZC/QJVBFL7Ci53rpxNyl
-x+4pvLgz1SGSn2nD6h3/+bhJw+Ak1WEevkdFNFcv6rWxfabDwPCezQz+xxfEXVCs
-Nqv/oNzamjjCTlBEKaGe4IjG
+MC4CAQAwBQYDK2VwBCIEIH8aSkCaxHQOnBc3SbAkalwpC4wG8z2V/Xfu9T+b3g3F
 -----END PRIVATE KEY-----"#;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ring::signature::{KeyPair, UnparsedPublicKey, ED25519};
 
     fn decode_claims(token: &str) -> WorkerJwtClaims {
         let parts: Vec<&str> = token.split('.').collect();
@@ -207,7 +177,7 @@ mod tests {
 
     #[test]
     fn configured_ttl_sets_expiry() {
-        let issuer = WorkerJwtIssuer::from_rsa_pem_with_ttl(
+        let issuer = WorkerJwtIssuer::from_ed25519_pem_with_ttl(
             tests_support::TEST_PRIVATE_KEY.as_bytes(),
             Duration::from_secs(42),
         )
@@ -215,12 +185,35 @@ mod tests {
 
         let claims = decode_claims(&issuer.issue("u1", "key1", None).unwrap());
 
+        assert_eq!(claims.u, "u1");
+        assert_eq!(claims.k, "key1");
         assert_eq!(claims.exp - claims.iat, 42);
     }
 
     #[test]
+    fn issued_token_signature_verifies() {
+        let issuer = WorkerJwtIssuer::from_ed25519_pem_with_ttl(
+            tests_support::TEST_PRIVATE_KEY.as_bytes(),
+            Duration::from_secs(42),
+        )
+        .unwrap();
+        let token = issuer.issue("u1", "key1", None).unwrap();
+        let parts: Vec<&str> = token.split('.').collect();
+        assert_eq!(parts.len(), 3);
+
+        let signing_input = format!("{}.{}", parts[0], parts[1]);
+        let signature = URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
+        assert_eq!(signature.len(), 64);
+        let public_key = UnparsedPublicKey::new(&ED25519, issuer.key.public_key().as_ref());
+
+        public_key
+            .verify(signing_input.as_bytes(), &signature)
+            .expect("worker JWT signature must verify with issuer public key");
+    }
+
+    #[test]
     fn validation_deadline_caps_expiry() {
-        let issuer = WorkerJwtIssuer::from_rsa_pem_with_ttl(
+        let issuer = WorkerJwtIssuer::from_ed25519_pem_with_ttl(
             tests_support::TEST_PRIVATE_KEY.as_bytes(),
             Duration::from_secs(3600),
         )
@@ -234,7 +227,7 @@ mod tests {
 
     #[test]
     fn cached_token_is_not_reused_past_validation_deadline() {
-        let issuer = WorkerJwtIssuer::from_rsa_pem_with_ttl(
+        let issuer = WorkerJwtIssuer::from_ed25519_pem_with_ttl(
             tests_support::TEST_PRIVATE_KEY.as_bytes(),
             Duration::from_secs(3600),
         )
@@ -246,5 +239,21 @@ mod tests {
 
         assert_ne!(uncapped, capped);
         assert_eq!(decode_claims(&capped).exp, deadline);
+    }
+
+    #[test]
+    fn cache_is_capped() {
+        let issuer = WorkerJwtIssuer::from_ed25519_pem_with_ttl(
+            tests_support::TEST_PRIVATE_KEY.as_bytes(),
+            Duration::from_secs(3600),
+        )
+        .unwrap();
+
+        for i in 0..(MAX_CACHED_TOKENS + 1) {
+            issuer.issue(&format!("u{i}"), "key1", None).unwrap();
+        }
+
+        let cache = issuer.cache.lock().unwrap();
+        assert_eq!(cache.len(), MAX_CACHED_TOKENS);
     }
 }

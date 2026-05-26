@@ -11,8 +11,8 @@ use std::sync::Arc;
 use ipnet::IpNet;
 
 pub use cache::KeyCache;
-pub use jwt::WorkerJwtIssuer;
 pub use client::NetworkApiClient;
+pub use jwt::WorkerJwtIssuer;
 pub use singleflight::Singleflight;
 pub use topkeys::TopKeys;
 
@@ -40,6 +40,8 @@ pub struct AuthState {
     pub internal_allowlist: Vec<IpNet>,
     /// Issues short-lived credentials that clients pass to workers.
     pub worker_jwt_issuer: Option<WorkerJwtIssuer>,
+    /// When true, authenticated responses must carry a worker JWT.
+    pub worker_jwt_required: bool,
 }
 
 impl AuthState {
@@ -50,6 +52,7 @@ impl AuthState {
         trusted_ips: Vec<IpNet>,
         internal_allowlist: Vec<IpNet>,
         worker_jwt_issuer: Option<WorkerJwtIssuer>,
+        worker_jwt_required: bool,
     ) -> Arc<Self> {
         Arc::new(Self {
             cache: KeyCache::new(10_000),
@@ -61,6 +64,7 @@ impl AuthState {
             trusted_ips,
             internal_allowlist,
             worker_jwt_issuer,
+            worker_jwt_required,
         })
     }
 
@@ -114,6 +118,7 @@ impl AuthState {
         trusted_ips: Vec<IpNet>,
         internal_allowlist: Vec<IpNet>,
     ) -> Arc<Self> {
+        let worker_jwt_required = !disabled && !enforce_for_ips.is_empty();
         Arc::new(Self {
             cache: KeyCache::with_clock(10_000, clock.clone()),
             client: NetworkApiClient::with_clock(base_url, clock),
@@ -124,6 +129,7 @@ impl AuthState {
             trusted_ips,
             internal_allowlist,
             worker_jwt_issuer: Some(test_worker_jwt_issuer()),
+            worker_jwt_required,
         })
     }
 }
@@ -132,13 +138,14 @@ impl AuthState {
 /// the CLI parser (when the user writes `*`) and by the test boolean shim.
 #[cfg(test)]
 fn all_ips() -> Vec<IpNet> {
-    vec![
-        "0.0.0.0/0".parse().unwrap(),
-        "::/0".parse().unwrap(),
-    ]
+    vec!["0.0.0.0/0".parse().unwrap(), "::/0".parse().unwrap()]
 }
 
 #[cfg(test)]
 fn test_worker_jwt_issuer() -> WorkerJwtIssuer {
-    WorkerJwtIssuer::from_rsa_pem(jwt::tests_support::TEST_PRIVATE_KEY.as_bytes()).unwrap()
+    WorkerJwtIssuer::from_ed25519_pem_with_ttl(
+        jwt::tests_support::TEST_PRIVATE_KEY.as_bytes(),
+        std::time::Duration::from_secs(3600),
+    )
+    .unwrap()
 }

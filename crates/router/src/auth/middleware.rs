@@ -17,8 +17,6 @@ use crate::metrics::{
 };
 
 const TOKEN_PREFIX: &str = "sqd_data_";
-const USER_ID_HEADER: &str = "x-sqd-user-id";
-const API_KEY_ID_HEADER: &str = "x-sqd-api-key-id";
 const WORKER_JWT_HEADER: &str = "x-sqd-auth";
 
 /// Fixed user_id for IP-allowlist bypass requests. Single label keeps the
@@ -118,20 +116,31 @@ where
     if allowed {
         let mut resp = next.run(req).await;
         if let Outcome::Ok(ctx) = &outcome {
-            if let Some(issuer) = &state.worker_jwt_issuer {
-                match issuer.issue(&ctx.user_id, &ctx.api_key_id, ctx.expires_at) {
+            match &state.worker_jwt_issuer {
+                Some(issuer) => match issuer.issue(&ctx.user_id, &ctx.api_key_id, ctx.expires_at) {
                     Ok(token) => match HeaderValue::from_str(&token) {
                         Ok(value) => {
                             resp.headers_mut().insert(WORKER_JWT_HEADER, value);
                         }
                         Err(_) => {
                             warn!("worker jwt cannot be encoded as response header");
+                            if state.worker_jwt_required {
+                                return worker_jwt_error();
+                            }
                         }
                     },
                     Err(err) => {
                         warn!(error = %err, "failed to issue worker jwt");
+                        if state.worker_jwt_required {
+                            return worker_jwt_error();
+                        }
                     }
+                },
+                None if state.worker_jwt_required => {
+                    warn!("worker jwt issuer is required but not configured");
+                    return worker_jwt_error();
                 }
+                None => {}
             }
         }
         resp
@@ -250,9 +259,15 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
             api_key_id,
             expires_at,
         } => {
-            state
-                .cache
-                .put_exists(token.to_string(), user_id.clone(), api_key_id.clone(), expires_at);
+            let stored = state.cache.put_exists(
+                token.to_string(),
+                user_id.clone(),
+                api_key_id.clone(),
+                expires_at,
+            );
+            if !stored {
+                return (Outcome::Invalid, real_ip);
+            }
             Outcome::Ok(AuthContext {
                 user_id,
                 api_key_id,
@@ -295,6 +310,14 @@ fn lookup(state: &AuthState, token: &str) -> Option<Outcome> {
             Some(Outcome::FailOpen)
         }
     }
+}
+
+fn worker_jwt_error() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({"error": "worker_auth_unavailable"})),
+    )
+        .into_response()
 }
 
 fn extract_bearer(header: &str) -> Option<&str> {

@@ -88,13 +88,13 @@ impl KeyCache {
         user_id: String,
         api_key_id: String,
         expires_at: Option<u64>,
-    ) {
+    ) -> bool {
         let now = self.clock.now();
         let expires_at_deadline = expires_at.and_then(|exp| self.project_unix_expiry(exp, now));
         if let Some(exp) = expires_at_deadline {
             if exp <= now {
                 self.put_deleted(token);
-                return;
+                return false;
             }
         }
         let default_deadline = now + TTL_EXISTS;
@@ -111,6 +111,7 @@ impl KeyCache {
             deadline,
         };
         self.inner.insert(token, entry);
+        true
     }
 
     fn project_unix_expiry(&self, expires_at: u64, now: Instant) -> Option<Instant> {

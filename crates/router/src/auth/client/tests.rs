@@ -77,8 +77,8 @@ async fn validate_200_propagates_expires_at() {
     }
 }
 
-// `expires_at` already in the past (server says: this is dead) -> we
-// return Some(now) so the cache demotes the entry to Deleted on insert.
+// `expires_at` already in the past still propagates as the raw server Unix
+// timestamp; the middleware/cache path uses it to deny and cache deletion.
 #[tokio::test]
 async fn validate_200_past_expires_at_returns_now() {
     let s = server().await;

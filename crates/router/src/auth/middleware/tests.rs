@@ -429,6 +429,10 @@ async fn network_api_timeout_fails_open() {
         StatusCode::OK,
         "fail-open must pass even when enforcing"
     );
+    let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
+    assert_eq!(claims.u, "fail-open");
+    assert_eq!(claims.k, "fail-open");
+    assert_eq!(claims.exp - claims.iat, 3600);
     assert_eq!(count_auth("fail_open") - before_fail, 1);
 
     // 2nd request within the 1s sentinel: served from cache, no API call.
@@ -521,7 +525,10 @@ async fn breaker_open_passes_through_without_dial() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_no_worker_jwt_header(&resp);
+    let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
+    assert_eq!(claims.u, "fail-open");
+    assert_eq!(claims.k, "fail-open");
+    assert_eq!(claims.exp - claims.iat, 3600);
     assert_eq!(
         s.received_requests().await.unwrap().len(),
         50,
@@ -942,6 +949,10 @@ async fn bypass_xoff_real_client_in_allowlist() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
+    let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
+    assert_eq!(claims.u, "internal");
+    assert_eq!(claims.k, "internal");
+    assert_eq!(claims.exp - claims.iat, 3600);
     assert_eq!(body_string(resp).await, "ok:internal:internal");
     // Bypass must NOT touch the Network API.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
@@ -1464,6 +1475,10 @@ async fn canary_passes_for_ip_out_of_scope() {
 
     // Out-of-scope source -> fail open even though the policy is "enforce".
     assert_eq!(resp.status(), StatusCode::OK);
+    let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
+    assert_eq!(claims.u, "internal");
+    assert_eq!(claims.k, "internal");
+    assert_eq!(claims.exp - claims.iat, 3600);
 }
 
 // In canary mode, the metric still records what WOULD have happened —

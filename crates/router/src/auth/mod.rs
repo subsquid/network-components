@@ -121,14 +121,18 @@ impl AuthState {
         let worker_jwt_required = !disabled && !enforce_for_ips.is_empty();
         Arc::new(Self {
             cache: KeyCache::with_clock(10_000, clock.clone()),
-            client: NetworkApiClient::with_clock(base_url, clock),
+            client: NetworkApiClient::with_clock(base_url, clock.clone()),
             top_keys: TopKeys::new(100),
             inflight: Singleflight::new(),
             disabled,
             enforce_for_ips,
             trusted_ips,
             internal_allowlist,
-            worker_jwt_issuer: Some(test_worker_jwt_issuer()),
+            worker_jwt_issuer: Some(WorkerJwtIssuer::with_clock(
+                jwt::tests_support::TEST_PRIVATE_KEY.as_bytes(),
+                std::time::Duration::from_secs(3600),
+                clock,
+            )),
             worker_jwt_required,
         })
     }
@@ -139,13 +143,4 @@ impl AuthState {
 #[cfg(test)]
 fn all_ips() -> Vec<IpNet> {
     vec!["0.0.0.0/0".parse().unwrap(), "::/0".parse().unwrap()]
-}
-
-#[cfg(test)]
-fn test_worker_jwt_issuer() -> WorkerJwtIssuer {
-    WorkerJwtIssuer::from_ed25519_pem_with_ttl(
-        jwt::tests_support::TEST_PRIVATE_KEY.as_bytes(),
-        std::time::Duration::from_secs(3600),
-    )
-    .unwrap()
 }

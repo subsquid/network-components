@@ -19,10 +19,10 @@ use crate::metrics::{
 const TOKEN_PREFIX: &str = "sqd_data_";
 const USER_ID_HEADER: &str = "x-sqd-user-id";
 const API_KEY_ID_HEADER: &str = "x-sqd-api-key-id";
+const WORKER_JWT_HEADER: &str = "x-sqd-auth";
 
-/// Fixed user_id for IP-allowlist bypass requests. Single label keeps the
-/// top-keys sketch (REQUESTS_BY_KEY) bounded — see `decide` step 3.
-const INTERNAL_BYPASS_USER_ID: &str = "internal";
+const INTERNAL_ID: &str = "internal";
+const FAIL_OPEN_ID: &str = "fail-open";
 
 /// Header inspected for the upstream-supplied forwarded chain.
 ///
@@ -42,10 +42,9 @@ const ORIGINAL_FORWARDED_FOR: &str = "X-Original-Forwarded-For";
 /// IP-allowlist bypass uses the fixed `internal` identity.
 #[derive(Clone, Debug)]
 pub struct AuthContext {
-    #[allow(dead_code)]
     pub user_id: String,
-    #[allow(dead_code)]
     pub api_key_id: String,
+    pub expires_at: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -116,26 +115,49 @@ where
     if allowed {
         let mut resp = next.run(req).await;
         if let Outcome::Ok(ctx) = &outcome {
-            match HeaderValue::from_str(&ctx.user_id) {
-                Ok(value) => {
-                    resp.headers_mut().insert(USER_ID_HEADER, value);
-                }
-                Err(_) => {
-                    warn!("validated user_id cannot be encoded as response header");
-                }
+            if let Ok(value) = HeaderValue::from_str(&ctx.user_id) {
+                resp.headers_mut().insert(USER_ID_HEADER, value);
+            } else {
+                warn!("validated user_id cannot be encoded as response header");
             }
-            match HeaderValue::from_str(&ctx.api_key_id) {
-                Ok(value) => {
-                    resp.headers_mut().insert(API_KEY_ID_HEADER, value);
-                }
-                Err(_) => {
-                    warn!("validated api_key_id cannot be encoded as response header");
-                }
+            if let Ok(value) = HeaderValue::from_str(&ctx.api_key_id) {
+                resp.headers_mut().insert(API_KEY_ID_HEADER, value);
+            } else {
+                warn!("validated api_key_id cannot be encoded as response header");
+            }
+        }
+        if let Some((user_id, api_key_id, expires_at)) = worker_jwt_context(&outcome) {
+            match &state.worker_jwt_issuer {
+                Some(issuer) => match issuer.issue(user_id, api_key_id, expires_at) {
+                    Ok(token) => match HeaderValue::from_str(&token) {
+                        Ok(value) => {
+                            resp.headers_mut().insert(WORKER_JWT_HEADER, value);
+                        }
+                        Err(_) => {
+                            warn!("worker jwt cannot be encoded as response header");
+                            return worker_jwt_error();
+                        }
+                    },
+                    Err(err) => {
+                        warn!(error = %err, "failed to issue worker jwt");
+                        return worker_jwt_error();
+                    }
+                },
+                None => {}
             }
         }
         resp
     } else {
         deny()
+    }
+}
+
+fn worker_jwt_context(outcome: &Outcome) -> Option<(&str, &str, Option<u64>)> {
+    match outcome {
+        Outcome::Ok(ctx) => Some((&ctx.user_id, &ctx.api_key_id, ctx.expires_at)),
+        Outcome::Missing | Outcome::Invalid => Some((INTERNAL_ID, INTERNAL_ID, None)),
+        Outcome::FailOpen => Some((FAIL_OPEN_ID, FAIL_OPEN_ID, None)),
+        Outcome::Disabled => None,
     }
 }
 
@@ -193,7 +215,7 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
     // 3. Source-IP bypass. Disabled when allowlist is empty.
     //
     // We attribute every bypass request under a single fixed label
-    // (`INTERNAL_BYPASS_USER_ID`) instead of `internal:<ip>` per source.
+    // (`internal`) instead of `internal:<ip>` per source.
     // Reason: the top-keys sketch (REQUESTS_BY_KEY) is bounded to 100
     // entries; if internal pods come from many distinct IPs (we've seen
     // dozens of /16 pod-CIDR blocks in main GKE), each would claim a
@@ -204,8 +226,9 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
             if state.internal_allowlist.iter().any(|net| net.contains(&ip)) {
                 return (
                     Outcome::Ok(AuthContext {
-                        user_id: INTERNAL_BYPASS_USER_ID.to_string(),
-                        api_key_id: INTERNAL_BYPASS_USER_ID.to_string(),
+                        user_id: INTERNAL_ID.to_string(),
+                        api_key_id: INTERNAL_ID.to_string(),
+                        expires_at: None,
                     }),
                     Some(ip),
                 );
@@ -248,15 +271,19 @@ async fn decide<B>(state: &AuthState, req: &mut Request<B>) -> (Outcome, Option<
             api_key_id,
             expires_at,
         } => {
-            state.cache.put_exists(
+            let stored = state.cache.put_exists(
                 token.to_string(),
                 user_id.clone(),
                 api_key_id.clone(),
                 expires_at,
             );
+            if !stored {
+                return (Outcome::Invalid, real_ip);
+            }
             Outcome::Ok(AuthContext {
                 user_id,
                 api_key_id,
+                expires_at,
             })
         }
         ValidateResult::Deleted => {
@@ -277,11 +304,13 @@ fn lookup(state: &AuthState, token: &str) -> Option<Outcome> {
         KeyState::Exists {
             user_id,
             api_key_id,
+            expires_at,
         } => {
             CACHE_HIT_TOTAL.with_label_values(&["exists"]).inc();
             Some(Outcome::Ok(AuthContext {
                 user_id,
                 api_key_id,
+                expires_at,
             }))
         }
         KeyState::Deleted => {
@@ -293,6 +322,14 @@ fn lookup(state: &AuthState, token: &str) -> Option<Outcome> {
             Some(Outcome::FailOpen)
         }
     }
+}
+
+fn worker_jwt_error() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({"error": "worker_auth_unavailable"})),
+    )
+        .into_response()
 }
 
 fn extract_bearer(header: &str) -> Option<&str> {

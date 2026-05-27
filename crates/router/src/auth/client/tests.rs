@@ -44,9 +44,7 @@ async fn validate_200_returns_exists() {
 
 // New: when the validate API returns an `expires_at` (server-side TTL),
 // it must propagate through to ValidateResult so the cache can clamp the
-// entry's lifetime below TTL_EXISTS. Server timestamp is unix seconds; we
-// project onto the monotonic clock (TestClock here) by computing the
-// remaining duration relative to "now" and adding to clock.now().
+// entry's lifetime below TTL_EXISTS.
 #[tokio::test]
 async fn validate_200_propagates_expires_at() {
     let s = server().await;
@@ -69,20 +67,18 @@ async fn validate_200_propagates_expires_at() {
         ValidateResult::Exists {
             user_id,
             api_key_id,
-            expires_at: Some(_),
+            expires_at: Some(expires_at),
         } => {
             assert_eq!(user_id, "u1");
             assert_eq!(api_key_id, "key1");
-            // Specific value depends on TestClock starting reference;
-            // the existence of Some(_) is what we assert here, plus the
-            // cache test below which exercises the clamping behaviour.
+            assert_eq!(expires_at, exp);
         }
         other => panic!("expected Exists with expires_at, got {:?}", other),
     }
 }
 
-// `expires_at` already in the past (server says: this is dead) -> we
-// return Some(now) so the cache demotes the entry to Deleted on insert.
+// `expires_at` already in the past still propagates as the raw server Unix
+// timestamp; the middleware/cache path uses it to deny and cache deletion.
 #[tokio::test]
 async fn validate_200_past_expires_at_returns_now() {
     let s = server().await;
@@ -178,17 +174,14 @@ async fn validate_500_returns_fail_open() {
 async fn validate_timeout_returns_fail_open() {
     let s = server().await;
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_millis(500)))
+        .respond_with(ResponseTemplate::new(200).set_delay(TIMEOUT + Duration::from_secs(2)))
         .mount(&s)
         .await;
     let c = client(&s, TestClock::new());
-    let start = std::time::Instant::now();
-    assert_eq!(c.validate("sqd_data_x_y").await, ValidateResult::FailOpen);
-    assert!(
-        start.elapsed() < Duration::from_millis(450),
-        "must time out within ~250ms; took {:?}",
-        start.elapsed()
-    );
+    let result = tokio::time::timeout(TIMEOUT + Duration::from_secs(1), c.validate("sqd_data_x_y"))
+        .await
+        .expect("validate must return before the delayed response arrives");
+    assert_eq!(result, ValidateResult::FailOpen);
 }
 
 #[tokio::test]

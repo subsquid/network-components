@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod client;
 pub mod clock;
+pub mod jwt;
 pub mod middleware;
 pub mod singleflight;
 pub mod topkeys;
@@ -11,6 +12,7 @@ use ipnet::IpNet;
 
 pub use cache::KeyCache;
 pub use client::NetworkApiClient;
+pub use jwt::WorkerJwtIssuer;
 pub use singleflight::Singleflight;
 pub use topkeys::TopKeys;
 
@@ -36,6 +38,8 @@ pub struct AuthState {
     /// Source IPs allowed to bypass Bearer auth. Matched against the
     /// resolved real-client IP (see `trusted_ips`). Empty -> bypass disabled.
     pub internal_allowlist: Vec<IpNet>,
+    /// Issues short-lived credentials that clients pass to workers.
+    pub worker_jwt_issuer: Option<WorkerJwtIssuer>,
 }
 
 impl AuthState {
@@ -45,6 +49,7 @@ impl AuthState {
         enforce_for_ips: Vec<IpNet>,
         trusted_ips: Vec<IpNet>,
         internal_allowlist: Vec<IpNet>,
+        worker_jwt_issuer: Option<WorkerJwtIssuer>,
     ) -> Arc<Self> {
         Arc::new(Self {
             cache: KeyCache::new(10_000),
@@ -55,6 +60,7 @@ impl AuthState {
             enforce_for_ips,
             trusted_ips,
             internal_allowlist,
+            worker_jwt_issuer,
         })
     }
 
@@ -110,13 +116,18 @@ impl AuthState {
     ) -> Arc<Self> {
         Arc::new(Self {
             cache: KeyCache::with_clock(10_000, clock.clone()),
-            client: NetworkApiClient::with_clock(base_url, clock),
+            client: NetworkApiClient::with_clock(base_url, clock.clone()),
             top_keys: TopKeys::new(100),
             inflight: Singleflight::new(),
             disabled,
             enforce_for_ips,
             trusted_ips,
             internal_allowlist,
+            worker_jwt_issuer: Some(WorkerJwtIssuer::with_clock(
+                jwt::tests_support::TEST_PRIVATE_KEY.as_bytes(),
+                std::time::Duration::from_secs(3600),
+                clock,
+            )),
         })
     }
 }
@@ -125,8 +136,5 @@ impl AuthState {
 /// the CLI parser (when the user writes `*`) and by the test boolean shim.
 #[cfg(test)]
 fn all_ips() -> Vec<IpNet> {
-    vec![
-        "0.0.0.0/0".parse().unwrap(),
-        "::/0".parse().unwrap(),
-    ]
+    vec!["0.0.0.0/0".parse().unwrap(), "::/0".parse().unwrap()]
 }

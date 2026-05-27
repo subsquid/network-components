@@ -3,6 +3,8 @@ use cli::Cli;
 use router_controller::controller::ControllerBuilder;
 use server::Server;
 use std::env;
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use storage::{S3Storage, Storage};
@@ -44,15 +46,43 @@ async fn main() {
         Some(url) => auth::NetworkApiClient::new(url),
         None => auth::NetworkApiClient::disabled(),
     };
+    let worker_jwt_must_be_configured =
+        !args.disable_v2_auth && !args.enforce_v2_auth_for_ips.0.is_empty();
+    let worker_jwt_ttl = Duration::from_secs(args.worker_jwt_ttl_secs);
+    let worker_jwt_issuer = args
+        .worker_jwt_private_key
+        .map(|private_key| create_worker_jwt_issuer(private_key, worker_jwt_ttl));
+    if worker_jwt_must_be_configured && worker_jwt_issuer.is_none() {
+        panic!("WORKER_JWT_PRIVATE_KEY is required when V2 auth enforcement is enabled");
+    }
     let auth_state = auth::AuthState::new(
         api_client,
         args.disable_v2_auth,
         args.enforce_v2_auth_for_ips.0,
         args.trusted_ips.0,
         args.internal_allowlist.0,
+        worker_jwt_issuer,
     );
 
     Server::new(controller).run(auth_state).await;
+}
+
+fn create_worker_jwt_issuer(private_key_or_path: String, ttl: Duration) -> auth::WorkerJwtIssuer {
+    let path = Path::new(&private_key_or_path);
+    let pem = if path.is_file() {
+        fs::read_to_string(path).unwrap_or_else(|err| {
+            panic!(
+                "failed to read worker JWT private key file {}: {}",
+                path.display(),
+                err
+            )
+        })
+    } else {
+        private_key_or_path
+    };
+
+    auth::WorkerJwtIssuer::from_ed25519_pem_with_ttl(pem.as_bytes(), ttl)
+        .expect("invalid worker JWT Ed25519 private key PEM or TTL")
 }
 
 async fn create_storage(dataset: &str) -> Arc<dyn Storage + Sync + Send> {

@@ -129,4 +129,13 @@ pub struct Cli {
     /// every request goes through the standard Bearer path.
     #[clap(long, env = "INTERNAL_ALLOWLIST", value_name = "CIDR,CIDR,...", default_value = "")]
     pub internal_allowlist: CidrList,
+
+    /// Ed25519 private key PEM, or a path to a PEM file, used to sign
+    /// short-lived worker JWTs.
+    #[clap(long, env = "WORKER_JWT_PRIVATE_KEY", value_name = "PEM_OR_PATH")]
+    pub worker_jwt_private_key: Option<String>,
+
+    /// Worker JWT lifetime in seconds.
+    #[clap(long, env = "WORKER_JWT_TTL_SECS", value_name = "SECONDS", default_value = "3600")]
+    pub worker_jwt_ttl_secs: u64,
 }

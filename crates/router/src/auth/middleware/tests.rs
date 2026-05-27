@@ -9,6 +9,8 @@ use axum::http::{header, Request, StatusCode};
 use axum::middleware::from_fn;
 use axum::routing::get;
 use axum::Router;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use serde_json::Value;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -47,19 +49,19 @@ async fn body_string(resp: Response) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
+fn assert_no_worker_jwt_header(resp: &Response) {
+    assert!(
+        resp.headers().get(WORKER_JWT_HEADER).is_none(),
+        "{WORKER_JWT_HEADER} must not be present"
+    );
+}
+
 fn assert_user_id_header(resp: &Response, expected: &str) {
     assert_eq!(
         resp.headers()
             .get(USER_ID_HEADER)
             .and_then(|value| value.to_str().ok()),
         Some(expected)
-    );
-}
-
-fn assert_no_user_id_header(resp: &Response) {
-    assert!(
-        resp.headers().get(USER_ID_HEADER).is_none(),
-        "{USER_ID_HEADER} must not be present"
     );
 }
 
@@ -72,11 +74,31 @@ fn assert_api_key_id_header(resp: &Response, expected: &str) {
     );
 }
 
+fn assert_no_user_id_header(resp: &Response) {
+    assert!(
+        resp.headers().get(USER_ID_HEADER).is_none(),
+        "{USER_ID_HEADER} must not be present"
+    );
+}
+
 fn assert_no_api_key_id_header(resp: &Response) {
     assert!(
         resp.headers().get(API_KEY_ID_HEADER).is_none(),
         "{API_KEY_ID_HEADER} must not be present"
     );
+}
+
+fn worker_jwt(resp: &Response) -> Option<&str> {
+    resp.headers()
+        .get(WORKER_JWT_HEADER)
+        .and_then(|value| value.to_str().ok())
+}
+
+fn decode_worker_jwt(token: &str) -> crate::auth::jwt::WorkerJwtClaims {
+    let parts: Vec<&str> = token.split('.').collect();
+    assert_eq!(parts.len(), 3);
+    URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
+    serde_json::from_slice(&URL_SAFE_NO_PAD.decode(parts[1]).unwrap()).unwrap()
 }
 
 fn good_validate_mock(user_id: &str) -> Mock {
@@ -130,10 +152,108 @@ async fn bearer_header_extracts_key() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+    let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
+    assert_eq!(claims.u, "u1");
+    assert_eq!(claims.k, "key1");
+    assert_eq!(claims.exp - claims.iat, 3600);
     assert_user_id_header(&resp, "u1");
     assert_api_key_id_header(&resp, "key1");
     assert_eq!(body_string(resp).await, "ok:u1:key1");
     assert_eq!(count_auth("ok") - before_ok, 1);
+}
+
+#[tokio::test]
+async fn worker_jwt_expiry_is_capped_by_validate_expires_at() {
+    let _g = metrics_lock().await;
+    let s = MockServer::start().await;
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 120;
+    Mock::given(method("POST"))
+        .and(path("/internal/validate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "user_id": "u1",
+            "api_key_id": "key1",
+            "expires_at": exp,
+        })))
+        .mount(&s)
+        .await;
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+
+    let resp = app(state)
+        .oneshot(
+            req("/test")
+                .header(header::AUTHORIZATION, "Bearer sqd_data_abc_xyz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
+    assert_eq!(claims.exp, exp);
+}
+
+#[tokio::test]
+async fn expired_validate_deadline_is_denied_immediately() {
+    let _g = metrics_lock().await;
+    let s = MockServer::start().await;
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        - 1;
+    Mock::given(method("POST"))
+        .and(path("/internal/validate"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "user_id": "u1",
+            "api_key_id": "key1",
+            "expires_at": exp,
+        })))
+        .mount(&s)
+        .await;
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+
+    let resp = app(state)
+        .oneshot(
+            req("/test")
+                .header(header::AUTHORIZATION, "Bearer sqd_data_expired_xyz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_no_worker_jwt_header(&resp);
+}
+
+#[tokio::test]
+async fn worker_jwt_is_reused_for_same_identity() {
+    let _g = metrics_lock().await;
+    let s = MockServer::start().await;
+    good_validate_mock("u1").mount(&s).await;
+    let state = AuthState::for_test(Some(Url::parse(&s.uri()).unwrap()), true, TestClock::new());
+
+    let mut tokens = Vec::new();
+    for _ in 0..2 {
+        let resp = app(state.clone())
+            .oneshot(
+                req("/test")
+                    .header(header::AUTHORIZATION, "Bearer sqd_data_abc_xyz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        tokens.push(worker_jwt(&resp).expect("worker jwt header").to_string());
+    }
+
+    assert_eq!(tokens[0], tokens[1]);
 }
 
 // `Token:` header is NOT a fallback. Treated as missing.
@@ -155,6 +275,7 @@ async fn no_token_header_fallback() {
         .unwrap();
     // No Authorization header -> Missing -> 403 (enforce=true).
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_no_worker_jwt_header(&resp);
     assert_no_user_id_header(&resp);
     assert_no_api_key_id_header(&resp);
     // Wiremock must not have been hit.
@@ -344,6 +465,10 @@ async fn network_api_timeout_fails_open() {
         StatusCode::OK,
         "fail-open must pass even when enforcing"
     );
+    let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
+    assert_eq!(claims.u, "fail-open");
+    assert_eq!(claims.k, "fail-open");
+    assert_eq!(claims.exp - claims.iat, 3600);
     assert_eq!(count_auth("fail_open") - before_fail, 1);
 
     // 2nd request within the 1s sentinel: served from cache, no API call.
@@ -395,8 +520,7 @@ async fn cached_deleted_denies_during_outage() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-    assert_no_user_id_header(&resp);
-    assert_no_api_key_id_header(&resp);
+    assert_no_worker_jwt_header(&resp);
 }
 
 #[tokio::test]
@@ -437,8 +561,10 @@ async fn breaker_open_passes_through_without_dial() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_no_user_id_header(&resp);
-    assert_no_api_key_id_header(&resp);
+    let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
+    assert_eq!(claims.u, "fail-open");
+    assert_eq!(claims.k, "fail-open");
+    assert_eq!(claims.exp - claims.iat, 3600);
     assert_eq!(
         s.received_requests().await.unwrap().len(),
         50,
@@ -463,8 +589,6 @@ async fn key_id_in_request_extensions() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, "user42");
-    assert_api_key_id_header(&resp, "key1");
     assert_eq!(body_string(resp).await, "ok:user42:key1");
 }
 
@@ -488,8 +612,6 @@ async fn cache_miss_then_hit() {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_user_id_header(&resp, "u");
-        assert_api_key_id_header(&resp, "key1");
     }
     assert_eq!(
         s.received_requests().await.unwrap().len(),
@@ -863,8 +985,12 @@ async fn bypass_xoff_real_client_in_allowlist() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
+    assert_eq!(claims.u, "internal");
+    assert_eq!(claims.k, "internal");
+    assert_eq!(claims.exp - claims.iat, 3600);
+    assert_user_id_header(&resp, "internal");
+    assert_api_key_id_header(&resp, "internal");
     assert_eq!(body_string(resp).await, "ok:internal:internal");
     // Bypass must NOT touch the Network API.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
@@ -951,8 +1077,8 @@ async fn bypass_clusterip_peer_in_allowlist() {
     let resp = app(state).oneshot(request).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    assert_user_id_header(&resp, "internal");
+    assert_api_key_id_header(&resp, "internal");
     assert_eq!(body_string(resp).await, "ok:internal:internal");
 }
 
@@ -1052,8 +1178,6 @@ async fn bypass_malformed_xoff_falls_back_to_connect_info() {
     // Malformed entries skipped; chain yields no valid IP; fall back to
     // peer (ConnectInfo) which IS in allowlist.
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
     assert_eq!(body_string(resp).await, "ok:internal:internal");
 }
 
@@ -1111,8 +1235,6 @@ async fn bypass_multiple_allowlist_cidrs() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
     assert_eq!(body_string(resp).await, "ok:internal:internal");
 }
 
@@ -1176,8 +1298,6 @@ async fn bypass_takes_precedence_over_valid_bearer() {
         .unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
     assert_eq!(body_string(resp).await, "ok:internal:internal");
     // Network API must NOT have been called — we short-circuited on IP.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
@@ -1395,6 +1515,10 @@ async fn canary_passes_for_ip_out_of_scope() {
 
     // Out-of-scope source -> fail open even though the policy is "enforce".
     assert_eq!(resp.status(), StatusCode::OK);
+    let claims = decode_worker_jwt(worker_jwt(&resp).expect("worker jwt header"));
+    assert_eq!(claims.u, "internal");
+    assert_eq!(claims.k, "internal");
+    assert_eq!(claims.exp - claims.iat, 3600);
 }
 
 // In canary mode, the metric still records what WOULD have happened —
@@ -1633,7 +1757,7 @@ async fn canary_internal_allowlist_takes_precedence() {
     let resp = app(state).oneshot(request).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_user_id_header(&resp, INTERNAL_BYPASS_USER_ID);
-    assert_api_key_id_header(&resp, INTERNAL_BYPASS_USER_ID);
+    assert_user_id_header(&resp, "internal");
+    assert_api_key_id_header(&resp, "internal");
     assert_eq!(body_string(resp).await, "ok:internal:internal");
 }

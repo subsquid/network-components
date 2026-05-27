@@ -17,6 +17,8 @@ use crate::metrics::{
 };
 
 const TOKEN_PREFIX: &str = "sqd_data_";
+const USER_ID_HEADER: &str = "x-sqd-user-id";
+const API_KEY_ID_HEADER: &str = "x-sqd-api-key-id";
 const WORKER_JWT_HEADER: &str = "x-sqd-auth";
 
 const INTERNAL_ID: &str = "internal";
@@ -112,6 +114,18 @@ where
 
     if allowed {
         let mut resp = next.run(req).await;
+        if let Outcome::Ok(ctx) = &outcome {
+            if let Ok(value) = HeaderValue::from_str(&ctx.user_id) {
+                resp.headers_mut().insert(USER_ID_HEADER, value);
+            } else {
+                warn!("validated user_id cannot be encoded as response header");
+            }
+            if let Ok(value) = HeaderValue::from_str(&ctx.api_key_id) {
+                resp.headers_mut().insert(API_KEY_ID_HEADER, value);
+            } else {
+                warn!("validated api_key_id cannot be encoded as response header");
+            }
+        }
         if let Some((user_id, api_key_id, expires_at)) = worker_jwt_context(&outcome) {
             match &state.worker_jwt_issuer {
                 Some(issuer) => match issuer.issue(user_id, api_key_id, expires_at) {

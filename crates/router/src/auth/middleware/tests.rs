@@ -56,6 +56,38 @@ fn assert_no_worker_jwt_header(resp: &Response) {
     );
 }
 
+fn assert_user_id_header(resp: &Response, expected: &str) {
+    assert_eq!(
+        resp.headers()
+            .get(USER_ID_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected)
+    );
+}
+
+fn assert_api_key_id_header(resp: &Response, expected: &str) {
+    assert_eq!(
+        resp.headers()
+            .get(API_KEY_ID_HEADER)
+            .and_then(|value| value.to_str().ok()),
+        Some(expected)
+    );
+}
+
+fn assert_no_user_id_header(resp: &Response) {
+    assert!(
+        resp.headers().get(USER_ID_HEADER).is_none(),
+        "{USER_ID_HEADER} must not be present"
+    );
+}
+
+fn assert_no_api_key_id_header(resp: &Response) {
+    assert!(
+        resp.headers().get(API_KEY_ID_HEADER).is_none(),
+        "{API_KEY_ID_HEADER} must not be present"
+    );
+}
+
 fn worker_jwt(resp: &Response) -> Option<&str> {
     resp.headers()
         .get(WORKER_JWT_HEADER)
@@ -124,6 +156,8 @@ async fn bearer_header_extracts_key() {
     assert_eq!(claims.u, "u1");
     assert_eq!(claims.k, "key1");
     assert_eq!(claims.exp - claims.iat, 3600);
+    assert_user_id_header(&resp, "u1");
+    assert_api_key_id_header(&resp, "key1");
     assert_eq!(body_string(resp).await, "ok:u1:key1");
     assert_eq!(count_auth("ok") - before_ok, 1);
 }
@@ -242,6 +276,8 @@ async fn no_token_header_fallback() {
     // No Authorization header -> Missing -> 403 (enforce=true).
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     assert_no_worker_jwt_header(&resp);
+    assert_no_user_id_header(&resp);
+    assert_no_api_key_id_header(&resp);
     // Wiremock must not have been hit.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
 }
@@ -953,6 +989,8 @@ async fn bypass_xoff_real_client_in_allowlist() {
     assert_eq!(claims.u, "internal");
     assert_eq!(claims.k, "internal");
     assert_eq!(claims.exp - claims.iat, 3600);
+    assert_user_id_header(&resp, "internal");
+    assert_api_key_id_header(&resp, "internal");
     assert_eq!(body_string(resp).await, "ok:internal:internal");
     // Bypass must NOT touch the Network API.
     assert_eq!(s.received_requests().await.unwrap().len(), 0);
@@ -1039,6 +1077,8 @@ async fn bypass_clusterip_peer_in_allowlist() {
     let resp = app(state).oneshot(request).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
+    assert_user_id_header(&resp, "internal");
+    assert_api_key_id_header(&resp, "internal");
     assert_eq!(body_string(resp).await, "ok:internal:internal");
 }
 
@@ -1717,5 +1757,7 @@ async fn canary_internal_allowlist_takes_precedence() {
     let resp = app(state).oneshot(request).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
+    assert_user_id_header(&resp, "internal");
+    assert_api_key_id_header(&resp, "internal");
     assert_eq!(body_string(resp).await, "ok:internal:internal");
 }

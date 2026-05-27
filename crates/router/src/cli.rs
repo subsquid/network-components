@@ -130,10 +130,10 @@ pub struct Cli {
     #[clap(long, env = "INTERNAL_ALLOWLIST", value_name = "CIDR,CIDR,...", default_value = "")]
     pub internal_allowlist: CidrList,
 
-    /// Path to the Ed25519 private key PEM used to sign short-lived worker JWTs.
-    /// Ignored when the WORKER_JWT_PRIVATE_KEY_PEM environment variable is set.
-    #[clap(long, env = "WORKER_JWT_PRIVATE_KEY_FILE", value_name = "PATH")]
-    pub worker_jwt_private_key_file: Option<std::path::PathBuf>,
+    /// Ed25519 private key PEM, or a path to a PEM file, used to sign
+    /// short-lived worker JWTs.
+    #[clap(long, env = "WORKER_JWT_PRIVATE_KEY", value_name = "PEM_OR_PATH")]
+    pub worker_jwt_private_key: Option<String>,
 
     /// Worker JWT lifetime in seconds.
     #[clap(long, env = "WORKER_JWT_TTL_SECS", value_name = "SECONDS", default_value = "3600")]

@@ -45,12 +45,13 @@ async fn main() {
         Some(url) => auth::NetworkApiClient::new(url),
         None => auth::NetworkApiClient::disabled(),
     };
-    let worker_jwt_required = !args.disable_v2_auth && !args.enforce_v2_auth_for_ips.0.is_empty();
+    let worker_jwt_must_be_configured =
+        !args.disable_v2_auth && !args.enforce_v2_auth_for_ips.0.is_empty();
     let worker_jwt_issuer = create_worker_jwt_issuer(
         env::var("WORKER_JWT_PRIVATE_KEY_PEM").ok(),
         args.worker_jwt_private_key_file,
         Duration::from_secs(args.worker_jwt_ttl_secs),
-        worker_jwt_required,
+        worker_jwt_must_be_configured,
     );
     let auth_state = auth::AuthState::new(
         api_client,
@@ -59,7 +60,6 @@ async fn main() {
         args.trusted_ips.0,
         args.internal_allowlist.0,
         worker_jwt_issuer,
-        worker_jwt_required,
     );
 
     Server::new(controller).run(auth_state).await;
@@ -69,7 +69,7 @@ fn create_worker_jwt_issuer(
     private_key_pem: Option<String>,
     private_key_file: Option<std::path::PathBuf>,
     ttl: Duration,
-    required: bool,
+    must_be_configured: bool,
 ) -> Option<auth::WorkerJwtIssuer> {
     let pem = match private_key_pem {
         Some(pem) => Some(pem),
@@ -81,7 +81,7 @@ fn create_worker_jwt_issuer(
     };
 
     let Some(pem) = pem else {
-        if required {
+        if must_be_configured {
             panic!(
                 "WORKER_JWT_PRIVATE_KEY_PEM or WORKER_JWT_PRIVATE_KEY_FILE is required when V2 auth enforcement is enabled"
             );

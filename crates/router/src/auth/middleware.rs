@@ -121,22 +121,14 @@ where
                         }
                         Err(_) => {
                             warn!("worker jwt cannot be encoded as response header");
-                            if state.worker_jwt_required {
-                                return worker_jwt_error();
-                            }
+                            return worker_jwt_error();
                         }
                     },
                     Err(err) => {
                         warn!(error = %err, "failed to issue worker jwt");
-                        if state.worker_jwt_required {
-                            return worker_jwt_error();
-                        }
+                        return worker_jwt_error();
                     }
                 },
-                None if state.worker_jwt_required => {
-                    warn!("worker jwt issuer is required but not configured");
-                    return worker_jwt_error();
-                }
                 None => {}
             }
         }

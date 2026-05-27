@@ -40,8 +40,6 @@ pub struct AuthState {
     pub internal_allowlist: Vec<IpNet>,
     /// Issues short-lived credentials that clients pass to workers.
     pub worker_jwt_issuer: Option<WorkerJwtIssuer>,
-    /// When true, authenticated responses must carry a worker JWT.
-    pub worker_jwt_required: bool,
 }
 
 impl AuthState {
@@ -52,7 +50,6 @@ impl AuthState {
         trusted_ips: Vec<IpNet>,
         internal_allowlist: Vec<IpNet>,
         worker_jwt_issuer: Option<WorkerJwtIssuer>,
-        worker_jwt_required: bool,
     ) -> Arc<Self> {
         Arc::new(Self {
             cache: KeyCache::new(10_000),
@@ -64,7 +61,6 @@ impl AuthState {
             trusted_ips,
             internal_allowlist,
             worker_jwt_issuer,
-            worker_jwt_required,
         })
     }
 
@@ -118,7 +114,6 @@ impl AuthState {
         trusted_ips: Vec<IpNet>,
         internal_allowlist: Vec<IpNet>,
     ) -> Arc<Self> {
-        let worker_jwt_required = !disabled && !enforce_for_ips.is_empty();
         Arc::new(Self {
             cache: KeyCache::with_clock(10_000, clock.clone()),
             client: NetworkApiClient::with_clock(base_url, clock.clone()),
@@ -133,7 +128,6 @@ impl AuthState {
                 std::time::Duration::from_secs(3600),
                 clock,
             )),
-            worker_jwt_required,
         })
     }
 }

@@ -1186,7 +1186,7 @@ dependencies = [
 
 [[package]]
 name = "collector-utils"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3783,7 +3783,7 @@ checksum = "04cbf5b083de1c7e0222a7a51dbfdba1cbe1c6ab0b15e29fff3f6c077fd9cd9f"
 
 [[package]]
 name = "logs-collector"
-version = "2.1.7"
+version = "2.1.8"
 dependencies = [
  "anyhow",
  "clap",
@@ -4617,7 +4617,7 @@ dependencies = [
 
 [[package]]
 name = "pings-collector"
-version = "2.4.5"
+version = "2.4.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4676,7 +4676,7 @@ checksum = "280dc24453071f1b63954171985a0b0d30058d287960968b9b2aca264c8d4ee6"
 
 [[package]]
 name = "portal-logs-collector"
-version = "1.1.4"
+version = "1.1.5"
 dependencies = [
  "anyhow",
  "clap",

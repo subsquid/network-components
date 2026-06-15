@@ -382,6 +382,11 @@ impl Storage for ClickhouseStorage {
         query_logs: T,
     ) -> anyhow::Result<()> {
         log::debug!("Storing logs in clickhouse");
+        let mut query_logs = query_logs.peekable();
+        if query_logs.peek().is_none() {
+            log::debug!("No logs to store, skipping empty batch");
+            return Ok(());
+        }
         let mut insert = self.0.insert(&LOGS_TABLE)?;
         for row in query_logs {
             log::trace!("Storing query log {:?}", row);
@@ -396,6 +401,11 @@ impl Storage for ClickhouseStorage {
         pings: T,
     ) -> anyhow::Result<()> {
         log::debug!("Storing pings in clickhouse");
+        let mut pings = pings.peekable();
+        if pings.peek().is_none() {
+            log::debug!("No pings to store, skipping empty batch");
+            return Ok(());
+        }
         let mut insert = self.0.insert(&PINGS_TABLE)?;
         for row in pings {
             log::trace!("Storing ping {:?}", row);
@@ -427,6 +437,11 @@ impl Storage for ClickhouseStorage {
         portal_logs: T,
     ) -> anyhow::Result<()> {
         log::debug!("Storing portal logs in clickhouse");
+        let mut portal_logs = portal_logs.peekable();
+        if portal_logs.peek().is_none() {
+            log::debug!("No portal logs to store, skipping empty batch");
+            return Ok(());
+        }
         let mut insert = self.0.insert(&PORTAL_LOGS_TABLE)?;
         for row in portal_logs {
             log::trace!("Storing portal log {:?}", row);

@@ -1,32 +1,73 @@
 # SQD Network components
 
-This repo contains several components of the SQD Network.
+Rust crates for SQD Network nodes: the archive router and the services that collect pings and logs from workers, gateways, and portals.
 
-### Archive router
+SQD is an open data platform for Web3. SQD Network is a decentralized data lake and query engine run by worker, gateway, and scheduler nodes. This repository holds the shared and standalone Rust components used by those nodes. For the network protocol and node implementations, see [subsquid/sqd-network](https://github.com/subsquid/sqd-network).
 
-It distributes data ranges among workers in the centralized setup and navigates
-clients what worker to use for a specific range.
+## Crates
 
-The active development branch for it is `arrowsquid`.
+This is a Cargo workspace. The crates under `crates/` are:
 
-### Network scheduler
+| Crate | Type | Description |
+|---|---|---|
+| `router` | binary | Archive router. Reads dataset definitions from S3, assigns data ranges to workers on a scheduling interval, and exposes an HTTP API (port 3000) so clients can find which worker holds a given range. |
+| `router-controller` | library | Scheduling and assignment logic used by `router`. |
+| `logs-collector` | binary | Collects query-execution logs from workers and gateways over the network transport and stores them in ClickHouse. |
+| `portal-logs-collector` | binary | Collects logs from SQD Portal instances and stores them in ClickHouse. |
+| `pings-collector` | binary | Collects pings from workers and stores them in ClickHouse. |
+| `collector-utils` | library | Shared ClickHouse storage types and helpers used by the collector binaries. |
 
-A replacement for the router in the decentralized setup. It distributes the
-data among workers and communicates the assignments to them.
+The collector binaries connect to the network over [`sqd-network-transport`](https://github.com/subsquid/sqd-network) (libp2p / QUIC) and persist to ClickHouse.
 
-### Pings collector
+## Build
 
-A simple service with multiple replicas that collects pings from workers and
-stores them in a database.
+Requires the Rust toolchain pinned in `rust-toolchain` (channel 1.83) and `protobuf-compiler` for building the protocol message dependencies.
 
-### Logs collector
+```bash
+# Build the whole workspace
+cargo build --release --workspace
 
-Receives logs from the workers and the gateways and stores them in a database.
+# Build a single crate, for example the router
+cargo build --release -p router
+```
 
-### Peer checker
+Binaries are written to `target/release/`.
 
-An experimental tool that helps locating a peer in the network.
+### Docker
+
+The `Dockerfile` defines separate build targets for the router and each collector. For example:
+
+```bash
+docker build --target logs-collector -t logs-collector .
+docker build --target pings-collector -t pings-collector .
+docker build --target portal-logs-collector -t portal-logs-collector .
+```
+
+## Usage
+
+Each binary is configured with command-line flags and environment variables (run with `--help` for the full list). For example, the router takes one or more S3 datasets and a set of managed workers:
+
+```bash
+router \
+  --dataset eth-mainnet=s3://my-bucket/eth-mainnet \
+  --worker <worker-id> \
+  --replication 2 \
+  --scheduling-unit 50 \
+  --scheduling-interval 300
+```
+
+The collector binaries read their P2P listen address from `P2P_LISTEN_ADDRS` and their ClickHouse connection details from flags and environment variables.
+
+## Scripts
+
+The `scripts/` directory contains Python helpers used during development and operations (worker reachability and status checks, chunk summaries, scheduling simulation) and a traffic generator under `scripts/traffic_generator`.
+
+## Documentation
+
+- SQD documentation: https://docs.sqd.dev
+- SQD Network: https://docs.sqd.dev/en/network
+- SQD: https://sqd.dev
 
 ## License
 
-This project is licensed under the AGPL v3.0 license - see the [LICENSE](LICENSE.txt) file for details.
+This project is licensed under the AGPL v3.0 license. See [LICENSE.txt](LICENSE.txt) for details.

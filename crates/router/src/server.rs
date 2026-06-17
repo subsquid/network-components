@@ -11,7 +11,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use prometheus::{gather, Encoder, TextEncoder};
-use tracing::info;
+use tracing::debug;
 
 use router_controller::controller::{Controller, PingMessage, WorkerState};
 
@@ -27,7 +27,7 @@ async fn ping(
     let worker_url = msg.worker_url.clone();
     let current_state = format!("{:?}", msg.state);
     let desired_state = controller.ping(msg);
-    info!(
+    debug!(
         ping_from = worker_id,
         worker_url,
         current_state,

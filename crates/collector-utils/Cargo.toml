@@ -3,6 +3,9 @@ name = "collector-utils"
 version = "2.0.2"
 edition = "2021"
 
+[features]
+mvcc-chunks = []
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"

@@ -390,14 +390,6 @@ impl ClickhouseStorage {
             .with_password(args.clickhouse_password);
         client.query(&LOGS_TABLE_DEFINITION).execute().await?;
         client.query(&PINGS_TABLE_DEFINITION).execute().await?;
-        #[cfg(feature = "mvcc-chunks")]
-        {
-            let migration = format!(
-                "ALTER TABLE {} ADD COLUMN IF NOT EXISTS last_applied_assignment_id Nullable(Int64) AFTER assignment_timestamp",
-                &*PINGS_TABLE
-            );
-            client.query(&migration).execute().await?;
-        }
         client.query(&PORTAL_LOGS_TABLE_DEFINITION).execute().await?;
         Ok(Self(client))
     }

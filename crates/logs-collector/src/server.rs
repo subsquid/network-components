@@ -117,6 +117,12 @@ where
     }
 
     async fn collect_logs(&self, worker_id: PeerId, mut from_timestamp_ms: u64) {
+        // Don't even request logs we'd have to drop. The buffer drains every round,
+        // so these workers are picked up again next time.
+        if self.logs_collector.is_full() {
+            log::debug!("Buffer full, skipping log collection from {worker_id}");
+            return;
+        }
         let mut last_query_id = None;
         for page in 0..MAX_PAGES {
             if page == 0 {
@@ -161,6 +167,10 @@ where
                 .buffer_logs(worker_id, logs.queries_executed);
 
             if !logs.has_more {
+                return;
+            }
+            if self.logs_collector.is_full() {
+                log::debug!("Buffer full, stopping log collection from {worker_id}");
                 return;
             }
         }

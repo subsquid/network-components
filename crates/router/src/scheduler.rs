@@ -14,17 +14,23 @@ async fn update_datasets(controller: &Arc<Controller>, datasets: &Vec<Dataset>) 
     for dataset in datasets.clone() {
         let controller = controller.clone();
         tasks.push(tokio::spawn(async move {
-            let next_block = controller.get_height(dataset.name())
-                .expect("dataset must be supported")
+            let height = controller.get_height(dataset.name())
+                .expect("dataset must be supported");
+            let next_block = height
                 .and_then(|height| u32::try_from(height).ok().map(|height| height + 1))
                 .unwrap_or(dataset.start_block().unwrap_or(0));
 
             debug!("getting new chunks for {}", dataset.url());
             let mut attempt = 0;
+            let timeout = if height.is_none() {
+                // it may take up to 30 minutes for initial sync
+                Duration::from_secs(30 * 60)
+            } else {
+                Duration::from_secs(5 * 60 + attempt * 60)
+            };
             let chunks = loop {
                 let future = dataset.storage().get_chunks(next_block);
-                let duration = Duration::from_secs(300 + attempt * 60);
-                match tokio::time::timeout(duration, future).await {
+                match tokio::time::timeout(timeout, future).await {
                     Ok(Ok(chunks)) => {
                         info!("found new chunks in {}: {:?}", dataset.url(), chunks);
                         if let Some(chunk) = chunks.last() {
@@ -45,7 +51,7 @@ async fn update_datasets(controller: &Arc<Controller>, datasets: &Vec<Dataset>) 
                     },
                     Err(_) => {
                         if attempt == 5 {
-                            error!("failed to download new chunks for {} within {:?}", dataset.url(), duration);
+                            error!("failed to download new chunks for {} within {:?}", dataset.url(), timeout);
                             DATASET_SYNC_ERRORS.with_label_values(&[dataset.url()]).inc();
                             return false
                         }

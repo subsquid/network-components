@@ -172,6 +172,29 @@ pub struct QueryExecutedRow {
 }
 
 impl QueryExecutedRow {
+    pub fn worker_id(&self) -> &str {
+        &self.worker_id
+    }
+
+    /// Rough estimate of the heap + stack memory occupied by this row.
+    /// Used to bound the size of buffers and INSERT batches.
+    pub fn estimated_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.client_id.len()
+            + self.worker_id.len()
+            + self.query_id.len()
+            + self.dataset.len()
+            + self.dataset_id.len()
+            + self.request_id.len()
+            + self.chunk_id.len()
+            + self.query.len()
+            + self.query_hash.len()
+            + self.output_hash.len()
+            + self.error_msg.len()
+            + self.client_signature.len()
+            + self.worker_version.len()
+    }
+
     pub fn try_from(
         query_executed: QueryExecuted,
         worker_id: PeerId,

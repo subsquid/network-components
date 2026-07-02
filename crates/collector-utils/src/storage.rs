@@ -13,6 +13,11 @@ use sqd_network_transport::{protocol, PeerId};
 use crate::cli::ClickhouseArgs;
 use crate::{base64, parse_assignment_id, timestamp_now_ms};
 
+#[cfg(feature = "mvcc-chunks")]
+const PINGS_MVCC_COLUMNS: &str = ",\n            last_applied_assignment_id Nullable(String)";
+#[cfg(not(feature = "mvcc-chunks"))]
+const PINGS_MVCC_COLUMNS: &str = "";
+
 lazy_static! {
     static ref LOGS_TABLE: String =
         std::env::var("LOGS_TABLE").unwrap_or("worker_query_logs".to_string());
@@ -75,13 +80,14 @@ lazy_static! {
             stored_bytes UInt64 NOT NULL CODEC(Delta, ZSTD),
             version LowCardinality(TEXT) NOT NULL,
             missing_chunks UInt64 NOT NULL DEFAULT 0,
-            assignment_timestamp DateTime64(3) NOT NULL DEFAULT 0
+            assignment_timestamp DateTime64(3) NOT NULL DEFAULT 0{}
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(timestamp)
         ORDER BY (timestamp, worker_id);
     ",
-        &*PINGS_TABLE
+        &*PINGS_TABLE,
+        PINGS_MVCC_COLUMNS
     );
     static ref PORTAL_LOGS_TABLE_DEFINITION: String = format!(
         "
@@ -315,6 +321,9 @@ pub struct PingRow {
     version: String,
     missing_chunks: u64,
     assignment_timestamp: u64,
+    // Opaque assignment ID reported by the worker; ordering is scheduler-owned.
+    #[cfg(feature = "mvcc-chunks")]
+    last_applied_assignment_id: Option<String>,
 }
 
 impl PingRow {
@@ -332,6 +341,8 @@ impl PingRow {
             timestamp: timestamp_now_ms(),
             missing_chunks: heartbeat.missing_chunks.map_or(0, |b| b.ones),
             assignment_timestamp: assignment_timestamp.or(Err("cannot parse assignment_id"))?,
+            #[cfg(feature = "mvcc-chunks")]
+            last_applied_assignment_id: heartbeat.last_applied_assignment_id,
         })
     }
 }
@@ -483,6 +494,14 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn test_pings_table_definition_matches_mvcc_feature() {
+        assert_eq!(
+            PINGS_TABLE_DEFINITION.contains("last_applied_assignment_id Nullable(String)"),
+            cfg!(feature = "mvcc-chunks")
+        );
+    }
+
     // To run this test, start a local clickhouse instance first
     // docker run --rm \
     //   -e CLICKHOUSE_DB=logs_db \
@@ -549,6 +568,7 @@ mod tests {
             chunk_id: "0000000000/0000808640-0000816499-b0486318".to_string(),
             timestamp_ms: 123456789000,
             signature: vec![],
+            compression: Default::default(),
         };
         query.sign(&client_keypair, worker_id).unwrap();
 
@@ -590,6 +610,7 @@ mod tests {
                 size: 6,
                 ones: 3,
             }),
+            ..Default::default()
         };
         let ts = timestamp_now_ms();
         storage
@@ -638,6 +659,7 @@ mod tests {
                 size: 6,
                 ones: 3,
             }),
+            ..Default::default()
         };
 
         let res = PingRow::new(ping.clone(), worker_id.to_string());
@@ -667,10 +689,33 @@ mod tests {
                 size: 6,
                 ones: 3,
             }),
+            ..Default::default()
         };
 
         let res = PingRow::new(ping.clone(), worker_id.to_string());
         assert!(res.is_ok());
         assert_eq!(res.unwrap().assignment_timestamp, 0);
+    }
+
+    #[cfg(feature = "mvcc-chunks")]
+    #[test]
+    fn test_last_applied_assignment_id() {
+        let ping = Heartbeat {
+            last_applied_assignment_id: Some("assignment-42".to_string()),
+            ..Default::default()
+        };
+
+        let row = PingRow::new(ping, "worker".to_string()).unwrap();
+        assert_eq!(
+            row.last_applied_assignment_id,
+            Some("assignment-42".to_string())
+        );
+    }
+
+    #[cfg(feature = "mvcc-chunks")]
+    #[test]
+    fn test_last_applied_assignment_id_absent() {
+        let row = PingRow::new(Heartbeat::default(), "worker".to_string()).unwrap();
+        assert_eq!(row.last_applied_assignment_id, None);
     }
 }

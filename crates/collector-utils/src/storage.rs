@@ -80,7 +80,8 @@ lazy_static! {
             stored_bytes UInt64 NOT NULL CODEC(Delta, ZSTD),
             version LowCardinality(TEXT) NOT NULL,
             missing_chunks UInt64 NOT NULL DEFAULT 0,
-            assignment_timestamp DateTime64(3) NOT NULL DEFAULT 0{}
+            assignment_timestamp DateTime64(3) NOT NULL DEFAULT 0,
+            current_epoch Nullable(UInt32){}
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(timestamp)
@@ -321,6 +322,7 @@ pub struct PingRow {
     version: String,
     missing_chunks: u64,
     assignment_timestamp: u64,
+    current_epoch: Option<u32>,
     // Opaque assignment ID reported by the worker; ordering is scheduler-owned.
     #[cfg(feature = "mvcc-chunks")]
     last_applied_assignment_id: Option<String>,
@@ -341,6 +343,7 @@ impl PingRow {
             timestamp: timestamp_now_ms(),
             missing_chunks: heartbeat.missing_chunks.map_or(0, |b| b.ones),
             assignment_timestamp: assignment_timestamp.or(Err("cannot parse assignment_id"))?,
+            current_epoch: heartbeat.current_epoch,
             #[cfg(feature = "mvcc-chunks")]
             last_applied_assignment_id: heartbeat.last_applied_assignment_id,
         })
@@ -610,6 +613,7 @@ mod tests {
                 size: 6,
                 ones: 3,
             }),
+            current_epoch: Some(1234),
             ..Default::default()
         };
         let ts = timestamp_now_ms();
@@ -635,6 +639,7 @@ mod tests {
             .unwrap();
         assert_eq!(row.assignment_timestamp, dt.timestamp_millis() as u64);
         assert_eq!(row.missing_chunks, 3);
+        assert_eq!(row.current_epoch, Some(1234));
     }
 
     #[tokio::test]

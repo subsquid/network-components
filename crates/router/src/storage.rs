@@ -120,11 +120,35 @@ impl S3Storage {
             .await
             .map_err(|err| err.to_string())?;
         let mut items = vec![];
+        let mut continuation_token = output.next_continuation_token.clone();
         if let Some(prefixes) = output.common_prefixes() {
-            for prefix in prefixes {
-                if let Some(value) = prefix.prefix() {
+            for p in prefixes {
+                if let Some(value) = p.prefix() {
                     let value = trim_trailing_slash(value);
                     items.push(value);
+                }
+            }
+        }
+        while let Some(token) = continuation_token {
+            let mut builder = self
+                .client
+                .list_objects_v2()
+                .bucket(&self.bucket)
+                .delimiter('/')
+                .continuation_token(token);
+            if let Some(prefix) = prefix {
+                builder = builder.prefix(prefix)
+            }
+            let output = builder.send()
+                .await
+                .map_err(|err| err.to_string())?;
+            continuation_token = output.next_continuation_token.clone();
+            if let Some(prefixes) = output.common_prefixes() {
+                for p in prefixes {
+                    if let Some(value) = p.prefix() {
+                        let value = trim_trailing_slash(value);
+                        items.push(value);
+                    }
                 }
             }
         }

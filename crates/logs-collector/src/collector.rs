@@ -74,6 +74,12 @@ impl<T: Storage + Sync> LogsCollector<T> {
         }
     }
 
+    /// Whether the buffer has reached its memory limit. Callers use this to stop
+    /// collecting more logs that would only be dropped (see `buffer_logs`).
+    pub fn is_full(&self) -> bool {
+        self.buffer.lock().size >= self.max_buffer_size
+    }
+
     pub async fn dump_buffer(&mut self) -> anyhow::Result<()> {
         let logs = {
             let buffer = self.buffer.get_mut();

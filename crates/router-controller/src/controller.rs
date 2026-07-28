@@ -216,6 +216,10 @@ impl Controller {
                     return Ok(None)
                 }
 
+                if pending == INITIAL_VALUE {
+                    return Ok(confirmed.try_into().ok())
+                }
+
                 if confirmed == pending {
                     return Ok(confirmed.try_into().ok())
                 }
@@ -230,6 +234,44 @@ impl Controller {
                 }
             }
             None => Ok(None)
+        }
+    }
+
+    pub fn all_workers_pinged(&self) -> bool {
+        if self.managed_workers.is_empty() {
+            return true
+        }
+        let workers = self.workers.get();
+        let registered: HashSet<&WorkerId> = workers.iter().map(|w| &w.id).collect();
+        self.managed_workers.iter().all(|id| registered.contains(id))
+    }
+
+    pub fn init_state_from_workers(&self) {
+        let workers = self.workers.get();
+        for (dataset_name, (dataset_url, _)) in &self.managed_datasets {
+            let height = match self.datasets_height.get(dataset_url) {
+                Some(h) => h,
+                None => continue,
+            };
+            if height.confirmed.load(Ordering::Relaxed) != INITIAL_VALUE {
+                continue
+            }
+            let mut max_block: Option<u32> = None;
+            for w in workers.iter() {
+                if let Some(ranges) = w.info.get().state.get(dataset_url) {
+                    if let Some(end) = ranges.max_block() {
+                        max_block = Some(max_block.map_or(end, |m| m.max(end)));
+                    }
+                }
+            }
+            if let Some(block) = max_block {
+                height.confirmed.store(i64::from(block), Ordering::Relaxed);
+                tracing::info!(
+                    dataset = %dataset_name,
+                    height = block,
+                    "bootstrapped dataset height from worker state"
+                );
+            }
         }
     }
 

@@ -84,6 +84,15 @@ pub fn start(
     tokio::spawn(async move {
         let schedule_time = Instant::now() + Duration::from_secs(90);
 
+        let bootstrap_deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            if controller.all_workers_pinged() || Instant::now() >= bootstrap_deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+        controller.init_state_from_workers();
+
         loop {
             info!("trying to update datasets before scheduling");
             if update_datasets(&controller, &datasets).await {

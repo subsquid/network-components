@@ -53,6 +53,10 @@ impl RangeSet {
         }).ok()
     }
 
+    pub fn max_block(&self) -> Option<u32> {
+        self.0.last().map(|r| r.end())
+    }
+
     pub fn includes(&self, range: Range) -> bool {
         if let Some(c) = self.find_containing_range(range.begin()) {
             c.end() >= range.end()

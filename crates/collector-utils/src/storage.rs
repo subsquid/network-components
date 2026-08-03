@@ -572,6 +572,8 @@ mod tests {
             timestamp_ms: 123456789000,
             signature: vec![],
             compression: Default::default(),
+            query_engine: Default::default(),
+            output_format: Default::default(),
         };
         query.sign(&client_keypair, worker_id).unwrap();
 

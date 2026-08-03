@@ -3,9 +3,9 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.dependencies]
-sqd-contract-client = { git = "https://github.com/subsquid/sqd-network.git", rev = "2a67c10",  version = "1.3.0" }
-sqd-messages = { git = "https://github.com/subsquid/sqd-network.git", rev = "2a67c10", version = "2.1.0", features = ["bitstring"] }
-sqd-network-transport = { git = "https://github.com/subsquid/sqd-network.git", rev = "2a67c10", version = "3.1.0" }
+sqd-contract-client = { git = "https://github.com/subsquid/sqd-network.git", rev = "d905db5",  version = "1.3.0" }
+sqd-messages = { git = "https://github.com/subsquid/sqd-network.git", rev = "d905db5", version = "2.1.0", features = ["bitstring"] }
+sqd-network-transport = { git = "https://github.com/subsquid/sqd-network.git", rev = "d905db5", version = "3.1.0" }
 
 # The sqd-network fork builds its crates against its in-tree libp2p-identity (path = "identity"), so
 # consumers must redirect the crates.io libp2p-identity to the same source, otherwise two incompatible

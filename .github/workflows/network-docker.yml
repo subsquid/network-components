@@ -1,3 +1,14 @@
+# Each architecture is built on a runner of its own architecture and pushed
+# untagged, by digest; the publish job combines the two digests into the same
+# tags as before, so only their contents change.
+#
+# The Dockerfile used to pin every stage to `--platform=$BUILDPLATFORM`, so the
+# single amd64 runner built each requested "platform" itself and all four entries
+# of the published manifest pointed at byte-identical amd64 layers.
+#
+# Only amd64 and arm64: those are the architectures GitHub-hosted runners come in,
+# and the only ones the cargo-chef base image is published for.
+
 name: network-docker
 on:
   workflow_dispatch: # manually run
@@ -10,9 +21,17 @@ env:
   CI: true
 
 jobs:
-  publish:
-    name: Build & publish docker images
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -26,80 +45,143 @@ jobs:
           username: ${{ secrets.DOCKER_LOGIN }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
+      # The version tags come from running the built binaries, as before. Only
+      # the amd64 runner does this; both runners would report the same version.
       - name: Build logs collector
+        if: matrix.arch == 'amd64'
         uses: docker/build-push-action@v5
         with:
           context: .
           target: logs-collector
           load: true
           tags: subsquid/logs-collector:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
       - name: Get logs collector version
+        if: matrix.arch == 'amd64'
         run: echo "LOGS_COLLECTOR_VERSION=$(docker run --rm subsquid/logs-collector:test logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
 
-      - name: Build & publish logs collector
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
-          target: logs-collector
-          push: true
-          tags: |
-            subsquid/logs-collector:${{ env.LOGS_COLLECTOR_VERSION }}
-            subsquid/logs-collector:${{ inputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
       - name: Build pings collector
+        if: matrix.arch == 'amd64'
         uses: docker/build-push-action@v5
         with:
           context: .
           target: pings-collector
           load: true
           tags: subsquid/pings-collector:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
       - name: Get pings collector version
+        if: matrix.arch == 'amd64'
         run: echo "PINGS_COLLECTOR_VERSION=$(docker run --rm subsquid/pings-collector:test pings-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
 
-      - name: Build & publish pings collector
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
-          target: pings-collector
-          push: true
-          tags: |
-            subsquid/pings-collector:${{ env.PINGS_COLLECTOR_VERSION }}
-            subsquid/pings-collector:${{ inputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
       - name: Build portal logs collector
+        if: matrix.arch == 'amd64'
         uses: docker/build-push-action@v5
         with:
           context: .
           target: portal-logs-collector
           load: true
           tags: subsquid/portal-logs-collector:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
       - name: Get portal logs collector version
+        if: matrix.arch == 'amd64'
         run: echo "PORTAL_LOGS_COLLECTOR_VERSION=$(docker run --rm subsquid/portal-logs-collector:test portal-logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
 
-      - name: Build & publish portal logs collector
+      - name: Build & publish logs collector
+        id: logs-collector
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
+          platforms: linux/${{ matrix.arch }}
+          target: logs-collector
+          outputs: type=image,name=subsquid/logs-collector,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - name: Build & publish pings collector
+        id: pings-collector
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          target: pings-collector
+          outputs: type=image,name=subsquid/pings-collector,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - name: Build & publish portal logs collector
+        id: portal-logs-collector
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
           target: portal-logs-collector
-          push: true
-          tags: |
-            subsquid/portal-logs-collector:${{ env.PORTAL_LOGS_COLLECTOR_VERSION }}
-            subsquid/portal-logs-collector:${{ inputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          outputs: type=image,name=subsquid/portal-logs-collector,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - name: Export digests and versions
+        env:
+          ARCH: ${{ matrix.arch }}
+          LOGS_COLLECTOR_DIGEST: ${{ steps.logs-collector.outputs.digest }}
+          PINGS_COLLECTOR_DIGEST: ${{ steps.pings-collector.outputs.digest }}
+          PORTAL_LOGS_COLLECTOR_DIGEST: ${{ steps.portal-logs-collector.outputs.digest }}
+        run: |
+          set -eu
+          mkdir -p /tmp/meta
+          echo "${LOGS_COLLECTOR_DIGEST:?}" > "/tmp/meta/logs-collector.${ARCH}"
+          echo "${PINGS_COLLECTOR_DIGEST:?}" > "/tmp/meta/pings-collector.${ARCH}"
+          echo "${PORTAL_LOGS_COLLECTOR_DIGEST:?}" > "/tmp/meta/portal-logs-collector.${ARCH}"
+          if [ "${ARCH}" = amd64 ]; then
+            echo "${LOGS_COLLECTOR_VERSION:?}" > /tmp/meta/logs-collector.version
+            echo "${PINGS_COLLECTOR_VERSION:?}" > /tmp/meta/pings-collector.version
+            echo "${PORTAL_LOGS_COLLECTOR_VERSION:?}" > /tmp/meta/portal-logs-collector.version
+          fi
+
+      - name: Upload digests and versions
+        uses: actions/upload-artifact@v4
+        with:
+          name: meta-${{ matrix.arch }}
+          path: /tmp/meta/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish multi-arch tags
+    # A matrix `needs` waits for every leg, so both architectures must have been
+    # pushed before any tag is moved.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests and versions
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/meta
+          pattern: meta-*
+          merge-multiple: true
+
+      - name: Docker login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_LOGIN }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Tag the merged manifests
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          for crate in logs-collector pings-collector portal-logs-collector; do
+            image="subsquid/${crate}"
+            version=$(cat "/tmp/meta/${crate}.version")
+            docker buildx imagetools create \
+              -t "${image}:${version:?}" -t "${image}:${TAG}" \
+              "${image}@$(cat "/tmp/meta/${crate}.amd64")" \
+              "${image}@$(cat "/tmp/meta/${crate}.arm64")"
+            docker buildx imagetools inspect "${image}:${version}"
+          done

@@ -1,3 +1,17 @@
+# Each architecture is built on a runner of its own architecture (no QEMU, no
+# cross-compilation) and pushed untagged, by digest; the publish job combines the
+# two digests into the same tags as before, so only their contents change.
+#
+# The Dockerfile used to pin every stage to `--platform=$BUILDPLATFORM`, so the
+# single amd64 runner built each requested "platform" itself and all four entries
+# of the published manifest pointed at byte-identical amd64 layers.
+#
+# Only amd64 and arm64: those are the architectures GitHub-hosted runners come in,
+# and the only ones the cargo-chef base image is published for.
+#
+# Releases are cut exactly as before, by dispatching this by hand with an image
+# tag. Nothing here reads or creates git tags.
+
 name: network-docker
 on:
   workflow_dispatch: # manually run
@@ -10,12 +24,20 @@ env:
   CI: true
 
 jobs:
-  publish:
-    name: Build & publish docker images
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -26,80 +48,96 @@ jobs:
           username: ${{ secrets.DOCKER_LOGIN }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
+      # All three targets share the `network-builder` stage, so building them in
+      # one job reuses that single `cargo build --workspace` from the builder's
+      # local state. Untagged pushes; the publish job tags the merged manifests.
       - name: Build logs collector
-        uses: docker/build-push-action@v5
+        id: logs-collector
+        uses: docker/build-push-action@v6
         with:
           context: .
           target: logs-collector
-          load: true
-          tags: subsquid/logs-collector:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Get logs collector version
-        run: echo "LOGS_COLLECTOR_VERSION=$(docker run --rm subsquid/logs-collector:test logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
-
-      - name: Build & publish logs collector
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
-          target: logs-collector
-          push: true
-          tags: |
-            subsquid/logs-collector:${{ env.LOGS_COLLECTOR_VERSION }}
-            subsquid/logs-collector:${{ inputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=subsquid/logs-collector,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
       - name: Build pings collector
-        uses: docker/build-push-action@v5
+        id: pings-collector
+        uses: docker/build-push-action@v6
         with:
           context: .
           target: pings-collector
-          load: true
-          tags: subsquid/pings-collector:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Get pings collector version
-        run: echo "PINGS_COLLECTOR_VERSION=$(docker run --rm subsquid/pings-collector:test pings-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
-
-      - name: Build & publish pings collector
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
-          target: pings-collector
-          push: true
-          tags: |
-            subsquid/pings-collector:${{ env.PINGS_COLLECTOR_VERSION }}
-            subsquid/pings-collector:${{ inputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=subsquid/pings-collector,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
       - name: Build portal logs collector
-        uses: docker/build-push-action@v5
+        id: portal-logs-collector
+        uses: docker/build-push-action@v6
         with:
           context: .
           target: portal-logs-collector
-          load: true
-          tags: subsquid/portal-logs-collector:test
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=subsquid/portal-logs-collector,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
-      - name: Get portal logs collector version
-        run: echo "PORTAL_LOGS_COLLECTOR_VERSION=$(docker run --rm subsquid/portal-logs-collector:test portal-logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
+      - name: Export digests
+        env:
+          ARCH: ${{ matrix.arch }}
+          LOGS_COLLECTOR_DIGEST: ${{ steps.logs-collector.outputs.digest }}
+          PINGS_COLLECTOR_DIGEST: ${{ steps.pings-collector.outputs.digest }}
+          PORTAL_LOGS_COLLECTOR_DIGEST: ${{ steps.portal-logs-collector.outputs.digest }}
+        # Named by architecture so the publish job knows which digest is the
+        # amd64 one it can run to read the version out of.
+        run: |
+          set -eu
+          mkdir -p /tmp/digests/{logs-collector,pings-collector,portal-logs-collector}
+          echo "${LOGS_COLLECTOR_DIGEST:?}" > "/tmp/digests/logs-collector/${ARCH}"
+          echo "${PINGS_COLLECTOR_DIGEST:?}" > "/tmp/digests/pings-collector/${ARCH}"
+          echo "${PORTAL_LOGS_COLLECTOR_DIGEST:?}" > "/tmp/digests/portal-logs-collector/${ARCH}"
 
-      - name: Build & publish portal logs collector
-        uses: docker/build-push-action@v5
+      - name: Upload digests
+        uses: actions/upload-artifact@v4
         with:
-          context: .
-          platforms: linux/amd64,linux/arm/v7,linux/arm64/v8,linux/386
-          target: portal-logs-collector
-          push: true
-          tags: |
-            subsquid/portal-logs-collector:${{ env.PORTAL_LOGS_COLLECTOR_VERSION }}
-            subsquid/portal-logs-collector:${{ inputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish multi-arch tags
+    # A matrix `needs` waits for every leg, so both platforms must have been
+    # pushed before any tag is moved.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Docker login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_LOGIN }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Tag the merged manifests
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          for crate in logs-collector pings-collector portal-logs-collector; do
+            image="subsquid/${crate}"
+            amd64="${image}@$(cat "/tmp/digests/${crate}/amd64")"
+            arm64="${image}@$(cat "/tmp/digests/${crate}/arm64")"
+            # Unchanged: the version tag is whatever the published binary reports.
+            version=$(docker run --rm "${amd64}" "${crate}" --version | cut -d ' ' -f2)
+            docker buildx imagetools create -t "${image}:${version:?}" -t "${image}:${TAG}" "${amd64}" "${arm64}"
+            docker buildx imagetools inspect "${image}:${version}"
+          done

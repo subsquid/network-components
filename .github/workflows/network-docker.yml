@@ -48,10 +48,59 @@ jobs:
           username: ${{ secrets.DOCKER_LOGIN }}
           password: ${{ secrets.DOCKER_TOKEN }}
 
+      # The version tags are read out of the built binaries, as before. These
+      # `load: true` builds exist only to have something runnable to ask; the
+      # images that get published are built further down, on both runners. Only
+      # the amd64 runner probes, since both would report the same version.
+      - name: Build logs collector (version probe)
+        if: matrix.arch == 'amd64'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: logs-collector
+          load: true
+          tags: subsquid/logs-collector:test
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - name: Get logs collector version
+        if: matrix.arch == 'amd64'
+        run: echo "LOGS_COLLECTOR_VERSION=$(docker run --rm subsquid/logs-collector:test logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
+
+      - name: Build pings collector (version probe)
+        if: matrix.arch == 'amd64'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: pings-collector
+          load: true
+          tags: subsquid/pings-collector:test
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - name: Get pings collector version
+        if: matrix.arch == 'amd64'
+        run: echo "PINGS_COLLECTOR_VERSION=$(docker run --rm subsquid/pings-collector:test pings-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
+
+      - name: Build portal logs collector (version probe)
+        if: matrix.arch == 'amd64'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: portal-logs-collector
+          load: true
+          tags: subsquid/portal-logs-collector:test
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      - name: Get portal logs collector version
+        if: matrix.arch == 'amd64'
+        run: echo "PORTAL_LOGS_COLLECTOR_VERSION=$(docker run --rm subsquid/portal-logs-collector:test portal-logs-collector --version | cut -d ' ' -f2)" >> $GITHUB_ENV
+
       # All three targets share the `network-builder` stage, so building them in
       # one job reuses that single `cargo build --workspace` from the builder's
       # local state. Untagged pushes; the publish job tags the merged manifests.
-      - name: Build logs collector
+      - name: Build & publish logs collector for linux/${{ matrix.arch }}
         id: logs-collector
         uses: docker/build-push-action@v6
         with:
@@ -62,7 +111,7 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
-      - name: Build pings collector
+      - name: Build & publish pings collector for linux/${{ matrix.arch }}
         id: pings-collector
         uses: docker/build-push-action@v6
         with:
@@ -73,7 +122,7 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
-      - name: Build portal logs collector
+      - name: Build & publish portal logs collector for linux/${{ matrix.arch }}
         id: portal-logs-collector
         uses: docker/build-push-action@v6
         with:
@@ -90,14 +139,22 @@ jobs:
           LOGS_COLLECTOR_DIGEST: ${{ steps.logs-collector.outputs.digest }}
           PINGS_COLLECTOR_DIGEST: ${{ steps.pings-collector.outputs.digest }}
           PORTAL_LOGS_COLLECTOR_DIGEST: ${{ steps.portal-logs-collector.outputs.digest }}
-        # Named by architecture so the publish job knows which digest is the
-        # amd64 one it can run to read the version out of.
+        # Named by architecture; the publish job reads both.
         run: |
           set -eu
           mkdir -p /tmp/digests/{logs-collector,pings-collector,portal-logs-collector}
           echo "${LOGS_COLLECTOR_DIGEST:?}" > "/tmp/digests/logs-collector/${ARCH}"
           echo "${PINGS_COLLECTOR_DIGEST:?}" > "/tmp/digests/pings-collector/${ARCH}"
           echo "${PORTAL_LOGS_COLLECTOR_DIGEST:?}" > "/tmp/digests/portal-logs-collector/${ARCH}"
+
+      # Written once, by the runner that read them out of the binaries.
+      - name: Export versions
+        if: matrix.arch == 'amd64'
+        run: |
+          set -eu
+          echo "${LOGS_COLLECTOR_VERSION:?}" > /tmp/digests/logs-collector/version
+          echo "${PINGS_COLLECTOR_VERSION:?}" > /tmp/digests/pings-collector/version
+          echo "${PORTAL_LOGS_COLLECTOR_VERSION:?}" > /tmp/digests/portal-logs-collector/version
 
       - name: Upload digests
         uses: actions/upload-artifact@v4
@@ -136,8 +193,7 @@ jobs:
             image="subsquid/${crate}"
             amd64="${image}@$(cat "/tmp/digests/${crate}/amd64")"
             arm64="${image}@$(cat "/tmp/digests/${crate}/arm64")"
-            # Unchanged: the version tag is whatever the published binary reports.
-            version=$(docker run --rm "${amd64}" "${crate}" --version | cut -d ' ' -f2)
+            version=$(cat "/tmp/digests/${crate}/version")
             docker buildx imagetools create -t "${image}:${version:?}" -t "${image}:${TAG}" "${amd64}" "${arm64}"
             docker buildx imagetools inspect "${image}:${version}"
           done

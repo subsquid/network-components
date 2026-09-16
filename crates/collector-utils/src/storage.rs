@@ -323,17 +323,31 @@ pub struct PingRow {
     missing_chunks: u64,
     assignment_timestamp: u64,
     current_epoch: Option<u32>,
-    // Opaque assignment ID reported by the worker; ordering is scheduler-owned.
+    // Integer part of the last applied assignment ID reported by the worker;
+    // ordering is scheduler-owned.
     #[cfg(feature = "mvcc-chunks")]
     last_applied_assignment_id: Option<String>,
 }
 
 impl PingRow {
     pub fn new(heartbeat: Heartbeat, worker_id: String) -> Result<Self, &'static str> {
-        let assignment_timestamp = if heartbeat.assignment_id.is_empty() {
-            Ok(0)
-        } else {
-            parse_assignment_id(&heartbeat.assignment_id)
+        let last_applied = heartbeat
+            .last_applied_assignment_id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+            .map(parse_assignment_id)
+            .transpose()
+            .or(Err("cannot parse last_applied_assignment_id"))?;
+
+        // The last applied assignment takes precedence over the latest known one
+        let assignment_timestamp = match &last_applied {
+            Some(aid) => aid.timestamp_ms,
+            None if heartbeat.assignment_id.is_empty() => 0,
+            None => {
+                parse_assignment_id(&heartbeat.assignment_id)
+                    .or(Err("cannot parse assignment_id"))?
+                    .timestamp_ms
+            }
         };
 
         Ok(Self {
@@ -342,10 +356,12 @@ impl PingRow {
             version: heartbeat.version,
             timestamp: timestamp_now_ms(),
             missing_chunks: heartbeat.missing_chunks.map_or(0, |b| b.ones),
-            assignment_timestamp: assignment_timestamp.or(Err("cannot parse assignment_id"))?,
+            assignment_timestamp,
             current_epoch: heartbeat.current_epoch,
             #[cfg(feature = "mvcc-chunks")]
-            last_applied_assignment_id: heartbeat.last_applied_assignment_id,
+            last_applied_assignment_id: last_applied
+                .and_then(|aid| aid.number)
+                .map(|n| n.to_string()),
         })
     }
 }
@@ -704,19 +720,70 @@ mod tests {
         assert_eq!(res.unwrap().assignment_timestamp, 0);
     }
 
-    #[cfg(feature = "mvcc-chunks")]
     #[test]
-    fn test_last_applied_assignment_id() {
+    fn test_last_applied_assignment_id_timestamp() {
         let ping = Heartbeat {
-            last_applied_assignment_id: Some("assignment-42".to_string()),
+            assignment_id: "2025-10-12T12:00:45_7_C1A955A7".to_string(),
+            last_applied_assignment_id: Some("2025-10-11T08:30:00_6_B2B966B8".to_string()),
             ..Default::default()
         };
 
         let row = PingRow::new(ping, "worker".to_string()).unwrap();
-        assert_eq!(
-            row.last_applied_assignment_id,
-            Some("assignment-42".to_string())
-        );
+        let dt = chrono::Utc
+            .with_ymd_and_hms(2025, 10, 11, 8, 30, 0)
+            .unwrap();
+        assert_eq!(row.assignment_timestamp, dt.timestamp_millis() as u64);
+    }
+
+    #[test]
+    fn test_last_applied_assignment_id_error() {
+        let ping = Heartbeat {
+            assignment_id: "2025-10-12T12:00:45_7_C1A955A7".to_string(),
+            last_applied_assignment_id: Some("assignment-42".to_string()),
+            ..Default::default()
+        };
+
+        let res = PingRow::new(ping, "worker".to_string());
+        assert_eq!(res.unwrap_err(), "cannot parse last_applied_assignment_id");
+    }
+
+    #[test]
+    fn test_last_applied_assignment_id_empty_falls_back() {
+        let ping = Heartbeat {
+            assignment_id: "2025-10-12T12:00:45_7_C1A955A7".to_string(),
+            last_applied_assignment_id: Some(String::new()),
+            ..Default::default()
+        };
+
+        let row = PingRow::new(ping, "worker".to_string()).unwrap();
+        let dt = chrono::Utc
+            .with_ymd_and_hms(2025, 10, 12, 12, 0, 45)
+            .unwrap();
+        assert_eq!(row.assignment_timestamp, dt.timestamp_millis() as u64);
+    }
+
+    #[cfg(feature = "mvcc-chunks")]
+    #[test]
+    fn test_last_applied_assignment_id() {
+        let ping = Heartbeat {
+            last_applied_assignment_id: Some("2025-10-11T08:30:00_6_B2B966B8".to_string()),
+            ..Default::default()
+        };
+
+        let row = PingRow::new(ping, "worker".to_string()).unwrap();
+        assert_eq!(row.last_applied_assignment_id, Some("6".to_string()));
+    }
+
+    #[cfg(feature = "mvcc-chunks")]
+    #[test]
+    fn test_last_applied_assignment_id_without_integer() {
+        let ping = Heartbeat {
+            last_applied_assignment_id: Some("2025-10-11T08:30:00_B2B966B8".to_string()),
+            ..Default::default()
+        };
+
+        let row = PingRow::new(ping, "worker".to_string()).unwrap();
+        assert_eq!(row.last_applied_assignment_id, None);
     }
 
     #[cfg(feature = "mvcc-chunks")]

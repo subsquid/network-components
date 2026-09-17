@@ -13,11 +13,6 @@ use sqd_network_transport::{protocol, PeerId};
 use crate::cli::ClickhouseArgs;
 use crate::{base64, parse_assignment_id, timestamp_now_ms};
 
-#[cfg(feature = "mvcc-chunks")]
-const PINGS_MVCC_COLUMNS: &str = ",\n            last_applied_assignment_id Nullable(String)";
-#[cfg(not(feature = "mvcc-chunks"))]
-const PINGS_MVCC_COLUMNS: &str = "";
-
 lazy_static! {
     static ref LOGS_TABLE: String =
         std::env::var("LOGS_TABLE").unwrap_or("worker_query_logs".to_string());
@@ -81,14 +76,14 @@ lazy_static! {
             version LowCardinality(TEXT) NOT NULL,
             missing_chunks UInt64 NOT NULL DEFAULT 0,
             assignment_timestamp DateTime64(3) NOT NULL DEFAULT 0,
-            current_epoch Nullable(UInt32){}
+            current_epoch Nullable(UInt32),
+            last_applied_assignment_id Nullable(String)
         )
         ENGINE = MergeTree
         PARTITION BY toYYYYMM(timestamp)
         ORDER BY (timestamp, worker_id);
     ",
-        &*PINGS_TABLE,
-        PINGS_MVCC_COLUMNS
+        &*PINGS_TABLE
     );
     static ref PORTAL_LOGS_TABLE_DEFINITION: String = format!(
         "
@@ -325,7 +320,6 @@ pub struct PingRow {
     current_epoch: Option<u32>,
     // Integer part of the last applied assignment ID reported by the worker;
     // ordering is scheduler-owned.
-    #[cfg(feature = "mvcc-chunks")]
     last_applied_assignment_id: Option<String>,
 }
 
@@ -358,7 +352,6 @@ impl PingRow {
             missing_chunks: heartbeat.missing_chunks.map_or(0, |b| b.ones),
             assignment_timestamp,
             current_epoch: heartbeat.current_epoch,
-            #[cfg(feature = "mvcc-chunks")]
             last_applied_assignment_id: last_applied
                 .and_then(|aid| aid.number)
                 .map(|n| n.to_string()),
@@ -512,14 +505,6 @@ mod tests {
     use sqd_network_transport::{Keypair, PeerId};
 
     use super::*;
-
-    #[test]
-    fn test_pings_table_definition_matches_mvcc_feature() {
-        assert_eq!(
-            PINGS_TABLE_DEFINITION.contains("last_applied_assignment_id Nullable(String)"),
-            cfg!(feature = "mvcc-chunks")
-        );
-    }
 
     // To run this test, start a local clickhouse instance first
     // docker run --rm \
@@ -762,7 +747,6 @@ mod tests {
         assert_eq!(row.assignment_timestamp, dt.timestamp_millis() as u64);
     }
 
-    #[cfg(feature = "mvcc-chunks")]
     #[test]
     fn test_last_applied_assignment_id() {
         let ping = Heartbeat {
@@ -774,7 +758,6 @@ mod tests {
         assert_eq!(row.last_applied_assignment_id, Some("6".to_string()));
     }
 
-    #[cfg(feature = "mvcc-chunks")]
     #[test]
     fn test_last_applied_assignment_id_without_integer() {
         let ping = Heartbeat {
@@ -786,7 +769,6 @@ mod tests {
         assert_eq!(row.last_applied_assignment_id, None);
     }
 
-    #[cfg(feature = "mvcc-chunks")]
     #[test]
     fn test_last_applied_assignment_id_absent() {
         let row = PingRow::new(Heartbeat::default(), "worker".to_string()).unwrap();

@@ -19,6 +19,11 @@ QUERY_TIMEOUT_SEC = int(os.environ.get('QUERY_TIMEOUT_SEC', 20))
 MIN_INTERVAL_SEC = float(os.environ.get('MIN_INTERVAL_SEC', 60))
 
 PORTAL_URL = os.environ.get('PORTAL_URL', "https://portal.sqd.dev")
+API_KEY = os.environ.get('API_KEY', '')
+
+# A gated portal refuses the commercial routes without a credential, and meters the traffic
+# of the key that carries one. Unset, the generator stays anonymous and is metered to nobody.
+AUTH_HEADERS = {'Authorization': f'Bearer {API_KEY}'} if API_KEY else {}
 
 LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
 
@@ -95,7 +100,7 @@ class TrafficGenerator:
     def _pull_head(self, dataset) -> int:
         dataset_name = dataset.name
         try:
-            response = requests.get(f'{PORTAL_URL}/datasets/{dataset_name}/archival-head')
+            response = requests.get(f'{PORTAL_URL}/datasets/{dataset_name}/archival-head', headers=AUTH_HEADERS)
             if response.ok:
                 head_state = DatasetHead.model_validate_json(response.content)
                 return head_state.number
@@ -120,7 +125,7 @@ class TrafficGenerator:
 
     def _do_request(self, query_url, query) -> Tuple[int, int, int]:
         try:
-            headers = {"Accept-Encoding": "gzip"}
+            headers = {"Accept-Encoding": "gzip", **AUTH_HEADERS}
             response = requests.post(query_url, json=query, stream=True, timeout=QUERY_TIMEOUT_SEC, headers = headers)
             cnt = 0
             number = -1

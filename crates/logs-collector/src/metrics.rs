@@ -29,7 +29,6 @@ pub static LOG_LAG: LazyLock<Histogram> =
     LazyLock::new(|| Histogram::new([30.0, 60.0, 120.0, 300.0, 600.0, 1200.0, 1800.0, 3600.0]));
 pub static LOGS_STORED: LazyLock<Counter> = LazyLock::new(Default::default);
 pub static LOGS_DISCARDED: LazyLock<Family<Label, Counter>> = LazyLock::new(Default::default);
-pub static LOGS_DEFERRED: LazyLock<Counter> = LazyLock::new(Default::default);
 pub static STORAGE_ERRORS: LazyLock<Family<Label, Counter>> = LazyLock::new(Default::default);
 
 pub fn registry(shard: u8, total_shards: u8) -> Registry {
@@ -51,7 +50,7 @@ pub fn registry(shard: u8, total_shards: u8) -> Registry {
     );
     registry.register(
         "buffer_max_bytes",
-        "Buffer size at which logs are deferred to a later round",
+        "Buffer size at which collection waits for the buffered logs to be stored",
         BUFFER_MAX_BYTES.clone(),
     );
     registry.register(
@@ -68,11 +67,6 @@ pub fn registry(shard: u8, total_shards: u8) -> Registry {
         "logs_discarded",
         "Logs discarded for good, by reason",
         LOGS_DISCARDED.clone(),
-    );
-    registry.register(
-        "logs_deferred",
-        "Logs rejected because the buffer was full; they are collected again in a later round",
-        LOGS_DEFERRED.clone(),
     );
     registry.register(
         "storage_errors",

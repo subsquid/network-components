@@ -70,6 +70,10 @@ pub struct Cli {
     /// Number of shards the workers are split into by the last byte of their peer ID
     #[arg(long, env, default_value_t = 1)]
     pub total_shards: u8,
+
+    /// Whether the logs should be structured in JSON format
+    #[arg(long, env)]
+    pub json_log: bool,
 }
 
 fn parse_seconds(s: &str) -> anyhow::Result<Duration> {

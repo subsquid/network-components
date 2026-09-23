@@ -32,9 +32,15 @@ pub struct LogsCollector<T: Storage + Sync> {
 
 impl<T: Storage + Sync> LogsCollector<T> {
     pub fn new(storage: T) -> Self {
-        let max_batch_size = env_size("MAX_INSERT_BATCH_BYTES", DEFAULT_MAX_BATCH_SIZE);
-        let max_buffer_size =
-            env_size("MAX_BUFFER_BYTES", DEFAULT_MAX_BUFFER_SIZE).max(max_batch_size);
+        Self::with_limits(
+            storage,
+            env_size("MAX_INSERT_BATCH_BYTES", DEFAULT_MAX_BATCH_SIZE),
+            env_size("MAX_BUFFER_BYTES", DEFAULT_MAX_BUFFER_SIZE),
+        )
+    }
+
+    pub(crate) fn with_limits(storage: T, max_batch_size: usize, max_buffer_size: usize) -> Self {
+        let max_buffer_size = max_buffer_size.max(max_batch_size);
         Self {
             storage,
             buffer: Mutex::new(Buffer {
@@ -46,15 +52,9 @@ impl<T: Storage + Sync> LogsCollector<T> {
         }
     }
 
-    pub fn buffer_logs(&self, worker_id: PeerId, logs: Vec<QueryExecuted>) {
-        log::debug!("Buffering {} logs from {worker_id}", logs.len());
-        log::trace!("Logs buffered: {logs:?}");
-        let rows = logs.into_iter().filter_map(|log| {
-            QueryExecutedRow::try_from(log, worker_id)
-                .map_err(|e| log::warn!("Invalid log message from {worker_id}: {e}"))
-                .ok()
-        });
-
+    /// Returns `false` if some rows were dropped because the buffer is full.
+    pub fn buffer_logs(&self, worker_id: PeerId, rows: Vec<QueryExecutedRow>) -> bool {
+        log::debug!("Buffering {} logs from {worker_id}", rows.len());
         let mut buffer = self.buffer.lock();
         let mut dropped = 0;
         for row in rows {
@@ -72,6 +72,7 @@ impl<T: Storage + Sync> LogsCollector<T> {
                 self.max_buffer_size
             );
         }
+        dropped == 0
     }
 
     /// Whether the buffer has reached its memory limit. Callers use this to stop
@@ -80,9 +81,9 @@ impl<T: Storage + Sync> LogsCollector<T> {
         self.buffer.lock().size >= self.max_buffer_size
     }
 
-    pub async fn dump_buffer(&mut self) -> anyhow::Result<()> {
+    pub async fn dump_buffer(&self) -> anyhow::Result<()> {
         let logs = {
-            let buffer = self.buffer.get_mut();
+            let mut buffer = self.buffer.lock();
             buffer.size = 0;
             std::mem::take(&mut buffer.logs)
         };
@@ -150,10 +151,29 @@ impl<T: Storage + Sync> LogsCollector<T> {
             .inspect_err(|e| log::warn!("Stored {stored}/{total} logs before failure: {e:?}"))
     }
 
-    pub async fn last_timestamps(&mut self) -> anyhow::Result<HashMap<String, u64>> {
+    pub async fn last_timestamps(&self) -> anyhow::Result<HashMap<String, u64>> {
         let timestamps = self.storage.get_last_stored().await?;
         Ok(timestamps)
     }
+}
+
+/// Converts a worker's logs into rows, dropping the invalid ones. Verifying every
+/// log's signature makes this CPU-bound, so it belongs on a blocking thread.
+pub fn rows_from_logs(worker_id: PeerId, logs: Vec<QueryExecuted>) -> Vec<QueryExecutedRow> {
+    log::trace!("Logs received: {logs:?}");
+    let mut invalid = HashMap::<&str, usize>::new();
+    let rows = logs
+        .into_iter()
+        .filter_map(|log| {
+            QueryExecutedRow::try_from(log, worker_id)
+                .map_err(|reason| *invalid.entry(reason).or_default() += 1)
+                .ok()
+        })
+        .collect();
+    for (reason, count) in invalid {
+        log::warn!("Dropped {count} invalid logs from {worker_id}: {reason}");
+    }
+    rows
 }
 
 fn env_size(var: &str, default: usize) -> usize {

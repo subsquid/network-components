@@ -68,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
         .run(
             contract_client,
             args.collection_interval,
+            args.backlog_collection_interval,
             args.worker_update_interval,
             args.concurrent_workers,
             cancellation_token,

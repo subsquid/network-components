@@ -22,6 +22,16 @@ pub struct Cli {
     )]
     pub collection_interval: Duration,
 
+    /// Interval between the starts of collection rounds while workers have a backlog
+    /// (seconds). When a round leaves logs uncollected (a worker had more than 5 pages,
+    /// or the buffer filled up), the next round starts this long after the previous one
+    /// started instead of waiting for the full collection interval. Capped at the
+    /// collection interval. Disabled when unset. Every round runs the watermark query
+    /// in ClickHouse and requests every registered worker, so while a backlog lasts
+    /// this multiplies that load by up to collection interval / this value.
+    #[arg(long, env = "BACKLOG_COLLECTION_INTERVAL_SEC", value_parser = parse_seconds)]
+    pub backlog_collection_interval: Option<Duration>,
+
     /// Number of workers processed in parallel
     #[arg(long, env, default_value_t = 30)]
     pub concurrent_workers: usize,

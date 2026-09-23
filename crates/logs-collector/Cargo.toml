@@ -1,6 +1,6 @@
 [package]
 name = "logs-collector"
-version = "2.1.12"
+version = "2.2.0"
 edition = "2021"
 
 [dependencies]
@@ -11,12 +11,17 @@ futures = "0.3"
 log = "0.4"
 parking_lot = "0.12"
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 
 sqd-contract-client = { workspace = true }
 sqd-messages = { workspace = true }
 sqd-network-transport = { workspace = true, features = ["logs-collector"] }
 
 collector-utils = { path = "../collector-utils" }
+
+[dev-dependencies]
+async-trait = "0.1"
+tokio = { version = "1", features = ["full", "test-util"] }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"

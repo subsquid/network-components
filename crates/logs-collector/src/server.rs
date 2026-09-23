@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,41 +7,66 @@ use collector_utils::Storage;
 use futures::StreamExt;
 use parking_lot::Mutex;
 use sqd_contract_client::Client as ContractClient;
-use sqd_messages::LogsRequest;
+use sqd_messages::{LogsRequest, QueryLogs};
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 use sqd_network_transport::{LogsCollectorTransport, PeerId};
+use tokio::time::Instant;
+use tokio_util::task::AbortOnDropHandle;
 
-use crate::collector::LogsCollector;
+use crate::collector::{rows_from_logs, LogsCollector};
 
 const MAX_PAGES: usize = 5;
 
-pub struct Server<T>
-where
-    T: Storage + Send + Sync + 'static,
-{
-    transport_handle: LogsCollectorTransport,
-    logs_collector: LogsCollector<T>,
-    registered_workers: Arc<Mutex<HashSet<PeerId>>>,
-    task_manager: TaskManager,
+/// Where worker logs are requested from: the P2P transport, or a fake in tests.
+pub trait LogsSource: Send + Sync + 'static {
+    fn request_logs(
+        &self,
+        worker_id: PeerId,
+        request: LogsRequest,
+    ) -> impl Future<Output = anyhow::Result<QueryLogs>> + Send;
 }
 
-impl<T> Server<T>
+impl LogsSource for LogsCollectorTransport {
+    async fn request_logs(
+        &self,
+        worker_id: PeerId,
+        request: LogsRequest,
+    ) -> anyhow::Result<QueryLogs> {
+        LogsCollectorTransport::request_logs(self, worker_id, request)
+            .await
+            // The `Debug` form is what has always been logged for these errors.
+            .map_err(|e| anyhow::anyhow!("{e:?}"))
+    }
+}
+
+pub struct Server<L, T>
 where
+    L: LogsSource,
     T: Storage + Send + Sync + 'static,
 {
-    pub fn new(transport: LogsCollectorTransport, logs_collector: LogsCollector<T>) -> Self {
+    transport_handle: L,
+    logs_collector: LogsCollector<T>,
+    registered_workers: Arc<Mutex<HashSet<PeerId>>>,
+}
+
+impl<L, T> Server<L, T>
+where
+    L: LogsSource,
+    T: Storage + Send + Sync + 'static,
+{
+    pub fn new(transport: L, logs_collector: LogsCollector<T>) -> Self {
         Self {
             transport_handle: transport,
             logs_collector,
             registered_workers: Default::default(),
-            task_manager: Default::default(),
         }
     }
 
     pub async fn run(
-        mut self,
+        self,
         contract_client: Arc<dyn ContractClient>,
         collection_interval: Duration,
+        backlog_collection_interval: Option<Duration>,
         worker_update_interval: Duration,
         concurrent_workers: usize,
         cancellation_token: CancellationToken,
@@ -56,33 +82,49 @@ where
             .collect();
         *self.registered_workers.lock() = workers;
 
-        self.spawn_worker_update_task(contract_client, worker_update_interval);
+        let mut task_manager = TaskManager::default();
+        self.spawn_worker_update_task(&mut task_manager, contract_client, worker_update_interval);
 
-        self.run_collecting_task(
-            collection_interval,
-            concurrent_workers,
-            cancellation_token.child_token(),
-        )
-        .await;
+        Arc::new(self)
+            .run_collecting_task(
+                collection_interval,
+                backlog_collection_interval,
+                concurrent_workers,
+                cancellation_token.child_token(),
+            )
+            .await;
 
         log::info!("Server shutting down");
-        self.task_manager.await_stop().await;
+        task_manager.await_stop().await;
         Ok(())
     }
 
     async fn run_collecting_task(
-        &mut self,
+        self: Arc<Self>,
         interval: Duration,
+        backlog_interval: Option<Duration>,
         concurrent_jobs: usize,
         cancel_token: CancellationToken,
     ) {
+        // A backlog never makes the next round start later than it would anyway.
+        let backlog_interval = backlog_interval.map(|backlog| backlog.min(interval));
+        match backlog_interval {
+            Some(backlog) => log::info!(
+                "Collecting logs every {interval:?}, or every {backlog:?} while workers have a backlog"
+            ),
+            None => log::info!("Collecting logs every {interval:?}"),
+        }
         let mut interval = tokio::time::interval(interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tokio::select! {
-                _ = interval.tick() => (),
+                // With a backlog the next tick is often already due, and shutdown
+                // shouldn't have to win a coin flip against it.
+                biased;
                 _ = cancel_token.cancelled() => break,
+                _ = interval.tick() => (),
             };
+            let round_start = Instant::now();
 
             let workers = self.registered_workers.lock().clone();
             log::info!("Collecting logs from {} workers", workers.len());
@@ -94,34 +136,67 @@ where
                 }
             };
 
-            futures::stream::iter(workers.into_iter())
+            let backlogged_workers = futures::stream::iter(workers)
                 .map(|worker_id| {
-                    self.collect_logs(
-                        worker_id,
-                        last_timestamps
-                            .get(&worker_id.to_string())
-                            .map(|ts| ts + 1)
-                            .unwrap_or(0),
-                    )
+                    let from_timestamp_ms = last_timestamps
+                        .get(&worker_id.to_string())
+                        .map(|ts| ts + 1)
+                        .unwrap_or(0);
+                    // A task per worker, so collecting isn't confined to this thread.
+                    let server = self.clone();
+                    AbortOnDropHandle::new(tokio::spawn(async move {
+                        server.collect_logs(worker_id, from_timestamp_ms).await
+                    }))
                 })
                 .buffer_unordered(concurrent_jobs)
                 .take_until(cancel_token.cancelled())
-                .collect::<()>()
+                .fold(0, |backlogged, joined| async move {
+                    match joined {
+                        Ok(true) => backlogged + 1,
+                        Ok(false) => backlogged,
+                        Err(e) => {
+                            log::error!("Log collection task failed: {e}");
+                            backlogged
+                        }
+                    }
+                })
                 .await;
 
-            self.logs_collector
-                .dump_buffer()
-                .await
-                .unwrap_or_else(|e| log::warn!("Couldn't store logs: {e:?}"));
+            if let Err(e) = self.logs_collector.dump_buffer().await {
+                // Don't start the next round early: it would fetch the same logs again,
+                // most likely only to fail the same way.
+                log::warn!("Couldn't store logs: {e:?}");
+                continue;
+            }
+
+            if backlogged_workers == 0 {
+                continue;
+            }
+            match backlog_interval {
+                Some(backlog_interval) => {
+                    let next_round = round_start + backlog_interval;
+                    log::info!(
+                        "{backlogged_workers} workers have more logs, starting the next round in {:?}",
+                        next_round.saturating_duration_since(Instant::now())
+                    );
+                    interval.reset_at(next_round);
+                }
+                None => log::info!(
+                    "{backlogged_workers} workers have more logs, collecting them next round"
+                ),
+            }
         }
     }
 
-    async fn collect_logs(&self, worker_id: PeerId, mut from_timestamp_ms: u64) {
+    /// Returns `true` if the worker may have logs left that this round didn't collect:
+    /// it had more than `MAX_PAGES` pages, or the buffer filled up. A failed request
+    /// returns `false`, so unreachable workers never make rounds start early.
+    async fn collect_logs(&self, worker_id: PeerId, mut from_timestamp_ms: u64) -> bool {
         // Don't even request logs we'd have to drop. The buffer drains every round,
         // so these workers are picked up again next time.
         if self.logs_collector.is_full() {
             log::debug!("Buffer full, skipping log collection from {worker_id}");
-            return;
+            return true;
         }
         let mut last_query_id = None;
         for page in 0..MAX_PAGES {
@@ -130,7 +205,7 @@ where
             } else {
                 log::debug!("Collecting more logs from {worker_id} since {from_timestamp_ms}");
             }
-            let mut logs = match self
+            let logs = match self
                 .transport_handle
                 .request_logs(
                     worker_id,
@@ -143,42 +218,47 @@ where
             {
                 Ok(logs) => logs,
                 Err(e) => {
-                    return log::warn!("Error getting logs from {worker_id}: {e:?}");
+                    log::warn!("Error getting logs from {worker_id}: {e:#}");
+                    return false;
                 }
             };
 
             let Some(last_log) = logs.queries_executed.last() else {
-                return;
+                return false;
             };
             last_query_id = last_log.query.as_ref().map(|q| q.query_id.clone());
             from_timestamp_ms = last_log.timestamp_ms;
 
-            let total_count = logs.queries_executed.len();
-            logs.queries_executed
-                .retain(|log| log.verify_client_signature(worker_id));
-            if logs.queries_executed.len() < total_count {
-                log::warn!(
-                    "Invalid client signature in {} logs from {worker_id}",
-                    total_count - logs.queries_executed.len()
-                );
+            // Verifying signatures is CPU-bound: keep it off the threads driving the network.
+            let rows = tokio::task::spawn_blocking(move || {
+                rows_from_logs(worker_id, logs.queries_executed)
+            });
+            let rows = match rows.await {
+                Ok(rows) => rows,
+                Err(e) => {
+                    log::error!("Couldn't process logs from {worker_id}: {e}");
+                    return false;
+                }
+            };
+
+            if !self.logs_collector.buffer_logs(worker_id, rows) {
+                return true;
             }
-
-            self.logs_collector
-                .buffer_logs(worker_id, logs.queries_executed);
-
             if !logs.has_more {
-                return;
+                return false;
             }
             if self.logs_collector.is_full() {
                 log::debug!("Buffer full, stopping log collection from {worker_id}");
-                return;
+                return true;
             }
         }
-        log::warn!("Logs from {worker_id} didn't fit in {MAX_PAGES} pages, giving up");
+        log::debug!("Logs from {worker_id} didn't fit in {MAX_PAGES} pages, continuing next round");
+        true
     }
 
     fn spawn_worker_update_task(
-        &mut self,
+        &self,
+        task_manager: &mut TaskManager,
         contract_client: Arc<dyn ContractClient>,
         interval: Duration,
     ) {
@@ -199,6 +279,9 @@ where
                     .collect::<HashSet<PeerId>>();
             }
         };
-        self.task_manager.spawn_periodic(task, interval);
+        task_manager.spawn_periodic(task, interval);
     }
 }
+
+#[cfg(test)]
+mod tests;

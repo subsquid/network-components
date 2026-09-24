@@ -63,6 +63,10 @@ async fn main() -> anyhow::Result<()> {
     })?;
 
     let storage = ClickhouseStorage::new(args.clickhouse).await?;
+    let worker_update_interval = Duration::from_secs(args.worker_update_interval_sec as u64);
+
+    let request_interval = Duration::from_secs(args.request_interval_sec as u64);
+    let concurrency_limit = args.concurrent_requests;
 
     let registry = metrics::registry(args.shard);
     tokio::spawn(async move {
@@ -70,10 +74,6 @@ async fn main() -> anyhow::Result<()> {
             tracing::error!(error = format!("{e:#}"), "Metrics server failed");
         }
     });
-    let worker_update_interval = Duration::from_secs(args.worker_update_interval_sec as u64);
-
-    let request_interval = Duration::from_secs(args.request_interval_sec as u64);
-    let concurrency_limit = args.concurrent_requests;
 
     Server::new(transport_handle, request_interval, concurrency_limit)
         .run(

@@ -1,8 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::http::{header, StatusCode};
-use axum::response::IntoResponse;
+use axum::http::header;
 use prometheus_client::encoding::text::encode;
 use prometheus_client::registry::Registry;
 
@@ -13,17 +12,9 @@ pub async fn serve_metrics(port: u16, registry: Registry) -> anyhow::Result<()> 
         "/metrics",
         axum::routing::get(move || async move {
             let mut body = String::new();
-            match encode(&mut body, &registry) {
-                Ok(()) => (
-                    [(
-                        header::CONTENT_TYPE,
-                        "application/openmetrics-text; version=1.0.0; charset=utf-8",
-                    )],
-                    body,
-                )
-                    .into_response(),
-                Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-            }
+            encode(&mut body, &registry).expect("writing to a String never fails");
+            let content_type = "application/openmetrics-text; version=1.0.0; charset=utf-8";
+            ([(header::CONTENT_TYPE, content_type)], body)
         }),
     );
     axum::Server::try_bind(&SocketAddr::from(([0, 0, 0, 0], port)))?

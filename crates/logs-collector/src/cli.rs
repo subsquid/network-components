@@ -62,6 +62,14 @@ pub struct Cli {
         default_value = "10"
     )]
     pub connect_timeout: Duration,
+
+    /// Shard of workers this instance collects logs from, in 0..TOTAL_SHARDS
+    #[arg(long, env, default_value_t = 0)]
+    pub shard: u8,
+
+    /// Number of shards the workers are split into by the last byte of their peer ID
+    #[arg(long, env, default_value_t = 1)]
+    pub total_shards: u8,
 }
 
 fn parse_seconds(s: &str) -> anyhow::Result<Duration> {

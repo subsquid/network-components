@@ -50,6 +50,12 @@ async fn main() -> anyhow::Result<()> {
     )
     .init();
     let args: Cli = Cli::parse();
+    anyhow::ensure!(
+        args.shard < args.total_shards,
+        "SHARD ({}) must be less than TOTAL_SHARDS ({})",
+        args.shard,
+        args.total_shards
+    );
 
     // Build P2P transport
     let agent_info = get_agent_info!();
@@ -64,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
     let logs_collector = LogsCollector::new(storage);
     let cancellation_token = create_cancellation_token()?;
 
-    Server::new(transport, logs_collector)
+    Server::new(transport, logs_collector, args.shard, args.total_shards)
         .run(
             contract_client,
             args.collection_interval,

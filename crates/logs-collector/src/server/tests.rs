@@ -205,7 +205,7 @@ fn server<L: LogsSource>(
     max_buffer_size: usize,
 ) -> Arc<Server<L, FakeStorage>> {
     let collector = LogsCollector::with_limits(storage.clone(), max_buffer_size, max_buffer_size);
-    let server = Server::new(workers, collector);
+    let server = Server::new(workers, collector, 0, 1);
     *server.registered_workers.lock() = worker_ids;
     Arc::new(server)
 }

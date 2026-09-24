@@ -6,7 +6,7 @@ use std::time::Duration;
 use collector_utils::Storage;
 use futures::StreamExt;
 use parking_lot::Mutex;
-use sqd_contract_client::Client as ContractClient;
+use sqd_contract_client::{Client as ContractClient, Worker};
 use sqd_messages::{LogsRequest, QueryLogs};
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 use sqd_network_transport::{LogsCollectorTransport, PeerId};
@@ -47,6 +47,9 @@ where
     transport_handle: L,
     logs_collector: LogsCollector<T>,
     registered_workers: Arc<Mutex<HashSet<PeerId>>>,
+    /// Only workers whose peer ID's last byte modulo `total_shards` is `shard` are collected from.
+    shard: u8,
+    total_shards: u8,
 }
 
 impl<L, T> Server<L, T>
@@ -54,11 +57,18 @@ where
     L: LogsSource,
     T: Storage + Send + Sync + 'static,
 {
-    pub fn new(transport: L, logs_collector: LogsCollector<T>) -> Self {
+    pub fn new(
+        transport: L,
+        logs_collector: LogsCollector<T>,
+        shard: u8,
+        total_shards: u8,
+    ) -> Self {
         Self {
             transport_handle: transport,
             logs_collector,
             registered_workers: Default::default(),
+            shard,
+            total_shards,
         }
     }
 
@@ -74,13 +84,8 @@ where
         log::info!("Starting logs collector server");
 
         // Get registered workers from chain
-        let workers = contract_client
-            .active_workers()
-            .await?
-            .into_iter()
-            .map(|w| w.peer_id)
-            .collect();
-        *self.registered_workers.lock() = workers;
+        let workers = contract_client.active_workers().await?;
+        *self.registered_workers.lock() = filter_peer_ids(workers, self.shard, self.total_shards);
 
         let mut task_manager = TaskManager::default();
         self.spawn_worker_update_task(&mut task_manager, contract_client, worker_update_interval);
@@ -264,6 +269,7 @@ where
     ) {
         log::info!("Starting worker update task");
         let registered_workers = self.registered_workers.clone();
+        let (shard, total_shards) = (self.shard, self.total_shards);
         let contract_client: Arc<dyn ContractClient> = contract_client;
         let task = move |_| {
             let registered_workers = registered_workers.clone();
@@ -273,14 +279,22 @@ where
                     Ok(workers) => workers,
                     Err(e) => return log::error!("Error getting registered workers: {e:?}"),
                 };
-                *registered_workers.lock() = workers
-                    .into_iter()
-                    .map(|w| w.peer_id)
-                    .collect::<HashSet<PeerId>>();
+                *registered_workers.lock() = filter_peer_ids(workers, shard, total_shards);
             }
         };
         task_manager.spawn_periodic(task, interval);
     }
+}
+
+fn filter_peer_ids(workers: Vec<Worker>, shard: u8, total_shards: u8) -> HashSet<PeerId> {
+    workers
+        .into_iter()
+        .map(|w| w.peer_id)
+        .filter(|peer_id| {
+            let last_byte = *peer_id.to_bytes().last().expect("a peer ID is never empty");
+            last_byte % total_shards == shard
+        })
+        .collect()
 }
 
 #[cfg(test)]

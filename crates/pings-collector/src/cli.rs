@@ -37,4 +37,8 @@ pub struct Cli {
 
     #[arg(long, env, default_value_t = 1)]
     pub total_shards: u8,
+
+    /// Whether the logs should be structured in JSON format
+    #[arg(long, env)]
+    pub json_log: bool,
 }

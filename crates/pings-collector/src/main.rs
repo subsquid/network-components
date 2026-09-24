@@ -45,9 +45,9 @@ fn setup_tracing(json: bool) -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Init logger and parse arguments
-    setup_tracing(false)?;
+    // Parse arguments and init logger
     let args: Cli = Cli::parse();
+    setup_tracing(args.json_log)?;
 
     // Build P2P transport
     let agent_info = get_agent_info!();

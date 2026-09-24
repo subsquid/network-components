@@ -51,7 +51,7 @@ impl Server {
         shard: u8,
         total_shards: u8,
     ) -> anyhow::Result<()> {
-        log::info!("Starting pings collector server");
+        tracing::info!(shard, total_shards, "Starting pings collector server");
 
         // Get registered workers from chain
         *self.registered_workers.write() = filter_peer_ids(
@@ -72,7 +72,7 @@ impl Server {
                 else => break
             }
         }
-        log::info!("Server shutting down");
+        tracing::info!("Server shutting down");
         self.task_manager.await_stop().await;
         Ok(())
     }
@@ -85,7 +85,7 @@ impl Server {
         total_shards: u8,
     ) {
         // TODO: There's exact same code in logs collector. Move out to collector-utils
-        log::info!("Starting worker update task");
+        tracing::info!("Starting worker update task");
         let registered_workers = self.registered_workers.clone();
         let contract_client: Arc<dyn ContractClient> = contract_client;
         let task = move |_| {
@@ -94,7 +94,9 @@ impl Server {
             async move {
                 let workers = match contract_client.active_workers().await {
                     Ok(workers) => workers,
-                    Err(e) => return log::error!("Error getting registered workers: {e:?}"),
+                    Err(e) => {
+                        return tracing::error!(error = ?e, "Error getting registered workers")
+                    }
                 };
                 *registered_workers.write() = filter_peer_ids(&workers, shard, total_shards);
             }
@@ -103,7 +105,7 @@ impl Server {
     }
 
     fn spawn_heartbeat_collection_task(&mut self, storage: impl Storage + Send + Sync + 'static) {
-        log::info!("Starting heartbeat collection task");
+        tracing::info!("Starting heartbeat collection task");
         let transport_handle = self.transport_handle.clone();
         let registered_workers = self.registered_workers.clone();
         let concurrency_limit = self.concurrency_limit;
@@ -119,11 +121,14 @@ impl Server {
 
                 let workers = registered_workers.read().clone();
                 if workers.is_empty() {
-                    log::info!("No registered workers to collect heartbeats from");
+                    tracing::info!("No registered workers to collect heartbeats from");
                     return;
                 }
 
-                log::info!("Collecting heartbeats from {} workers", workers.len());
+                tracing::info!(
+                    workers = workers.len(),
+                    "Collecting heartbeats from workers"
+                );
 
                 let ping_rows: Vec<PingRow> = stream::iter(workers.into_iter())
                     .map(|peer_id| {
@@ -132,15 +137,16 @@ impl Server {
                             let heartbeat = match handle.request_heartbeat(peer_id).await {
                                 Ok(heartbeat) => heartbeat,
                                 Err(e) => {
-                                    log::debug!("Failed to get heartbeat from {}: {}", peer_id, e);
+                                    tracing::debug!(worker_id = %peer_id, error = %e, "Failed to get heartbeat");
                                     return None;
                                 }
                             };
 
                             if !heartbeat.version_matches(&SUPPORTED_WORKER_VERSIONS) {
-                                log::debug!(
-                                    "Unsupported worker version {peer_id}: {:?}",
-                                    heartbeat.version
+                                tracing::debug!(
+                                    worker_id = %peer_id,
+                                    version = ?heartbeat.version,
+                                    "Unsupported worker version"
                                 );
                                 return None;
                             }
@@ -148,7 +154,7 @@ impl Server {
                             match PingRow::new(heartbeat, peer_id.to_string()) {
                                 Ok(ping_row) => Some(ping_row),
                                 Err(e) => {
-                                    log::error!("Error creating ping row: {e}");
+                                    tracing::error!(worker_id = %peer_id, error = %e, "Error creating ping row");
                                     None
                                 }
                             }
@@ -160,7 +166,7 @@ impl Server {
                     .collect()
                     .await;
 
-                log::info!(
+                tracing::info!(
                     "Collected {} heartbeats in {:?}",
                     ping_rows.len(),
                     start.elapsed()
@@ -168,10 +174,10 @@ impl Server {
                 if !ping_rows.is_empty() {
                     match storage.store_heartbeats(ping_rows.into_iter()).await {
                         Ok(()) => {
-                            log::info!("Stored heartbeats successfully",);
+                            tracing::info!("Stored heartbeats successfully");
                         }
                         Err(e) => {
-                            log::error!("Error storing heartbeats: {e:?}");
+                            tracing::error!(error = format!("{e:#}"), "Error storing heartbeats");
                         }
                     }
                 }

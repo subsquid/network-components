@@ -4633,7 +4633,6 @@ dependencies = [
  "collector-utils",
  "futures 0.3.31",
  "lazy_static",
- "log",
  "parking_lot 0.12.3",
  "semver 1.0.25",
  "sqd-contract-client",
@@ -4641,6 +4640,7 @@ dependencies = [
  "sqd-network-transport",
  "tikv-jemallocator",
  "tokio 1.43.0",
+ "tracing",
  "tracing-subscriber",
 ]
 

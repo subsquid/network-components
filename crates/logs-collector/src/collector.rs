@@ -6,6 +6,8 @@ use sqd_network_transport::PeerId;
 
 use collector_utils::{QueryExecutedRow, Storage};
 
+use crate::metrics;
+
 /// Default maximum estimated size (bytes) of a single INSERT batch sent to
 /// ClickHouse. Buffers larger than this are split into several INSERTs so that
 /// an oversized batch can't fail repeatedly and stall log collection.
@@ -66,6 +68,9 @@ impl<T: Storage + Sync> LogsCollector<T> {
             buffer.logs.push(row);
         }
         if dropped > 0 {
+            metrics::LOGS_DROPPED
+                .get_or_create(&[("reason", "buffer_full")])
+                .inc_by(dropped);
             tracing::warn!(
                 worker_id = %worker_id,
                 dropped,
@@ -146,9 +151,13 @@ impl<T: Storage + Sync> LogsCollector<T> {
         stored: usize,
         total: usize,
     ) -> anyhow::Result<()> {
+        let count = chunk.len() as u64;
         self.storage
             .store_logs(chunk.into_iter())
             .await
+            .inspect(|()| {
+                metrics::LOGS_STORED.inc_by(count);
+            })
             .inspect_err(|e| {
                 tracing::warn!(
                     stored,
@@ -179,6 +188,9 @@ pub fn rows_from_logs(worker_id: PeerId, logs: Vec<QueryExecuted>) -> Vec<QueryE
         })
         .collect();
     for (reason, count) in invalid {
+        metrics::LOGS_DROPPED
+            .get_or_create(&[("reason", "invalid")])
+            .inc_by(count as u64);
         tracing::warn!(worker_id = %worker_id, count, reason, "Dropped invalid logs");
     }
     rows

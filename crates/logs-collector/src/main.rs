@@ -12,6 +12,7 @@ use crate::server::Server;
 
 mod cli;
 mod collector;
+mod metrics;
 mod server;
 
 #[cfg(not(target_env = "msvc"))]
@@ -88,6 +89,14 @@ async fn main() -> anyhow::Result<()> {
     let storage = ClickhouseStorage::new(args.clickhouse).await?;
     let logs_collector = LogsCollector::new(storage);
     let cancellation_token = create_cancellation_token()?;
+
+    let registry = metrics::registry(args.shard);
+    let cancel = cancellation_token.clone();
+    tokio::spawn(async move {
+        if let Err(e) = metrics::serve(args.prometheus_port, registry, cancel).await {
+            tracing::error!(error = format!("{e:#}"), "Metrics server failed");
+        }
+    });
 
     Server::new(transport, logs_collector, args.shard, args.total_shards)
         .run(

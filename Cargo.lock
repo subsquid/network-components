@@ -3800,10 +3800,12 @@ version = "2.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "clap",
  "collector-utils",
  "futures 0.3.34",
  "parking_lot 0.12.5",
+ "prometheus-client",
  "sqd-contract-client",
  "sqd-messages",
  "sqd-network-transport",

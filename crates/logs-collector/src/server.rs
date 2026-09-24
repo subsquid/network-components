@@ -14,6 +14,7 @@ use tokio::time::Instant;
 use tokio_util::task::AbortOnDropHandle;
 
 use crate::collector::{rows_from_logs, LogsCollector};
+use crate::metrics;
 
 const MAX_PAGES: usize = 5;
 
@@ -136,9 +137,13 @@ where
 
             let workers = self.registered_workers.lock().clone();
             tracing::info!(workers = workers.len(), "Collecting logs from workers");
+            metrics::COMMON.workers.set(workers.len() as i64);
             let last_timestamps = match self.logs_collector.last_timestamps().await {
                 Ok(timestamps) => timestamps,
                 Err(e) => {
+                    metrics::STORAGE_ERRORS
+                        .get_or_create(&[("operation", "read")])
+                        .inc();
                     tracing::warn!(error = format!("{e:#}"), "Couldn't read last stored logs");
                     continue;
                 }
@@ -169,8 +174,14 @@ where
                     }
                 })
                 .await;
+            metrics::BACKLOGGED_WORKERS.set(backlogged_workers);
 
-            if let Err(e) = self.logs_collector.dump_buffer().await {
+            let dumped = self.logs_collector.dump_buffer().await;
+            metrics::COMMON.observe_round(round_start.elapsed());
+            if let Err(e) = dumped {
+                metrics::STORAGE_ERRORS
+                    .get_or_create(&[("operation", "insert")])
+                    .inc();
                 // Don't start the next round early: it would fetch the same logs again,
                 // most likely only to fail the same way.
                 tracing::warn!(error = format!("{e:#}"), "Couldn't store logs");
@@ -213,15 +224,14 @@ where
         let mut last_query_id = None;
         for page in 0..MAX_PAGES {
             tracing::debug!(worker_id = %worker_id, page, from_timestamp_ms, "Collecting logs");
-            let logs = match self
-                .transport_handle
-                .request_logs(
+            let logs = match metrics::COMMON
+                .observe_request(self.transport_handle.request_logs(
                     worker_id,
                     LogsRequest {
                         from_timestamp_ms,
                         last_received_query_id: last_query_id,
                     },
-                )
+                ))
                 .await
             {
                 Ok(logs) => logs,

@@ -1,6 +1,6 @@
 [package]
 name = "logs-collector"
-version = "2.3.0"
+version = "2.4.0"
 edition = "2021"
 
 [dependencies]
@@ -8,6 +8,7 @@ anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
 parking_lot = "0.12"
+prometheus-client = "0.23"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"

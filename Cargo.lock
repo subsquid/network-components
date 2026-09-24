@@ -1143,11 +1143,13 @@ version = "2.0.3"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "base64 0.22.1",
  "chrono",
  "clap",
  "clickhouse",
  "lazy_static",
+ "prometheus-client",
  "serde",
  "serde_bytes",
  "serde_repr",
@@ -3796,7 +3798,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "logs-collector"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3804,6 +3806,7 @@ dependencies = [
  "collector-utils",
  "futures 0.3.34",
  "parking_lot 0.12.5",
+ "prometheus-client",
  "sqd-contract-client",
  "sqd-messages",
  "sqd-network-transport",
@@ -4637,7 +4640,7 @@ dependencies = [
 
 [[package]]
 name = "pings-collector"
-version = "2.8.0"
+version = "2.9.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4647,6 +4650,7 @@ dependencies = [
  "futures 0.3.34",
  "lazy_static",
  "parking_lot 0.12.5",
+ "prometheus-client",
  "semver 1.0.28",
  "sqd-contract-client",
  "sqd-messages",

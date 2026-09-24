@@ -6,6 +6,8 @@ use sqd_network_transport::PeerId;
 
 use collector_utils::{QueryExecutedRow, Storage};
 
+use crate::metrics;
+
 /// Default maximum estimated size (bytes) of a single INSERT batch sent to
 /// ClickHouse. Buffers larger than this are split into several INSERTs so that
 /// an oversized batch can't fail repeatedly and stall log collection.
@@ -41,6 +43,7 @@ impl<T: Storage + Sync> LogsCollector<T> {
 
     pub(crate) fn with_limits(storage: T, max_batch_size: usize, max_buffer_size: usize) -> Self {
         let max_buffer_size = max_buffer_size.max(max_batch_size);
+        metrics::BUFFER_MAX_BYTES.set(max_buffer_size as i64);
         Self {
             storage,
             buffer: Mutex::new(Buffer {
@@ -65,7 +68,9 @@ impl<T: Storage + Sync> LogsCollector<T> {
             buffer.size += row.estimated_size();
             buffer.logs.push(row);
         }
+        metrics::BUFFER_BYTES.set(buffer.size as i64);
         if dropped > 0 {
+            metrics::LOGS_DEFERRED.inc_by(dropped);
             tracing::warn!(
                 worker_id = %worker_id,
                 dropped,
@@ -86,6 +91,7 @@ impl<T: Storage + Sync> LogsCollector<T> {
         let logs = {
             let mut buffer = self.buffer.lock();
             buffer.size = 0;
+            metrics::BUFFER_BYTES.set(0);
             std::mem::take(&mut buffer.logs)
         };
         let total = logs.len();
@@ -146,9 +152,17 @@ impl<T: Storage + Sync> LogsCollector<T> {
         stored: usize,
         total: usize,
     ) -> anyhow::Result<()> {
+        let lags: Vec<f64> = chunk
+            .iter()
+            .map(|row| row.collector_timestamp.saturating_sub(row.worker_timestamp) as f64 / 1000.0)
+            .collect();
         self.storage
             .store_logs(chunk.into_iter())
             .await
+            .inspect(|()| {
+                metrics::LOGS_STORED.inc_by(lags.len() as u64);
+                lags.iter().for_each(|&lag| metrics::LOG_LAG.observe(lag));
+            })
             .inspect_err(|e| {
                 tracing::warn!(
                     stored,
@@ -179,6 +193,9 @@ pub fn rows_from_logs(worker_id: PeerId, logs: Vec<QueryExecuted>) -> Vec<QueryE
         })
         .collect();
     for (reason, count) in invalid {
+        metrics::LOGS_DISCARDED
+            .get_or_create(&[("reason", "invalid")])
+            .inc_by(count as u64);
         tracing::warn!(worker_id = %worker_id, count, reason, "Dropped invalid logs");
     }
     rows

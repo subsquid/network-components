@@ -74,6 +74,10 @@ pub struct Cli {
     /// Whether the logs should be structured in JSON format
     #[arg(long, env)]
     pub json_log: bool,
+
+    /// Port to serve Prometheus metrics on, at /metrics
+    #[arg(long, env, default_value_t = 9090)]
+    pub prometheus_port: u16,
 }
 
 fn parse_seconds(s: &str) -> anyhow::Result<Duration> {

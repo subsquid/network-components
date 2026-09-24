@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
 use sqd_messages::signatures::sha3_256;
-use sqd_messages::{query_error, query_executed, query_finished, Heartbeat, QueryExecuted, QueryFinished};
+use sqd_messages::{
+    query_error, query_executed, query_finished, Heartbeat, QueryExecuted, QueryFinished,
+};
 use sqd_network_transport::{protocol, PeerId};
 
 use crate::cli::ClickhouseArgs;
@@ -378,15 +380,13 @@ pub struct QueryFinishedRow {
 }
 
 impl QueryFinishedRow {
-    pub fn try_from(
-        query_finished: QueryFinished,
-    ) -> Result<Self, &'static str> {
+    pub fn try_from(query_finished: QueryFinished) -> Result<Self, &'static str> {
         let QueryFinished {
             worker_id,
             query_id,
             total_time_micros: total_time,
             worker_signature,
-            result
+            result,
         } = query_finished;
         let result_hash = match result {
             Some(query_finished::Result::Ok(ok)) => ok.data_hash,
@@ -406,7 +406,6 @@ impl QueryFinishedRow {
     }
 }
 
-
 impl ClickhouseStorage {
     pub async fn new(args: ClickhouseArgs) -> anyhow::Result<Self> {
         let client = Client::default()
@@ -416,7 +415,10 @@ impl ClickhouseStorage {
             .with_password(args.clickhouse_password);
         client.query(&LOGS_TABLE_DEFINITION).execute().await?;
         client.query(&PINGS_TABLE_DEFINITION).execute().await?;
-        client.query(&PORTAL_LOGS_TABLE_DEFINITION).execute().await?;
+        client
+            .query(&PORTAL_LOGS_TABLE_DEFINITION)
+            .execute()
+            .await?;
         Ok(Self(client))
     }
 }
@@ -603,7 +605,7 @@ mod tests {
         let last_stored = storage.get_last_stored().await.unwrap();
         assert_eq!(last_stored.get(&worker_id.to_string()), Some(&123456789500));
 
-        let assignment_id = 
+        let assignment_id =
             "2025-10-12T12:00:45_C1A955A7E13FABEC64DCA7965104FA0CBF98C063A6FCB4473E243348CADFAFAE";
 
         // Check pings storing

@@ -3,7 +3,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-pub use sqd_messages::{Range, RangeSet, data_chunk::DataChunk};
+pub use sqd_messages::{data_chunk::DataChunk, Range, RangeSet};
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Debug, Clone, PartialEq, Eq)]
 pub struct WorkerState {

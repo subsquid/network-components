@@ -135,20 +135,22 @@ impl Server {
                     .map(|peer_id| {
                         let handle = transport_handle.clone();
                         async move {
+                            let request_start = std::time::Instant::now();
                             let heartbeat = match handle.request_heartbeat(peer_id).await {
                                 Ok(heartbeat) => {
-                                    metrics::REQUESTS.get_or_create(&[("result", "ok")]).inc();
+                                    metrics::observe_request(request_start.elapsed(), None);
                                     heartbeat
                                 }
                                 Err(e) => {
-                                    metrics::REQUESTS.get_or_create(&[("result", "error")]).inc();
+                                    let error = format!("{e:?}");
+                                    metrics::observe_request(request_start.elapsed(), Some(&error));
                                     tracing::debug!(worker_id = %peer_id, error = %e, "Failed to get heartbeat");
                                     return None;
                                 }
                             };
 
                             if !heartbeat.version_matches(&SUPPORTED_WORKER_VERSIONS) {
-                                metrics::HEARTBEATS_DROPPED
+                                metrics::HEARTBEATS_DISCARDED
                                     .get_or_create(&[("reason", "unsupported_version")])
                                     .inc();
                                 tracing::debug!(
@@ -162,7 +164,7 @@ impl Server {
                             match PingRow::new(heartbeat, peer_id.to_string()) {
                                 Ok(ping_row) => Some(ping_row),
                                 Err(e) => {
-                                    metrics::HEARTBEATS_DROPPED
+                                    metrics::HEARTBEATS_DISCARDED
                                         .get_or_create(&[("reason", "invalid")])
                                         .inc();
                                     tracing::error!(worker_id = %peer_id, error = %e, "Error creating ping row");
@@ -195,6 +197,7 @@ impl Server {
                         }
                     }
                 }
+                metrics::ROUND_DURATION.observe(start.elapsed().as_secs_f64());
             }
         };
 

@@ -171,7 +171,7 @@ pub struct QueryExecutedRow {
     client_signature: Vec<u8>,
     pub client_timestamp: u64,
     pub worker_timestamp: u64,
-    collector_timestamp: u64,
+    pub collector_timestamp: u64,
     worker_version: String,
 }
 

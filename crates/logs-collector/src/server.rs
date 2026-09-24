@@ -141,7 +141,9 @@ where
             let last_timestamps = match self.logs_collector.last_timestamps().await {
                 Ok(timestamps) => timestamps,
                 Err(e) => {
-                    metrics::STORAGE_ERRORS.inc();
+                    metrics::STORAGE_ERRORS
+                        .get_or_create(&[("operation", "read")])
+                        .inc();
                     tracing::warn!(error = format!("{e:#}"), "Couldn't read last stored logs");
                     continue;
                 }
@@ -174,8 +176,12 @@ where
                 .await;
             metrics::BACKLOGGED_WORKERS.set(backlogged_workers);
 
-            if let Err(e) = self.logs_collector.dump_buffer().await {
-                metrics::STORAGE_ERRORS.inc();
+            let dumped = self.logs_collector.dump_buffer().await;
+            metrics::ROUND_DURATION.observe(round_start.elapsed().as_secs_f64());
+            if let Err(e) = dumped {
+                metrics::STORAGE_ERRORS
+                    .get_or_create(&[("operation", "insert")])
+                    .inc();
                 // Don't start the next round early: it would fetch the same logs again,
                 // most likely only to fail the same way.
                 tracing::warn!(error = format!("{e:#}"), "Couldn't store logs");
@@ -218,6 +224,7 @@ where
         let mut last_query_id = None;
         for page in 0..MAX_PAGES {
             tracing::debug!(worker_id = %worker_id, page, from_timestamp_ms, "Collecting logs");
+            let request_start = Instant::now();
             let logs = match self
                 .transport_handle
                 .request_logs(
@@ -230,13 +237,11 @@ where
                 .await
             {
                 Ok(logs) => {
-                    metrics::REQUESTS.get_or_create(&[("result", "ok")]).inc();
+                    metrics::observe_request(request_start.elapsed(), None);
                     logs
                 }
                 Err(e) => {
-                    metrics::REQUESTS
-                        .get_or_create(&[("result", "error")])
-                        .inc();
+                    metrics::observe_request(request_start.elapsed(), Some(&e.to_string()));
                     tracing::warn!(worker_id = %worker_id, error = format!("{e:#}"), "Error getting logs");
                     return false;
                 }

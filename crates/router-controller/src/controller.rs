@@ -72,10 +72,7 @@ impl Controller {
         dataset_name: &str,
         first_block: u64,
     ) -> Option<(WorkerId, Url, String)> {
-        let dataset = match self.managed_datasets.get(dataset_name) {
-            Some(ds) => ds,
-            None => return None,
-        };
+        let dataset = self.managed_datasets.get(dataset_name)?;
 
         let now = SystemTime::now();
 
@@ -83,7 +80,7 @@ impl Controller {
             if !w
                 .desired_state
                 .get(dataset)
-                .map_or(false, |ranges| ranges.has(first_block))
+                .is_some_and(|ranges| ranges.has(first_block))
             {
                 return None;
             }
@@ -97,7 +94,7 @@ impl Controller {
             if info
                 .state
                 .get(dataset)
-                .map_or(false, |ranges| ranges.has(first_block))
+                .is_some_and(|ranges| ranges.has(first_block))
             {
                 Some(info)
             } else {
@@ -134,10 +131,7 @@ impl Controller {
     }
 
     pub fn get_height(&self, dataset_name: &str) -> Option<u64> {
-        let dataset = match self.managed_datasets.get(dataset_name) {
-            Some(ds) => ds,
-            None => return None,
-        };
+        let dataset = self.managed_datasets.get(dataset_name)?;
 
         self.datasets_height
             .get(dataset)

@@ -1,4 +1,4 @@
-FROM rust:1.83 AS archive-router-builder
+FROM rust:1.98-bookworm AS archive-router-builder
 RUN apt-get update && apt-get install protobuf-compiler -y
 WORKDIR /archive-router
 COPY ./ .
@@ -12,7 +12,7 @@ COPY --from=archive-router-builder /archive-router/target/release/router ./route
 ENTRYPOINT ["/archive-router/router"]
 EXPOSE 3000
 
-FROM lukemathwalker/cargo-chef:latest-rust-1.83-slim-bookworm AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.98-slim-bookworm AS chef
 WORKDIR /app
 
 FROM chef AS network-planner

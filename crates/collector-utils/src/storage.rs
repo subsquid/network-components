@@ -469,7 +469,7 @@ impl Storage for ClickhouseStorage {
             .0
             .query(&format!(
                 "SELECT worker_id, MAX(worker_timestamp) FROM {} GROUP BY worker_id",
-                &*LOGS_TABLE
+                *LOGS_TABLE
             ))
             .fetch::<TimestampRow>()?;
         let mut result = HashMap::new();
@@ -533,13 +533,13 @@ mod tests {
         // Clean up database
         storage
             .0
-            .query(&format!("TRUNCATE TABLE {}", &*LOGS_TABLE))
+            .query(&format!("TRUNCATE TABLE {}", *LOGS_TABLE))
             .execute()
             .await
             .unwrap();
         storage
             .0
-            .query(&format!("TRUNCATE TABLE {}", &*PINGS_TABLE))
+            .query(&format!("TRUNCATE TABLE {}", *PINGS_TABLE))
             .execute()
             .await
             .unwrap();
@@ -631,7 +631,7 @@ mod tests {
 
         let mut cursor = storage
             .0
-            .query(&format!("SELECT * FROM {}", &*PINGS_TABLE))
+            .query(&format!("SELECT * FROM {}", *PINGS_TABLE))
             .fetch::<PingRow>()
             .unwrap();
         let row = cursor.next().await.unwrap().unwrap();

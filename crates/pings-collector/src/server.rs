@@ -128,7 +128,7 @@ impl Server {
                     "Collecting heartbeats from workers"
                 );
 
-                let ping_rows: Vec<PingRow> = stream::iter(workers.into_iter())
+                let ping_rows: Vec<PingRow> = stream::iter(workers)
                     .map(|peer_id| {
                         let handle = transport_handle.clone();
                         async move {

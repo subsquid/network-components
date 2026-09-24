@@ -54,7 +54,7 @@ impl<T: Storage + Sync> LogsCollector<T> {
 
     /// Returns `false` if some rows were dropped because the buffer is full.
     pub fn buffer_logs(&self, worker_id: PeerId, rows: Vec<QueryExecutedRow>) -> bool {
-        log::debug!("Buffering {} logs from {worker_id}", rows.len());
+        tracing::debug!(worker_id = %worker_id, logs = rows.len(), "Buffering logs");
         let mut buffer = self.buffer.lock();
         let mut dropped = 0;
         for row in rows {
@@ -66,10 +66,11 @@ impl<T: Storage + Sync> LogsCollector<T> {
             buffer.logs.push(row);
         }
         if dropped > 0 {
-            log::warn!(
-                "Buffer full ({} bytes), dropped {dropped} logs from {worker_id}; \
-                 they will be re-collected once the buffer drains",
-                self.max_buffer_size
+            tracing::warn!(
+                worker_id = %worker_id,
+                dropped,
+                max_buffer_bytes = self.max_buffer_size,
+                "Buffer full, dropped logs; they will be re-collected once the buffer drains"
             );
         }
         dropped == 0
@@ -112,11 +113,11 @@ impl<T: Storage + Sync> LogsCollector<T> {
                     // A single row exceeds the batch limit. Sending it alone is the
                     // best we can do; warn so a persistently-failing oversized row
                     // (which would stall this worker) is visible.
-                    log::warn!(
-                        "Single log row from {} is {row_size} bytes, exceeding the \
-                         {} byte batch limit",
-                        row.worker_id(),
-                        self.max_batch_size
+                    tracing::warn!(
+                        worker_id = row.worker_id(),
+                        row_bytes = row_size,
+                        max_batch_bytes = self.max_batch_size,
+                        "Single log row exceeds the batch limit"
                     );
                 } else {
                     let count = chunk.len();
@@ -135,7 +136,7 @@ impl<T: Storage + Sync> LogsCollector<T> {
             stored += count;
         }
 
-        log::info!("Dumped {stored} logs to storage");
+        tracing::info!(logs = stored, "Dumped logs to storage");
         Ok(())
     }
 
@@ -148,7 +149,14 @@ impl<T: Storage + Sync> LogsCollector<T> {
         self.storage
             .store_logs(chunk.into_iter())
             .await
-            .inspect_err(|e| log::warn!("Stored {stored}/{total} logs before failure: {e:?}"))
+            .inspect_err(|e| {
+                tracing::warn!(
+                    stored,
+                    total,
+                    error = format!("{e:#}"),
+                    "Couldn't store all logs"
+                )
+            })
     }
 
     pub async fn last_timestamps(&self) -> anyhow::Result<HashMap<String, u64>> {
@@ -160,7 +168,7 @@ impl<T: Storage + Sync> LogsCollector<T> {
 /// Converts a worker's logs into rows, dropping the invalid ones. Verifying every
 /// log's signature makes this CPU-bound, so it belongs on a blocking thread.
 pub fn rows_from_logs(worker_id: PeerId, logs: Vec<QueryExecuted>) -> Vec<QueryExecutedRow> {
-    log::trace!("Logs received: {logs:?}");
+    tracing::trace!(worker_id = %worker_id, ?logs, "Logs received");
     let mut invalid = HashMap::<&str, usize>::new();
     let rows = logs
         .into_iter()
@@ -171,7 +179,7 @@ pub fn rows_from_logs(worker_id: PeerId, logs: Vec<QueryExecuted>) -> Vec<QueryE
         })
         .collect();
     for (reason, count) in invalid {
-        log::warn!("Dropped {count} invalid logs from {worker_id}: {reason}");
+        tracing::warn!(worker_id = %worker_id, count, reason, "Dropped invalid logs");
     }
     rows
 }
@@ -181,7 +189,7 @@ fn env_size(var: &str, default: usize) -> usize {
         Ok(value) => match value.parse() {
             Ok(parsed) => parsed,
             Err(e) => {
-                log::warn!("Invalid {var}={value:?}: {e}; using default {default}");
+                tracing::warn!(var, value, error = %e, default, "Invalid size setting, using the default");
                 default
             }
         },

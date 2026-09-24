@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use clap::Parser;
-use env_logger::Env;
 use sqd_network_transport::util::CancellationToken;
 use sqd_network_transport::{get_agent_info, AgentInfo, LogsCollectorConfig, P2PTransportBuilder};
 
@@ -42,14 +41,34 @@ fn create_cancellation_token() -> anyhow::Result<CancellationToken> {
     Ok(token)
 }
 
+fn setup_tracing(json: bool) {
+    let env_filter = tracing_subscriber::EnvFilter::builder().parse_lossy(
+        std::env::var(tracing_subscriber::EnvFilter::DEFAULT_ENV)
+            .unwrap_or_else(|_| "info,aws_config=warn,ethers_providers=warn".to_string()),
+    );
+
+    if json {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_target(false)
+            .json()
+            .with_span_list(false)
+            .flatten_event(true)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_target(false)
+            .compact()
+            .init();
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Init logger and parse arguments
-    env_logger::Builder::from_env(
-        Env::default().default_filter_or("info, aws_config=warn, ethers_providers=warn"),
-    )
-    .init();
+    // Parse arguments and init logger
     let args: Cli = Cli::parse();
+    setup_tracing(args.json_log);
     anyhow::ensure!(
         args.shard < args.total_shards,
         "SHARD ({}) must be less than TOTAL_SHARDS ({})",

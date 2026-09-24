@@ -81,7 +81,11 @@ where
         concurrent_workers: usize,
         cancellation_token: CancellationToken,
     ) -> anyhow::Result<()> {
-        log::info!("Starting logs collector server");
+        tracing::info!(
+            shard = self.shard,
+            total_shards = self.total_shards,
+            "Starting logs collector server"
+        );
 
         // Get registered workers from chain
         let workers = contract_client.active_workers().await?;
@@ -99,7 +103,7 @@ where
             )
             .await;
 
-        log::info!("Server shutting down");
+        tracing::info!("Server shutting down");
         task_manager.await_stop().await;
         Ok(())
     }
@@ -113,12 +117,11 @@ where
     ) {
         // A backlog never makes the next round start later than it would anyway.
         let backlog_interval = backlog_interval.map(|backlog| backlog.min(interval));
-        match backlog_interval {
-            Some(backlog) => log::info!(
-                "Collecting logs every {interval:?}, or every {backlog:?} while workers have a backlog"
-            ),
-            None => log::info!("Collecting logs every {interval:?}"),
-        }
+        tracing::info!(
+            interval_secs = interval.as_secs(),
+            backlog_interval_secs = backlog_interval.map(|backlog| backlog.as_secs()),
+            "Starting log collection"
+        );
         let mut interval = tokio::time::interval(interval);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
@@ -132,11 +135,11 @@ where
             let round_start = Instant::now();
 
             let workers = self.registered_workers.lock().clone();
-            log::info!("Collecting logs from {} workers", workers.len());
+            tracing::info!(workers = workers.len(), "Collecting logs from workers");
             let last_timestamps = match self.logs_collector.last_timestamps().await {
                 Ok(timestamps) => timestamps,
                 Err(e) => {
-                    log::warn!("Couldn't read last stored logs: {e:?}");
+                    tracing::warn!(error = format!("{e:#}"), "Couldn't read last stored logs");
                     continue;
                 }
             };
@@ -160,7 +163,7 @@ where
                         Ok(true) => backlogged + 1,
                         Ok(false) => backlogged,
                         Err(e) => {
-                            log::error!("Log collection task failed: {e}");
+                            tracing::error!(error = %e, "Log collection task failed");
                             backlogged
                         }
                     }
@@ -170,7 +173,7 @@ where
             if let Err(e) = self.logs_collector.dump_buffer().await {
                 // Don't start the next round early: it would fetch the same logs again,
                 // most likely only to fail the same way.
-                log::warn!("Couldn't store logs: {e:?}");
+                tracing::warn!(error = format!("{e:#}"), "Couldn't store logs");
                 continue;
             }
 
@@ -180,14 +183,18 @@ where
             match backlog_interval {
                 Some(backlog_interval) => {
                     let next_round = round_start + backlog_interval;
-                    log::info!(
-                        "{backlogged_workers} workers have more logs, starting the next round in {:?}",
-                        next_round.saturating_duration_since(Instant::now())
+                    tracing::info!(
+                        backlogged_workers,
+                        next_round_in_secs = next_round
+                            .saturating_duration_since(Instant::now())
+                            .as_secs(),
+                        "Workers have more logs, starting the next round early"
                     );
                     interval.reset_at(next_round);
                 }
-                None => log::info!(
-                    "{backlogged_workers} workers have more logs, collecting them next round"
+                None => tracing::info!(
+                    backlogged_workers,
+                    "Workers have more logs, collecting them next round"
                 ),
             }
         }
@@ -200,16 +207,12 @@ where
         // Don't even request logs we'd have to drop. The buffer drains every round,
         // so these workers are picked up again next time.
         if self.logs_collector.is_full() {
-            log::debug!("Buffer full, skipping log collection from {worker_id}");
+            tracing::debug!(worker_id = %worker_id, "Buffer full, skipping log collection");
             return true;
         }
         let mut last_query_id = None;
         for page in 0..MAX_PAGES {
-            if page == 0 {
-                log::debug!("Collecting logs from {worker_id} since {from_timestamp_ms}");
-            } else {
-                log::debug!("Collecting more logs from {worker_id} since {from_timestamp_ms}");
-            }
+            tracing::debug!(worker_id = %worker_id, page, from_timestamp_ms, "Collecting logs");
             let logs = match self
                 .transport_handle
                 .request_logs(
@@ -223,7 +226,7 @@ where
             {
                 Ok(logs) => logs,
                 Err(e) => {
-                    log::warn!("Error getting logs from {worker_id}: {e:#}");
+                    tracing::warn!(worker_id = %worker_id, error = format!("{e:#}"), "Error getting logs");
                     return false;
                 }
             };
@@ -241,7 +244,7 @@ where
             let rows = match rows.await {
                 Ok(rows) => rows,
                 Err(e) => {
-                    log::error!("Couldn't process logs from {worker_id}: {e}");
+                    tracing::error!(worker_id = %worker_id, error = %e, "Couldn't process logs");
                     return false;
                 }
             };
@@ -253,11 +256,15 @@ where
                 return false;
             }
             if self.logs_collector.is_full() {
-                log::debug!("Buffer full, stopping log collection from {worker_id}");
+                tracing::debug!(worker_id = %worker_id, "Buffer full, stopping log collection");
                 return true;
             }
         }
-        log::debug!("Logs from {worker_id} didn't fit in {MAX_PAGES} pages, continuing next round");
+        tracing::debug!(
+            worker_id = %worker_id,
+            pages = MAX_PAGES,
+            "Logs didn't fit in one round, continuing next round"
+        );
         true
     }
 
@@ -267,7 +274,7 @@ where
         contract_client: Arc<dyn ContractClient>,
         interval: Duration,
     ) {
-        log::info!("Starting worker update task");
+        tracing::info!("Starting worker update task");
         let registered_workers = self.registered_workers.clone();
         let (shard, total_shards) = (self.shard, self.total_shards);
         let contract_client: Arc<dyn ContractClient> = contract_client;
@@ -277,7 +284,9 @@ where
             async move {
                 let workers = match contract_client.active_workers().await {
                     Ok(workers) => workers,
-                    Err(e) => return log::error!("Error getting registered workers: {e:?}"),
+                    Err(e) => {
+                        return tracing::error!(error = ?e, "Error getting registered workers")
+                    }
                 };
                 *registered_workers.lock() = filter_peer_ids(workers, shard, total_shards);
             }

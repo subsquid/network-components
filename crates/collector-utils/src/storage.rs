@@ -427,15 +427,15 @@ impl Storage for ClickhouseStorage {
         &self,
         query_logs: T,
     ) -> anyhow::Result<()> {
-        log::debug!("Storing logs in clickhouse");
+        tracing::debug!("Storing logs in clickhouse");
         let mut query_logs = query_logs.peekable();
         if query_logs.peek().is_none() {
-            log::debug!("No logs to store, skipping empty batch");
+            tracing::debug!("No logs to store, skipping empty batch");
             return Ok(());
         }
         let mut insert = self.0.insert(&LOGS_TABLE)?;
         for row in query_logs {
-            log::trace!("Storing query log {:?}", row);
+            tracing::trace!(?row, "Storing query log");
             insert.write(&row).await?;
         }
         insert.end().await?;
@@ -446,15 +446,15 @@ impl Storage for ClickhouseStorage {
         &self,
         pings: T,
     ) -> anyhow::Result<()> {
-        log::debug!("Storing pings in clickhouse");
+        tracing::debug!("Storing pings in clickhouse");
         let mut pings = pings.peekable();
         if pings.peek().is_none() {
-            log::debug!("No pings to store, skipping empty batch");
+            tracing::debug!("No pings to store, skipping empty batch");
             return Ok(());
         }
         let mut insert = self.0.insert(&PINGS_TABLE)?;
         for row in pings {
-            log::trace!("Storing ping {:?}", row);
+            tracing::trace!(?row, "Storing ping");
             insert.write(&row).await?;
         }
         insert.end().await?;
@@ -462,7 +462,7 @@ impl Storage for ClickhouseStorage {
     }
 
     async fn get_last_stored(&self) -> anyhow::Result<HashMap<String, u64>> {
-        log::debug!("Retrieving latest timestamps from clickhouse");
+        tracing::debug!("Retrieving latest timestamps from clickhouse");
         let mut cursor = self
             .0
             .query(&format!(
@@ -474,7 +474,7 @@ impl Storage for ClickhouseStorage {
         while let Some(row) = cursor.next().await? {
             result.insert(row.worker_id, row.timestamp);
         }
-        log::debug!("Retrieved timestamps: {:?}", result);
+        tracing::debug!(?result, "Retrieved timestamps");
         Ok(result)
     }
 
@@ -482,15 +482,15 @@ impl Storage for ClickhouseStorage {
         &self,
         portal_logs: T,
     ) -> anyhow::Result<()> {
-        log::debug!("Storing portal logs in clickhouse");
+        tracing::debug!("Storing portal logs in clickhouse");
         let mut portal_logs = portal_logs.peekable();
         if portal_logs.peek().is_none() {
-            log::debug!("No portal logs to store, skipping empty batch");
+            tracing::debug!("No portal logs to store, skipping empty batch");
             return Ok(());
         }
         let mut insert = self.0.insert(&PORTAL_LOGS_TABLE)?;
         for row in portal_logs {
-            log::trace!("Storing portal log {:?}", row);
+            tracing::trace!(?row, "Storing portal log");
             insert.write(&row).await?;
         }
         insert.end().await?;

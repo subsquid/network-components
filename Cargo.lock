@@ -1195,7 +1195,6 @@ dependencies = [
  "clap",
  "clickhouse",
  "lazy_static",
- "log",
  "serde",
  "serde_bytes",
  "serde_repr",
@@ -1203,6 +1202,7 @@ dependencies = [
  "sqd-network-transport",
  "test-with",
  "tokio 1.43.0",
+ "tracing",
 ]
 
 [[package]]
@@ -3794,9 +3794,7 @@ dependencies = [
  "async-trait",
  "clap",
  "collector-utils",
- "env_logger",
  "futures 0.3.31",
- "log",
  "parking_lot 0.12.3",
  "sqd-contract-client",
  "sqd-messages",
@@ -3804,6 +3802,8 @@ dependencies = [
  "tikv-jemallocator",
  "tokio 1.43.0",
  "tokio-util",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -4633,7 +4633,6 @@ dependencies = [
  "collector-utils",
  "futures 0.3.31",
  "lazy_static",
- "log",
  "parking_lot 0.12.3",
  "semver 1.0.25",
  "sqd-contract-client",
@@ -4641,6 +4640,7 @@ dependencies = [
  "sqd-network-transport",
  "tikv-jemallocator",
  "tokio 1.43.0",
+ "tracing",
  "tracing-subscriber",
 ]
 

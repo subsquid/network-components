@@ -36,6 +36,11 @@ pub struct Cli {
     #[arg(long, env, default_value_t = 30)]
     pub concurrent_workers: usize,
 
+    /// Maximum stored size of a query (bytes); longer queries are truncated.
+    /// Unset stores them whole
+    #[arg(long, env)]
+    pub max_query_bytes: Option<usize>,
+
     /// Interval at which registered workers are updated (seconds)
     #[arg(long,
         env = "WORKER_UPDATE_INTERVAL_SEC",

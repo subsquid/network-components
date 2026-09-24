@@ -30,15 +30,20 @@ pub struct LogsCollector<T: Storage + Sync> {
     buffer: Mutex<Buffer>,
     max_batch_size: usize,
     max_buffer_size: usize,
+    /// Queries longer than this are truncated before being buffered.
+    max_query_bytes: Option<usize>,
 }
 
 impl<T: Storage + Sync> LogsCollector<T> {
-    pub fn new(storage: T) -> Self {
-        Self::with_limits(
-            storage,
-            env_size("MAX_INSERT_BATCH_BYTES", DEFAULT_MAX_BATCH_SIZE),
-            env_size("MAX_BUFFER_BYTES", DEFAULT_MAX_BUFFER_SIZE),
-        )
+    pub fn new(storage: T, max_query_bytes: Option<usize>) -> Self {
+        Self {
+            max_query_bytes,
+            ..Self::with_limits(
+                storage,
+                env_size("MAX_INSERT_BATCH_BYTES", DEFAULT_MAX_BATCH_SIZE),
+                env_size("MAX_BUFFER_BYTES", DEFAULT_MAX_BUFFER_SIZE),
+            )
+        }
     }
 
     pub(crate) fn with_limits(storage: T, max_batch_size: usize, max_buffer_size: usize) -> Self {
@@ -52,12 +57,18 @@ impl<T: Storage + Sync> LogsCollector<T> {
             }),
             max_batch_size,
             max_buffer_size,
+            max_query_bytes: None,
         }
     }
 
     /// Returns `false` if some rows were dropped because the buffer is full.
-    pub fn buffer_logs(&self, worker_id: PeerId, rows: Vec<QueryExecutedRow>) -> bool {
+    pub fn buffer_logs(&self, worker_id: PeerId, mut rows: Vec<QueryExecutedRow>) -> bool {
         tracing::debug!(worker_id = %worker_id, logs = rows.len(), "Buffering logs");
+        if let Some(max_bytes) = self.max_query_bytes {
+            for row in &mut rows {
+                row.truncate_query(max_bytes);
+            }
+        }
         let mut buffer = self.buffer.lock();
         let mut dropped = 0;
         for row in rows {

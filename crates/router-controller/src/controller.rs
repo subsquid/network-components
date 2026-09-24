@@ -10,7 +10,7 @@ use base64::Engine;
 use rand::prelude::SliceRandom;
 use serde::{Deserialize, Serialize};
 
-use super::messages::{Range, RangeSet, WorkerState, DataChunk};
+use super::messages::{DataChunk, Range, RangeSet, WorkerState};
 
 use crate::atom::Atom;
 
@@ -527,7 +527,7 @@ mod tests {
             .set_datasets((0..2).map(|i| (i.to_string(), i.to_string())))
             .build();
 
-        let chunks = vec![
+        let chunks = [
             vec![
                 DataChunk::new(0, 0, 10, "".to_string()),
                 DataChunk::new(0, 11, 200, "".to_string()),

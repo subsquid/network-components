@@ -65,12 +65,10 @@ impl Server {
 
         let mut sigint = signal(SignalKind::interrupt())?;
         let mut sigterm = signal(SignalKind::terminate())?;
-        loop {
-            tokio::select! {
-                _ = sigint.recv() => break,
-                _ = sigterm.recv() => break,
-                else => break
-            }
+        tokio::select! {
+            _ = sigint.recv() => {}
+            _ = sigterm.recv() => {}
+            else => {}
         }
         tracing::info!("Server shutting down");
         self.task_manager.await_stop().await;
@@ -162,7 +160,7 @@ impl Server {
                     })
                     .buffered(concurrency_limit)
                     .take_until(cancellation_token.cancelled_owned())
-                    .filter_map(|x| std::future::ready(x))
+                    .filter_map(std::future::ready)
                     .collect()
                     .await;
 

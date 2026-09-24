@@ -120,7 +120,7 @@ impl Server {
                 let start = std::time::Instant::now();
 
                 let workers = registered_workers.read().clone();
-                metrics::WORKERS.set(workers.len() as i64);
+                metrics::COMMON.workers.set(workers.len() as i64);
                 if workers.is_empty() {
                     tracing::info!("No registered workers to collect heartbeats from");
                     return;
@@ -135,15 +135,10 @@ impl Server {
                     .map(|peer_id| {
                         let handle = transport_handle.clone();
                         async move {
-                            let request_start = std::time::Instant::now();
-                            let heartbeat = match handle.request_heartbeat(peer_id).await {
-                                Ok(heartbeat) => {
-                                    metrics::observe_request(request_start.elapsed(), None);
-                                    heartbeat
-                                }
+                            let request = handle.request_heartbeat(peer_id);
+                            let heartbeat = match metrics::COMMON.observe_request(request).await {
+                                Ok(heartbeat) => heartbeat,
                                 Err(e) => {
-                                    let error = format!("{e:?}");
-                                    metrics::observe_request(request_start.elapsed(), Some(&error));
                                     tracing::debug!(worker_id = %peer_id, error = %e, "Failed to get heartbeat");
                                     return None;
                                 }
@@ -197,7 +192,7 @@ impl Server {
                         }
                     }
                 }
-                metrics::ROUND_DURATION.observe(start.elapsed().as_secs_f64());
+                metrics::COMMON.observe_round(start.elapsed());
             }
         };
 

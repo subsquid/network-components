@@ -137,7 +137,7 @@ where
 
             let workers = self.registered_workers.lock().clone();
             tracing::info!(workers = workers.len(), "Collecting logs from workers");
-            metrics::WORKERS.set(workers.len() as i64);
+            metrics::COMMON.workers.set(workers.len() as i64);
             let last_timestamps = match self.logs_collector.last_timestamps().await {
                 Ok(timestamps) => timestamps,
                 Err(e) => {
@@ -177,7 +177,7 @@ where
             metrics::BACKLOGGED_WORKERS.set(backlogged_workers);
 
             let dumped = self.logs_collector.dump_buffer().await;
-            metrics::ROUND_DURATION.observe(round_start.elapsed().as_secs_f64());
+            metrics::COMMON.observe_round(round_start.elapsed());
             if let Err(e) = dumped {
                 metrics::STORAGE_ERRORS
                     .get_or_create(&[("operation", "insert")])
@@ -224,24 +224,18 @@ where
         let mut last_query_id = None;
         for page in 0..MAX_PAGES {
             tracing::debug!(worker_id = %worker_id, page, from_timestamp_ms, "Collecting logs");
-            let request_start = Instant::now();
-            let logs = match self
-                .transport_handle
-                .request_logs(
+            let logs = match metrics::COMMON
+                .observe_request(self.transport_handle.request_logs(
                     worker_id,
                     LogsRequest {
                         from_timestamp_ms,
                         last_received_query_id: last_query_id,
                     },
-                )
+                ))
                 .await
             {
-                Ok(logs) => {
-                    metrics::observe_request(request_start.elapsed(), None);
-                    logs
-                }
+                Ok(logs) => logs,
                 Err(e) => {
-                    metrics::observe_request(request_start.elapsed(), Some(&e.to_string()));
                     tracing::warn!(worker_id = %worker_id, error = format!("{e:#}"), "Error getting logs");
                     return false;
                 }

@@ -12,6 +12,8 @@ use sqd_contract_client::{Client as ContractClient, Worker};
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 use sqd_network_transport::{PeerId, PingsCollectorTransportHandle};
 
+use crate::metrics;
+
 lazy_static! {
     pub static ref SUPPORTED_WORKER_VERSIONS: VersionReq =
         std::env::var("SUPPORTED_WORKER_VERSIONS")
@@ -118,6 +120,7 @@ impl Server {
                 let start = std::time::Instant::now();
 
                 let workers = registered_workers.read().clone();
+                metrics::WORKERS.set(workers.len() as i64);
                 if workers.is_empty() {
                     tracing::info!("No registered workers to collect heartbeats from");
                     return;
@@ -133,14 +136,21 @@ impl Server {
                         let handle = transport_handle.clone();
                         async move {
                             let heartbeat = match handle.request_heartbeat(peer_id).await {
-                                Ok(heartbeat) => heartbeat,
+                                Ok(heartbeat) => {
+                                    metrics::REQUESTS.get_or_create(&[("result", "ok")]).inc();
+                                    heartbeat
+                                }
                                 Err(e) => {
+                                    metrics::REQUESTS.get_or_create(&[("result", "error")]).inc();
                                     tracing::debug!(worker_id = %peer_id, error = %e, "Failed to get heartbeat");
                                     return None;
                                 }
                             };
 
                             if !heartbeat.version_matches(&SUPPORTED_WORKER_VERSIONS) {
+                                metrics::HEARTBEATS_DROPPED
+                                    .get_or_create(&[("reason", "unsupported_version")])
+                                    .inc();
                                 tracing::debug!(
                                     worker_id = %peer_id,
                                     version = ?heartbeat.version,
@@ -152,6 +162,9 @@ impl Server {
                             match PingRow::new(heartbeat, peer_id.to_string()) {
                                 Ok(ping_row) => Some(ping_row),
                                 Err(e) => {
+                                    metrics::HEARTBEATS_DROPPED
+                                        .get_or_create(&[("reason", "invalid")])
+                                        .inc();
                                     tracing::error!(worker_id = %peer_id, error = %e, "Error creating ping row");
                                     None
                                 }
@@ -170,11 +183,14 @@ impl Server {
                     start.elapsed()
                 );
                 if !ping_rows.is_empty() {
+                    let count = ping_rows.len() as u64;
                     match storage.store_heartbeats(ping_rows.into_iter()).await {
                         Ok(()) => {
+                            metrics::HEARTBEATS_STORED.inc_by(count);
                             tracing::info!("Stored heartbeats successfully");
                         }
                         Err(e) => {
+                            metrics::STORAGE_ERRORS.inc();
                             tracing::error!(error = format!("{e:#}"), "Error storing heartbeats");
                         }
                     }

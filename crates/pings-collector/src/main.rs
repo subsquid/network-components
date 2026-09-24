@@ -10,6 +10,7 @@ use crate::cli::Cli;
 use crate::server::Server;
 
 mod cli;
+mod metrics;
 mod server;
 
 #[cfg(not(target_env = "msvc"))]
@@ -62,6 +63,13 @@ async fn main() -> anyhow::Result<()> {
     })?;
 
     let storage = ClickhouseStorage::new(args.clickhouse).await?;
+
+    let registry = metrics::registry(args.shard);
+    tokio::spawn(async move {
+        if let Err(e) = collector_utils::serve_metrics(args.prometheus_port, registry).await {
+            tracing::error!(error = format!("{e:#}"), "Metrics server failed");
+        }
+    });
     let worker_update_interval = Duration::from_secs(args.worker_update_interval_sec as u64);
 
     let request_interval = Duration::from_secs(args.request_interval_sec as u64);

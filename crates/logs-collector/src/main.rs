@@ -91,9 +91,8 @@ async fn main() -> anyhow::Result<()> {
     let cancellation_token = create_cancellation_token()?;
 
     let registry = metrics::registry(args.shard);
-    let cancel = cancellation_token.clone();
     tokio::spawn(async move {
-        if let Err(e) = metrics::serve(args.prometheus_port, registry, cancel).await {
+        if let Err(e) = collector_utils::serve_metrics(args.prometheus_port, registry).await {
             tracing::error!(error = format!("{e:#}"), "Metrics server failed");
         }
     });

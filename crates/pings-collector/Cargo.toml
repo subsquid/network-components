@@ -11,6 +11,7 @@ clickhouse = "0.12"
 futures = "0.3"
 lazy_static = "1"
 parking_lot = "0.12"
+prometheus-client = "0.23"
 semver = "1"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"

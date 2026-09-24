@@ -10,45 +10,39 @@ use prometheus_client::registry::Registry;
 type Label = [(&'static str, &'static str); 1];
 
 pub static WORKERS: LazyLock<Gauge> = LazyLock::new(Default::default);
-pub static BACKLOGGED_WORKERS: LazyLock<Gauge> = LazyLock::new(Default::default);
 pub static REQUESTS: LazyLock<Family<Label, Counter>> = LazyLock::new(Default::default);
-pub static LOGS_STORED: LazyLock<Counter> = LazyLock::new(Default::default);
-pub static LOGS_DROPPED: LazyLock<Family<Label, Counter>> = LazyLock::new(Default::default);
+pub static HEARTBEATS_STORED: LazyLock<Counter> = LazyLock::new(Default::default);
+pub static HEARTBEATS_DROPPED: LazyLock<Family<Label, Counter>> = LazyLock::new(Default::default);
 pub static STORAGE_ERRORS: LazyLock<Counter> = LazyLock::new(Default::default);
 
 pub fn registry(shard: u8) -> Registry {
     let mut registry = Registry::with_prefix_and_labels(
-        "logs_collector",
+        "pings_collector",
         [("shard".into(), shard.to_string().into())].into_iter(),
     );
     registry.register(
         "workers",
-        "Workers this instance collects logs from",
+        "Workers this instance collects heartbeats from",
         WORKERS.clone(),
     );
     registry.register(
-        "backlogged_workers",
-        "Workers that had more logs than the last round could collect",
-        BACKLOGGED_WORKERS.clone(),
-    );
-    registry.register(
         "requests",
-        "Log requests to workers, by result (ok, error)",
+        "Heartbeat requests to workers, by result (ok, error)",
         REQUESTS.clone(),
     );
     registry.register(
-        "logs_stored",
-        "Logs inserted into ClickHouse",
-        LOGS_STORED.clone(),
+        "heartbeats_stored",
+        "Heartbeats inserted into ClickHouse",
+        HEARTBEATS_STORED.clone(),
     );
     registry.register(
-        "logs_dropped",
-        "Logs dropped, by reason: invalid logs are discarded, buffer_full ones are re-collected later",
-        LOGS_DROPPED.clone(),
+        "heartbeats_dropped",
+        "Heartbeats not stored, by reason (unsupported_version, invalid)",
+        HEARTBEATS_DROPPED.clone(),
     );
     registry.register(
         "storage_errors",
-        "Failed ClickHouse queries and inserts",
+        "Failed ClickHouse inserts",
         STORAGE_ERRORS.clone(),
     );
     registry
@@ -69,9 +63,9 @@ mod tests {
         let samples: Vec<&str> = body.lines().filter(|l| !l.starts_with('#')).collect();
         assert!(!samples.is_empty());
         for sample in samples {
-            assert!(sample.starts_with("logs_collector_"), "{sample}");
+            assert!(sample.starts_with("pings_collector_"), "{sample}");
             assert!(sample.contains(r#"shard="3""#), "{sample}");
         }
-        assert!(body.contains("logs_collector_requests_total{"), "{body}");
+        assert!(body.contains("pings_collector_requests_total{"), "{body}");
     }
 }

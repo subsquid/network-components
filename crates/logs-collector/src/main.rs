@@ -87,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
     let transport = transport_builder.build_logs_collector(config)?;
 
     let storage = ClickhouseStorage::new(args.clickhouse).await?;
-    let logs_collector = LogsCollector::new(storage);
+    let logs_collector = LogsCollector::new(storage, args.max_query_bytes);
     let cancellation_token = create_cancellation_token()?;
 
     let registry = metrics::registry(args.shard, args.total_shards);

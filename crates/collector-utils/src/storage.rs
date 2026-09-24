@@ -199,6 +199,17 @@ impl QueryExecutedRow {
             + self.worker_version.len()
     }
 
+    /// Truncates the query to at most `max_bytes`, on a char boundary. `query_hash` still
+    /// covers the full query.
+    pub fn truncate_query(&mut self, max_bytes: usize) {
+        if self.query.len() > max_bytes {
+            self.query
+                .truncate(self.query.floor_char_boundary(max_bytes));
+            // Buffers are bounded by `estimated_size`, so release the cut-off part.
+            self.query.shrink_to_fit();
+        }
+    }
+
     pub fn try_from(
         query_executed: QueryExecuted,
         worker_id: PeerId,
@@ -775,5 +786,35 @@ mod tests {
     fn test_last_applied_assignment_id_absent() {
         let row = PingRow::new(Heartbeat::default(), "worker".to_string()).unwrap();
         assert_eq!(row.last_applied_assignment_id, None);
+    }
+
+    #[test]
+    fn test_truncate_query() {
+        let client = Keypair::ed25519_from_bytes([1; 32]).unwrap();
+        let worker_id = Keypair::ed25519_from_bytes([2; 32])
+            .unwrap()
+            .public()
+            .to_peer_id();
+        let mut query = Query {
+            query_id: "b14371f9-2463-49cb-9e60-f2f62283b1af".to_string(),
+            dataset: "dataset".to_string(),
+            query: "abéd".to_string(),
+            ..Default::default()
+        };
+        query.sign(&client, worker_id).unwrap();
+        let log = QueryExecuted {
+            client_id: client.public().to_peer_id().to_string(),
+            query: Some(query),
+            result: Some(query_executed::Result::Ok(QueryOkSummary::default())),
+            ..Default::default()
+        };
+        let mut row = QueryExecutedRow::try_from(log, worker_id).unwrap();
+
+        row.truncate_query(10);
+        assert_eq!(row.query, "abéd");
+        // 'é' takes bytes 2..4, so a 3-byte limit cuts before it.
+        row.truncate_query(3);
+        assert_eq!(row.query, "ab");
+        assert_eq!(row.query_hash, sha3_256("abéd".as_bytes()).to_vec());
     }
 }

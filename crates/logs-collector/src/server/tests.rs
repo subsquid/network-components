@@ -3,7 +3,7 @@
 //! real time.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::ThreadId;
 use std::time::Duration;
@@ -34,7 +34,8 @@ struct FakeWorkers {
     unreachable: HashSet<PeerId>,
     page_size: usize,
     latency: Duration,
-    requests: Arc<AtomicUsize>,
+    /// The worker of every request made, in order.
+    requested: Arc<Mutex<Vec<PeerId>>>,
 }
 
 impl FakeWorkers {
@@ -53,8 +54,12 @@ impl FakeWorkers {
             unreachable: HashSet::new(),
             page_size: PAGE_SIZE,
             latency: LATENCY,
-            requests: Default::default(),
+            requested: Default::default(),
         }
+    }
+
+    fn request_count(&self) -> usize {
+        self.requested.lock().len()
     }
 
     fn worker_ids(&self) -> HashSet<PeerId> {
@@ -82,7 +87,7 @@ impl LogsSource for FakeWorkers {
         worker_id: PeerId,
         request: LogsRequest,
     ) -> anyhow::Result<QueryLogs> {
-        self.requests.fetch_add(1, Ordering::Relaxed);
+        self.requested.lock().push(worker_id);
         tokio::time::sleep(self.latency).await;
         if self.unreachable.contains(&worker_id) {
             anyhow::bail!("Timeout(Connect)");
@@ -114,7 +119,12 @@ struct FakeStorage(Arc<StorageState>);
 struct StorageState {
     rows: Mutex<Vec<(String, u64)>>,
     round_starts: Mutex<Vec<Instant>>,
-    fail_inserts: AtomicBool,
+    /// How many of the next INSERTs fail.
+    failing_inserts: AtomicUsize,
+    /// How many of the next INSERTs store their rows and then fail anyway, as when the
+    /// connection drops after ClickHouse has written them.
+    failing_after_insert: AtomicUsize,
+    insert_latency: Mutex<Duration>,
 }
 
 impl FakeStorage {
@@ -131,13 +141,28 @@ impl Storage for FakeStorage {
         &self,
         query_logs: T,
     ) -> anyhow::Result<()> {
-        if self.0.fail_inserts.load(Ordering::Relaxed) {
+        let latency = *self.0.insert_latency.lock();
+        tokio::time::sleep(latency).await;
+        let failing = self
+            .0
+            .failing_inserts
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
+            .is_ok();
+        if failing {
             anyhow::bail!("insert failed");
         }
         self.0
             .rows
             .lock()
             .extend(query_logs.map(|row| (row.worker_id().to_owned(), row.worker_timestamp)));
+        let failing_after_insert = self
+            .0
+            .failing_after_insert
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
+            .is_ok();
+        if failing_after_insert {
+            anyhow::bail!("connection reset after the insert");
+        }
         Ok(())
     }
 
@@ -299,10 +324,18 @@ async fn caught_up_workers_add_no_rounds_or_requests() {
     for backlog_interval in [None, Some(secs(10))] {
         // Each worker's logs fit in one page.
         let workers = FakeWorkers::with_logs(&[5, 5, 5]);
-        let request_count = workers.requests.clone();
         let storage = FakeStorage::default();
-        rounds.push(run_rounds(workers, &storage, LARGE_BUFFER, backlog_interval, secs(300)).await);
-        requests.push(request_count.load(Ordering::Relaxed));
+        rounds.push(
+            run_rounds(
+                workers.clone(),
+                &storage,
+                LARGE_BUFFER,
+                backlog_interval,
+                secs(300),
+            )
+            .await,
+        );
+        requests.push(workers.request_count());
     }
 
     assert_eq!(rounds, [[0, 120, 240], [0, 120, 240]]);
@@ -325,7 +358,10 @@ async fn unreachable_workers_do_not_start_rounds_early() {
 async fn failed_inserts_do_not_start_rounds_early() {
     let workers = FakeWorkers::with_logs(&[BACKLOG]);
     let storage = FakeStorage::default();
-    storage.0.fail_inserts.store(true, Ordering::Relaxed);
+    storage
+        .0
+        .failing_inserts
+        .store(usize::MAX, Ordering::Relaxed);
 
     let rounds = run_rounds(workers, &storage, LARGE_BUFFER, Some(secs(10)), secs(300)).await;
 
@@ -333,27 +369,123 @@ async fn failed_inserts_do_not_start_rounds_early() {
     assert!(storage.stored_logs().is_empty());
 }
 
+/// The estimated size of one of `signed_logs`' rows, to size buffers in rows.
+fn row_size() -> usize {
+    QueryExecutedRow::try_from(signed_logs(worker(0), 1).remove(0), worker(0))
+        .unwrap()
+        .estimated_size()
+}
+
 #[tokio::test(start_paused = true)]
-async fn full_buffer_starts_rounds_early_without_losing_logs() {
-    // Three workers with 5 pages each: one round would cover them all, but the
-    // buffer only fits 25 logs, so rows are dropped and workers skipped until they
-    // are collected in later rounds.
+async fn small_buffer_is_stored_in_batches_within_the_round() {
+    // Three workers with 5 pages each, and a buffer (and batch) of 25 logs: the
+    // round stores a batch every 25 logs and still collects everything in one go.
     let workers = FakeWorkers::with_logs(&[50, 50, 50]);
     let expected = workers.all_logs();
-    let row_size = QueryExecutedRow::try_from(signed_logs(worker(0), 1).remove(0), worker(0))
-        .unwrap()
-        .estimated_size();
     let storage = FakeStorage::default();
 
-    let rounds = run_rounds(workers, &storage, 25 * row_size, Some(secs(10)), secs(100)).await;
+    let rounds = run_rounds(
+        workers.clone(),
+        &storage,
+        25 * row_size(),
+        Some(secs(10)),
+        secs(100),
+    )
+    .await;
 
-    // 150 logs at 25 per round take 6 rounds, each started early. A 7th, empty one
-    // follows when the last round happens to fill the buffer exactly: which worker
-    // is cut off depends on the (random) order they are processed in.
-    assert!(matches!(rounds.len(), 6 | 7), "{rounds:?}");
-    assert!(rounds.windows(2).all(|w| w[1] - w[0] == 10), "{rounds:?}");
-    // Without the backlog interval, only the first 25 would be stored by now.
+    // Nothing was left for a later round, and no page was requested twice.
+    assert_eq!(rounds, [0]);
     assert_eq!(storage.stored_logs(), expected);
+    assert_eq!(workers.request_count(), 15);
+}
+
+#[tokio::test(start_paused = true)]
+async fn full_buffer_makes_workers_wait_for_room() {
+    // As above, but every INSERT takes 10s. Pages are buffered whole, so the three
+    // first pages (30 logs) go in at 1s and the first batch of 25 is stored from 1s
+    // to 11s. At 2s two of the second pages fit next to the 5 logs left over and the
+    // third worker waits; the two go on to their third pages at 3s, which wait too.
+    // No further page is requested until the batch is stored.
+    let workers = FakeWorkers::with_logs(&[50, 50, 50]);
+    let expected = workers.all_logs();
+    let storage = FakeStorage::default();
+    *storage.0.insert_latency.lock() = secs(10);
+
+    run_rounds(workers.clone(), &storage, 25 * row_size(), None, secs(5)).await;
+
+    assert_eq!(workers.request_count(), 8);
+    assert!(storage.stored_logs().is_empty());
+
+    // Everything is stored eventually, still with one request per page.
+    let workers = FakeWorkers::with_logs(&[50, 50, 50]);
+    let storage = FakeStorage::default();
+    *storage.0.insert_latency.lock() = secs(10);
+
+    let rounds = run_rounds(workers.clone(), &storage, 25 * row_size(), None, secs(100)).await;
+
+    assert_eq!(rounds, [0]);
+    assert_eq!(storage.stored_logs(), expected);
+    assert_eq!(workers.request_count(), 15);
+}
+
+#[tokio::test(start_paused = true)]
+async fn failed_batch_ends_the_round_without_losing_or_duplicating_logs() {
+    // One worker with 5 pages and a batch of 25 logs. The first batch, taken at 3s,
+    // fails while the worker is still being collected: the rest of the buffer is
+    // discarded rather than stored, and the next round collects all the logs again.
+    let workers = FakeWorkers::with_logs(&[50]);
+    let expected = workers.all_logs();
+    let storage = FakeStorage::default();
+    storage.0.failing_inserts.store(1, Ordering::Relaxed);
+
+    let rounds = run_rounds(
+        workers.clone(),
+        &storage,
+        25 * row_size(),
+        Some(secs(10)),
+        secs(200),
+    )
+    .await;
+
+    // A failed round doesn't start the next one early.
+    assert_eq!(rounds, [0, 120]);
+    assert_eq!(storage.stored_logs(), expected);
+}
+
+#[tokio::test(start_paused = true)]
+async fn insert_that_fails_after_storing_is_not_stored_twice() {
+    // The INSERT is written but reported as failed. The batch isn't retried: the
+    // next round resumes from the watermark, which already covers it.
+    let workers = FakeWorkers::with_logs(&[5]);
+    let expected = workers.all_logs();
+    let storage = FakeStorage::default();
+    storage.0.failing_after_insert.store(1, Ordering::Relaxed);
+
+    let rounds = run_rounds(workers.clone(), &storage, LARGE_BUFFER, None, secs(130)).await;
+
+    assert_eq!(rounds, [0, 120]);
+    assert_eq!(storage.stored_logs(), expected);
+    // The second round's request finds nothing new.
+    assert_eq!(workers.request_count(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn workers_furthest_behind_are_requested_first() {
+    // Workers 0 and 1 have logs stored up to their third and first one; worker 2
+    // has none stored.
+    let workers = FakeWorkers::with_logs(&[5, 5, 5]);
+    let storage = FakeStorage::default();
+    storage.0.rows.lock().extend([
+        (worker(0).to_string(), BASE_TIMESTAMP_MS + 2000),
+        (worker(1).to_string(), BASE_TIMESTAMP_MS),
+    ]);
+
+    run_rounds(workers.clone(), &storage, LARGE_BUFFER, None, secs(10)).await;
+
+    assert_eq!(
+        workers.requested.lock()[..3],
+        [worker(2), worker(1), worker(0)]
+    );
 }
 
 #[tokio::test(start_paused = true)]

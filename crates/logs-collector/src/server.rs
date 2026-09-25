@@ -4,14 +4,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use collector_utils::Storage;
-use futures::StreamExt;
 use parking_lot::Mutex;
 use sqd_contract_client::{Client as ContractClient, Worker};
 use sqd_messages::{LogsRequest, QueryLogs};
 use sqd_network_transport::util::{CancellationToken, TaskManager};
 use sqd_network_transport::{LogsCollectorTransport, PeerId};
+use tokio::task::{JoinError, JoinSet};
 use tokio::time::Instant;
-use tokio_util::task::AbortOnDropHandle;
 
 use crate::collector::{rows_from_logs, LogsCollector};
 use crate::metrics;
@@ -149,44 +148,36 @@ where
                 }
             };
 
-            let backlogged_workers = futures::stream::iter(workers)
+            // The workers furthest behind go first.
+            let mut workers: Vec<_> = workers
+                .into_iter()
                 .map(|worker_id| {
                     let from_timestamp_ms = last_timestamps
                         .get(&worker_id.to_string())
                         .map(|ts| ts + 1)
                         .unwrap_or(0);
-                    // A task per worker, so collecting isn't confined to this thread.
-                    let server = self.clone();
-                    AbortOnDropHandle::new(tokio::spawn(async move {
-                        server.collect_logs(worker_id, from_timestamp_ms).await
-                    }))
+                    (worker_id, from_timestamp_ms)
                 })
-                .buffer_unordered(concurrent_jobs)
-                .take_until(cancel_token.cancelled())
-                .fold(0, |backlogged, joined| async move {
-                    match joined {
-                        Ok(true) => backlogged + 1,
-                        Ok(false) => backlogged,
-                        Err(e) => {
-                            tracing::error!(error = %e, "Log collection task failed");
-                            backlogged
-                        }
-                    }
-                })
-                .await;
-            metrics::BACKLOGGED_WORKERS.set(backlogged_workers);
+                .collect();
+            workers.sort_by_key(|(_, from_timestamp_ms)| *from_timestamp_ms);
 
-            let dumped = self.logs_collector.dump_buffer().await;
+            let collected = self
+                .collect_round(workers, concurrent_jobs, &cancel_token)
+                .await;
             metrics::COMMON.observe_round(round_start.elapsed());
-            if let Err(e) = dumped {
-                metrics::STORAGE_ERRORS
-                    .get_or_create(&[("operation", "insert")])
-                    .inc();
-                // Don't start the next round early: it would fetch the same logs again,
-                // most likely only to fail the same way.
-                tracing::warn!(error = format!("{e:#}"), "Couldn't store logs");
-                continue;
-            }
+            let backlogged_workers = match collected {
+                Ok(backlogged) => backlogged,
+                Err(e) => {
+                    metrics::STORAGE_ERRORS
+                        .get_or_create(&[("operation", "insert")])
+                        .inc();
+                    // Don't start the next round early: it would fetch the same logs
+                    // again, most likely only to fail the same way.
+                    tracing::warn!(error = format!("{e:#}"), "Couldn't store logs");
+                    continue;
+                }
+            };
+            metrics::BACKLOGGED_WORKERS.set(backlogged_workers as i64);
 
             if backlogged_workers == 0 {
                 continue;
@@ -211,16 +202,79 @@ where
         }
     }
 
-    /// Returns `true` if the worker may have logs left that this round didn't collect:
-    /// it had more than `MAX_PAGES` pages, or the buffer filled up. A failed request
-    /// returns `false`, so unreachable workers never make rounds start early.
-    async fn collect_logs(&self, worker_id: PeerId, mut from_timestamp_ms: u64) -> bool {
-        // Don't even request logs we'd have to drop. The buffer drains every round,
-        // so these workers are picked up again next time.
-        if self.logs_collector.is_full() {
-            tracing::debug!(worker_id = %worker_id, "Buffer full, skipping log collection");
-            return true;
+    /// Collects the workers' logs, `concurrent_jobs` workers at a time, storing them
+    /// in batches as they come in. Returns how many workers may have logs left for
+    /// the next round.
+    ///
+    /// Fails if a batch couldn't be stored. The round stops right there: the workers
+    /// still being collected are cancelled and the buffer is discarded, so that their
+    /// logs are collected again next round (see `LogsCollector::store_batches_until`
+    /// for why nothing more may be stored).
+    async fn collect_round(
+        self: &Arc<Self>,
+        workers: Vec<(PeerId, u64)>,
+        concurrent_jobs: usize,
+        cancel_token: &CancellationToken,
+    ) -> anyhow::Result<usize> {
+        let collected = CancellationToken::new();
+        let failed = CancellationToken::new();
+
+        let writer = async {
+            let stored = self
+                .logs_collector
+                .store_batches_until(collected.cancelled())
+                .await;
+            if stored.is_err() {
+                failed.cancel();
+            }
+            stored
+        };
+
+        let producers = async {
+            let mut workers = workers.into_iter();
+            let mut tasks = JoinSet::new();
+            let mut backlogged = 0;
+            loop {
+                while tasks.len() < concurrent_jobs {
+                    let Some((worker_id, from_timestamp_ms)) = workers.next() else {
+                        break;
+                    };
+                    // A task per worker, so collecting isn't confined to this thread.
+                    let server = self.clone();
+                    tasks.spawn(
+                        async move { server.collect_logs(worker_id, from_timestamp_ms).await },
+                    );
+                }
+                tokio::select! {
+                    biased;
+                    _ = cancel_token.cancelled() => break,
+                    _ = failed.cancelled() => break,
+                    joined = tasks.join_next() => match joined {
+                        Some(joined) => backlogged += usize::from(has_backlog(joined)),
+                        None => break,
+                    },
+                }
+            }
+            // Nothing may be buffered once the writer stores the rest, or the buffer
+            // is discarded: a page buffered after that would be stored twice, or never.
+            tasks.shutdown().await;
+            collected.cancel();
+            backlogged
+        };
+
+        // Both run in this task: the writer only waits on ClickHouse and the producers
+        // only wait on the workers' tasks, so neither holds the other up.
+        let (stored, backlogged) = tokio::join!(writer, producers);
+        if stored.is_err() {
+            self.logs_collector.clear();
         }
+        stored.map(|()| backlogged)
+    }
+
+    /// Returns `true` if the worker may have logs left that this round didn't collect
+    /// because it had more than `MAX_PAGES` pages. A failed request returns `false`,
+    /// so unreachable workers never make rounds start early.
+    async fn collect_logs(&self, worker_id: PeerId, mut from_timestamp_ms: u64) -> bool {
         let mut last_query_id = None;
         for page in 0..MAX_PAGES {
             tracing::debug!(worker_id = %worker_id, page, from_timestamp_ms, "Collecting logs");
@@ -259,15 +313,9 @@ where
                 }
             };
 
-            if !self.logs_collector.buffer_logs(worker_id, rows) {
-                return true;
-            }
+            self.logs_collector.buffer_logs(worker_id, rows).await;
             if !logs.has_more {
                 return false;
-            }
-            if self.logs_collector.is_full() {
-                tracing::debug!(worker_id = %worker_id, "Buffer full, stopping log collection");
-                return true;
             }
         }
         tracing::debug!(
@@ -303,6 +351,14 @@ where
         };
         task_manager.spawn_periodic(task, interval);
     }
+}
+
+/// What a joined `collect_logs` task found: whether its worker has logs left.
+fn has_backlog(joined: Result<bool, JoinError>) -> bool {
+    joined.unwrap_or_else(|e| {
+        tracing::error!(error = %e, "Log collection task failed");
+        false
+    })
 }
 
 fn filter_peer_ids(workers: Vec<Worker>, shard: u8, total_shards: u8) -> HashSet<PeerId> {

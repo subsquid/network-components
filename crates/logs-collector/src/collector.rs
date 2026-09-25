@@ -1,26 +1,31 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::future::Future;
 
 use parking_lot::Mutex;
 use sqd_messages::QueryExecuted;
 use sqd_network_transport::PeerId;
+use tokio::sync::Notify;
 
 use collector_utils::{QueryExecutedRow, Storage};
 
 use crate::metrics;
 
 /// Default maximum estimated size (bytes) of a single INSERT batch sent to
-/// ClickHouse. Buffers larger than this are split into several INSERTs so that
-/// an oversized batch can't fail repeatedly and stall log collection.
+/// ClickHouse. The buffer is stored a batch at a time as soon as one has
+/// accumulated, so no INSERT can grow large enough to fail repeatedly and stall
+/// log collection.
 const DEFAULT_MAX_BATCH_SIZE: usize = 32 << 20; // 32 MiB
 
-/// Default maximum estimated size (bytes) of logs kept in memory between dumps.
-/// Once reached, further logs are dropped for the current round; since the
-/// ClickHouse watermark hasn't advanced for them, they are re-collected on the
-/// next round once the buffer drains.
+/// Default estimated size (bytes) of buffered logs above which collection waits
+/// for the writer to catch up. Bounds memory when ClickHouse is slower than the
+/// workers; nothing is dropped. Exceeded by at most one page, since pages are
+/// buffered whole; the pages of workers waiting for room are held outside it.
 const DEFAULT_MAX_BUFFER_SIZE: usize = 256 << 20; // 256 MiB
 
 struct Buffer {
-    logs: Vec<QueryExecutedRow>,
+    /// Whole pages, appended in the order they were collected. A worker's pages
+    /// are collected sequentially, so its rows are in ascending-timestamp order.
+    logs: VecDeque<QueryExecutedRow>,
     /// Running estimate of `logs`' memory footprint, kept in sync on push/take.
     size: usize,
 }
@@ -28,6 +33,10 @@ struct Buffer {
 pub struct LogsCollector<T: Storage + Sync> {
     storage: T,
     buffer: Mutex<Buffer>,
+    /// A batch's worth of logs is buffered: wakes the writer (`store_batches_until`).
+    batch_ready: Notify,
+    /// A batch was taken off the buffer: wakes the workers waiting in `buffer_logs`.
+    room: Notify,
     max_batch_size: usize,
     max_buffer_size: usize,
     /// Queries longer than this are truncated before being buffered.
@@ -52,132 +61,178 @@ impl<T: Storage + Sync> LogsCollector<T> {
         Self {
             storage,
             buffer: Mutex::new(Buffer {
-                logs: Vec::new(),
+                logs: VecDeque::new(),
                 size: 0,
             }),
+            batch_ready: Notify::new(),
+            room: Notify::new(),
             max_batch_size,
             max_buffer_size,
             max_query_bytes: None,
         }
     }
 
-    /// Returns `false` if some rows were dropped because the buffer is full.
-    pub fn buffer_logs(&self, worker_id: PeerId, mut rows: Vec<QueryExecutedRow>) -> bool {
+    /// Adds a page of a worker's logs to the buffer, waiting for room if it has
+    /// reached its limit. Nothing is dropped: once collected, logs are only lost if
+    /// storing them fails (see `store_batches_until`).
+    pub async fn buffer_logs(&self, worker_id: PeerId, mut rows: Vec<QueryExecutedRow>) {
         tracing::debug!(worker_id = %worker_id, logs = rows.len(), "Buffering logs");
         if let Some(max_bytes) = self.max_query_bytes {
             for row in &mut rows {
                 row.truncate_query(max_bytes);
             }
         }
-        let mut buffer = self.buffer.lock();
-        let mut dropped = 0;
-        for row in rows {
-            if buffer.size >= self.max_buffer_size {
-                dropped += 1;
-                continue;
-            }
-            buffer.size += row.estimated_size();
-            buffer.logs.push(row);
-        }
-        metrics::BUFFER_BYTES.set(buffer.size as i64);
-        if dropped > 0 {
-            metrics::LOGS_DEFERRED.inc_by(dropped);
-            tracing::warn!(
-                worker_id = %worker_id,
-                dropped,
-                max_buffer_bytes = self.max_buffer_size,
-                "Buffer full, dropped logs; they will be re-collected once the buffer drains"
-            );
-        }
-        dropped == 0
-    }
-
-    /// Whether the buffer has reached its memory limit. Callers use this to stop
-    /// collecting more logs that would only be dropped (see `buffer_logs`).
-    pub fn is_full(&self) -> bool {
-        self.buffer.lock().size >= self.max_buffer_size
-    }
-
-    pub async fn dump_buffer(&self) -> anyhow::Result<()> {
-        let logs = {
-            let mut buffer = self.buffer.lock();
-            buffer.size = 0;
-            metrics::BUFFER_BYTES.set(0);
-            std::mem::take(&mut buffer.logs)
-        };
-        let total = logs.len();
-        if total == 0 {
-            return Ok(());
-        }
-
-        // Flush in memory-bounded chunks so no single INSERT can be too large.
-        // On failure the unstored chunks are dropped, but they are re-collected
-        // next round: the ClickHouse watermark is MAX(worker_timestamp) per worker
-        // (see get_last_stored), and a single worker's logs are appended to the
-        // buffer in ascending-timestamp order (collect_logs in server.rs requests
-        // pages sequentially per worker). Chunks split the buffer at contiguous
-        // positions, so any un-stored row has a timestamp >= the advanced
-        // watermark and will be requested again. This ordering invariant is what
-        // makes partial-failure safe; it breaks if collection is ever parallelized
-        // within a single worker.
-        let mut stored = 0;
-        let mut chunk: Vec<QueryExecutedRow> = Vec::new();
-        let mut chunk_size = 0;
-        for row in logs {
-            let row_size = row.estimated_size();
-            if chunk_size + row_size > self.max_batch_size {
-                if chunk.is_empty() {
-                    // A single row exceeds the batch limit. Sending it alone is the
-                    // best we can do; warn so a persistently-failing oversized row
-                    // (which would stall this worker) is visible.
-                    tracing::warn!(
-                        worker_id = row.worker_id(),
-                        row_bytes = row_size,
-                        max_batch_bytes = self.max_batch_size,
-                        "Single log row exceeds the batch limit"
-                    );
-                } else {
-                    let count = chunk.len();
-                    self.flush_chunk(std::mem::take(&mut chunk), stored, total)
-                        .await?;
-                    stored += count;
-                    chunk_size = 0;
+        let size: usize = rows.iter().map(QueryExecutedRow::estimated_size).sum();
+        let mut waited = false;
+        loop {
+            // Registered before checking the buffer, so that a batch taken off it
+            // in between isn't missed.
+            let room = self.room.notified();
+            tokio::pin!(room);
+            room.as_mut().enable();
+            {
+                let mut buffer = self.buffer.lock();
+                if buffer.size < self.max_buffer_size {
+                    buffer.size += size;
+                    buffer.logs.extend(rows);
+                    metrics::BUFFER_BYTES.set(buffer.size as i64);
+                    if buffer.size >= self.max_batch_size {
+                        self.batch_ready.notify_one();
+                    }
+                    return;
                 }
             }
-            chunk_size += row_size;
-            chunk.push(row);
+            if !waited {
+                tracing::debug!(
+                    worker_id = %worker_id,
+                    logs = rows.len(),
+                    "Buffer full, waiting for room"
+                );
+                waited = true;
+            }
+            room.await;
         }
-        if !chunk.is_empty() {
-            let count = chunk.len();
-            self.flush_chunk(chunk, stored, total).await?;
-            stored += count;
-        }
+    }
 
+    /// Stores the buffer a batch at a time as batches accumulate, until `collected`
+    /// completes, and then whatever is left. Fails at the first INSERT that fails,
+    /// leaving the rest of the buffer in place.
+    ///
+    /// The caller must then stop collecting and `clear` the buffer instead of
+    /// storing any more of it: the ClickHouse watermark is MAX(worker_timestamp)
+    /// per worker (see `get_last_stored`), and batches take the buffer's rows in
+    /// order, so as long as nothing is stored past a failed batch every unstored
+    /// row is above the watermark and is collected again next round. A later
+    /// batch stored after the failed one would advance the watermark past the
+    /// failed rows for good. This holds because a worker's pages are collected
+    /// sequentially; it breaks if collection is ever parallelized within a worker.
+    ///
+    /// A failed batch isn't retried: if the INSERT reached ClickHouse before it
+    /// failed, a retry would store it twice, whereas the next round resumes from
+    /// whatever the watermark says was stored.
+    pub async fn store_batches_until(
+        &self,
+        collected: impl Future<Output = ()>,
+    ) -> anyhow::Result<()> {
+        tokio::pin!(collected);
+        let mut stored = 0;
+        loop {
+            tokio::select! {
+                biased;
+                _ = self.batch_ready.notified() => self.store_batches(false, &mut stored).await?,
+                _ = &mut collected => break,
+            }
+        }
+        self.store_batches(true, &mut stored).await?;
         tracing::info!(logs = stored, "Dumped logs to storage");
         Ok(())
     }
 
-    async fn flush_chunk(
-        &self,
-        chunk: Vec<QueryExecutedRow>,
-        stored: usize,
-        total: usize,
-    ) -> anyhow::Result<()> {
-        let lags: Vec<f64> = chunk
+    /// Discards the buffer after a failed INSERT (see `store_batches_until`).
+    pub fn clear(&self) {
+        let mut buffer = self.buffer.lock();
+        let dropped = buffer.logs.len();
+        buffer.logs.clear();
+        buffer.size = 0;
+        metrics::BUFFER_BYTES.set(0);
+        if dropped > 0 {
+            tracing::warn!(
+                logs = dropped,
+                "Dropped unstored logs; they will be collected again next round"
+            );
+        }
+    }
+
+    /// Stores every full batch in the buffer, and with `everything` the remainder
+    /// too, counting the stored rows in `stored`.
+    async fn store_batches(&self, everything: bool, stored: &mut usize) -> anyhow::Result<()> {
+        while let Some(batch) = self.take_batch(everything) {
+            // Before the INSERT rather than after, so workers refill the buffer
+            // while it runs.
+            self.room.notify_waiters();
+            let count = batch.len();
+            self.store_batch(batch, *stored).await?;
+            *stored += count;
+        }
+        Ok(())
+    }
+
+    /// Takes the next batch off the front of the buffer: a full one, or with
+    /// `everything` whatever is buffered. `None` when there is no such batch.
+    fn take_batch(&self, everything: bool) -> Option<Vec<QueryExecutedRow>> {
+        let mut buffer = self.buffer.lock();
+        if buffer.logs.is_empty() || (!everything && buffer.size < self.max_batch_size) {
+            return None;
+        }
+        let mut batch = Vec::new();
+        let mut batch_size = 0;
+        while let Some(row) = buffer.logs.front() {
+            let row_size = row.estimated_size();
+            if batch_size + row_size > self.max_batch_size {
+                if !batch.is_empty() {
+                    break;
+                }
+                // A single row exceeds the batch limit. Sending it alone is the
+                // best we can do; warn so a persistently-failing oversized row
+                // (which would stall this worker) is visible.
+                tracing::warn!(
+                    worker_id = row.worker_id(),
+                    row_bytes = row_size,
+                    max_batch_bytes = self.max_batch_size,
+                    "Single log row exceeds the batch limit"
+                );
+            }
+            batch_size += row_size;
+            batch.extend(buffer.logs.pop_front());
+        }
+        buffer.size = buffer.size.saturating_sub(batch_size);
+        metrics::BUFFER_BYTES.set(buffer.size as i64);
+        tracing::debug!(
+            logs = batch.len(),
+            batch_bytes = batch_size,
+            buffered_logs = buffer.logs.len(),
+            "Taking a batch off the buffer"
+        );
+        Some(batch)
+    }
+
+    async fn store_batch(&self, batch: Vec<QueryExecutedRow>, stored: usize) -> anyhow::Result<()> {
+        let lags: Vec<f64> = batch
             .iter()
             .map(|row| row.collector_timestamp.saturating_sub(row.worker_timestamp) as f64 / 1000.0)
             .collect();
         self.storage
-            .store_logs(chunk.into_iter())
+            .store_logs(batch.into_iter())
             .await
             .inspect(|()| {
                 metrics::LOGS_STORED.inc_by(lags.len() as u64);
                 lags.iter().for_each(|&lag| metrics::LOG_LAG.observe(lag));
+                tracing::debug!(logs = lags.len(), "Stored a batch of logs");
             })
             .inspect_err(|e| {
                 tracing::warn!(
                     stored,
-                    total,
+                    logs = lags.len(),
                     error = format!("{e:#}"),
                     "Couldn't store all logs"
                 )

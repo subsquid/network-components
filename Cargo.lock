@@ -3798,13 +3798,12 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "logs-collector"
-version = "2.5.0"
+version = "2.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "clap",
  "collector-utils",
- "futures 0.3.34",
  "parking_lot 0.12.5",
  "prometheus-client",
  "sqd-contract-client",
@@ -3812,7 +3811,6 @@ dependencies = [
  "sqd-network-transport",
  "tikv-jemallocator",
  "tokio 1.53.1",
- "tokio-util",
  "tracing",
  "tracing-subscriber",
 ]
@@ -6848,7 +6846,6 @@ dependencies = [
  "bytes 1.12.1",
  "futures-core",
  "futures-sink",
- "futures-util",
  "libc",
  "pin-project-lite",
  "slab",

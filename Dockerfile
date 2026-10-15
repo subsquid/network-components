@@ -1,17 +1,3 @@
-FROM rust:1.98-bookworm AS archive-router-builder
-RUN apt-get update && apt-get install protobuf-compiler -y
-WORKDIR /archive-router
-COPY ./ .
-RUN rm -r crates/logs-collector
-RUN --mount=type=ssh cargo build --release
-
-FROM debian:bullseye-slim AS archive-router
-RUN apt-get update && apt-get install ca-certificates -y
-WORKDIR /archive-router
-COPY --from=archive-router-builder /archive-router/target/release/router ./router
-ENTRYPOINT ["/archive-router/router"]
-EXPOSE 3000
-
 FROM lukemathwalker/cargo-chef:latest-rust-1.98-slim-bookworm AS chef
 WORKDIR /app
 

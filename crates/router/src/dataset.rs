@@ -14,6 +14,17 @@ fn invalid_object_key(key: &str) -> String {
     format!("invalid object key - {key}")
 }
 
+/// The chunk of a `<chunk id>/blocks.parquet` key; `None` for the chunk's other files.
+fn chunk_of_blocks_key(key: &str) -> Result<Option<DataChunk>, String> {
+    let Some(chunk_id) = key.strip_suffix("/blocks.parquet") else {
+        return Ok(None);
+    };
+
+    DataChunk::from_str(chunk_id)
+        .map(Some)
+        .map_err(|()| invalid_object_key(key))
+}
+
 fn trim_trailing_slash(value: &str) -> String {
     let mut value = value.to_string();
     value.pop();
@@ -84,11 +95,8 @@ impl Storage for S3Storage {
         let mut chunks = vec![];
         for object in &objects {
             if let Some(key) = object.key() {
-                if key.ends_with("blocks.parquet") {
-                    match DataChunk::from_str(key) {
-                        Ok(chunk) => chunks.push(chunk),
-                        Err(..) => return Err(invalid_object_key(key)),
-                    }
+                if let Some(chunk) = chunk_of_blocks_key(key)? {
+                    chunks.push(chunk);
                 }
             }
         }
@@ -125,5 +133,38 @@ impl S3Storage {
             }
         }
         Ok(items)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::chunk_of_blocks_key;
+
+    #[test]
+    fn reads_the_chunk_from_a_full_object_key() {
+        let key = "0000000000/0000000000-0000000099-abcde/blocks.parquet";
+
+        let chunk = chunk_of_blocks_key(key)
+            .unwrap()
+            .expect("a blocks.parquet key");
+
+        assert_eq!(chunk.to_string(), "0000000000/0000000000-0000000099-abcde");
+    }
+
+    #[test]
+    fn skips_the_other_files_of_a_chunk() {
+        let key = "0000000000/0000000000-0000000099-abcde/transactions.parquet";
+
+        assert_eq!(chunk_of_blocks_key(key), Ok(None));
+    }
+
+    #[test]
+    fn rejects_a_malformed_chunk_id() {
+        let key = "0000000000/0000000099-abcde/blocks.parquet";
+
+        assert_eq!(
+            chunk_of_blocks_key(key),
+            Err(format!("invalid object key - {key}"))
+        );
     }
 }

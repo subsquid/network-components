@@ -588,6 +588,7 @@ mod tests {
             compression: Default::default(),
             query_engine: Default::default(),
             output_format: Default::default(),
+            chunk_version: Default::default(),
         };
         query.sign(&client_keypair, worker_id).unwrap();
 

@@ -521,15 +521,12 @@ mod tests {
             .set_datasets((0..2).map(|i| (i.to_string(), i.to_string())))
             .build();
 
+        let chunk = |top, first_block, last_block| {
+            DataChunk::new(top, first_block, last_block, "abcde").expect("valid chunk")
+        };
         let chunks = [
-            vec![
-                DataChunk::new(0, 0, 10, "".to_string()),
-                DataChunk::new(0, 11, 200, "".to_string()),
-            ],
-            vec![
-                DataChunk::new(0, 0, 5, "".to_string()),
-                DataChunk::new(6, 6, 20, "".to_string()),
-            ],
+            vec![chunk(0, 0, 10), chunk(0, 11, 200)],
+            vec![chunk(0, 0, 5), chunk(6, 6, 20)],
         ];
 
         for w in 0..8 {

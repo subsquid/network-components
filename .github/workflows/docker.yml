@@ -1,3 +1,5 @@
+# Builds the archive router, which is on the arrowsquid branch: run it there.
+# It stays on main because GitHub offers workflow_dispatch only for workflows on the default branch.
 name: docker
 on:
   workflow_dispatch: # manually run

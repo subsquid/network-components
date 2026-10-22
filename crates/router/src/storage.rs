@@ -13,6 +13,23 @@ fn invalid_object_key(key: &str) -> String {
     format!("invalid object key - {key}")
 }
 
+/// Chunks live under numeric top directories (`0000123456/`). Anything else at the top of the
+/// bucket, such as the prefix of a newer chunk version (`_0000001-fix-1/`), is not part of the
+/// dataset the router serves.
+fn is_chunk_top(top: &str) -> bool {
+    !top.is_empty() && top.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn in_chunk_top(key: &str) -> bool {
+    key.split_once('/').map_or(false, |(top, _)| is_chunk_top(top))
+}
+
+/// Listings are in byte order, so once a key starts above `9` (a letter or `_`) no later key is
+/// in a numeric top directory.
+fn past_chunk_tops(key: &str) -> bool {
+    key.as_bytes().first().map_or(false, |b| *b > b'9')
+}
+
 fn trim_trailing_slash(value: &str) -> String {
     let mut value = value.to_string();
     value.pop();
@@ -33,7 +50,7 @@ impl Storage for S3Storage {
         let tops = self.ls(prefix).await?;
 
         let mut top: Option<String> = None;
-        for item in tops.into_iter().rev() {
+        for item in tops.into_iter().rev().filter(|item| is_chunk_top(item)) {
             let block_num = item.parse::<u32>().map_err(|err| err.to_string())?;
             top = Some(item);
             if block_num <= next_block {
@@ -68,6 +85,9 @@ impl Storage for S3Storage {
                 let mut continuation_token = output.next_continuation_token.clone();
                 if let Some(contents) = output.contents() {
                     objects.extend_from_slice(contents);
+                    if contents.iter().any(|o| o.key().map_or(false, past_chunk_tops)) {
+                        continuation_token = None;
+                    }
                 }
                 while let Some(token) = continuation_token {
                     let output = self
@@ -81,6 +101,9 @@ impl Storage for S3Storage {
                     continuation_token = output.next_continuation_token.clone();
                     if let Some(contents) = output.contents() {
                         objects.extend_from_slice(contents);
+                        if contents.iter().any(|o| o.key().map_or(false, past_chunk_tops)) {
+                            continuation_token = None;
+                        }
                     }
                 }
             }
@@ -89,7 +112,7 @@ impl Storage for S3Storage {
         let mut chunks = vec![];
         for object in &objects {
             if let Some(key) = object.key() {
-                if key.ends_with("blocks.parquet") {
+                if key.ends_with("blocks.parquet") && in_chunk_top(key) {
                     match DataChunk::from_str(key) {
                         Ok(chunk) => chunks.push(chunk),
                         Err(..) => return Err(invalid_object_key(key)),
@@ -153,5 +176,28 @@ impl S3Storage {
             }
         }
         Ok(items)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_tops() {
+        assert!(is_chunk_top("0000123456"));
+        assert!(!is_chunk_top("_0000001-fix-1"));
+        assert!(!is_chunk_top("fix-1"));
+        assert!(!is_chunk_top(""));
+        assert!(in_chunk_top("0000000000/0000000000-0000000999-abcdef01/blocks.parquet"));
+        assert!(!in_chunk_top("_0000001-fix-1/0000000000/0000000000-0000000999-abcdef01/blocks.parquet"));
+        assert!(!in_chunk_top("status.json"));
+    }
+
+    #[test]
+    fn listing_end() {
+        assert!(!past_chunk_tops("0000000000/0000000000-0000000999-abcdef01/blocks.parquet"));
+        assert!(past_chunk_tops("_0000001-fix-1/0000000000/0000000000-0000000999-abcdef01/blocks.parquet"));
+        assert!(past_chunk_tops("fix/blocks.parquet"));
     }
 }

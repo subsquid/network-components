@@ -3798,7 +3798,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "logs-collector"
-version = "2.5.0"
+version = "2.5.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4640,7 +4640,7 @@ dependencies = [
 
 [[package]]
 name = "pings-collector"
-version = "2.9.0"
+version = "2.9.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4708,7 +4708,7 @@ dependencies = [
 
 [[package]]
 name = "portal-logs-collector"
-version = "1.1.6"
+version = "1.1.7"
 dependencies = [
  "anyhow",
  "clap",
@@ -5025,9 +5025,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.18"
+version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
+checksum = "0e750cca55fe4f0439a15d0bb529da9651e79993e8e72c61a899a36d462befbe"
 dependencies = [
  "bytes 1.12.1",
  "getrandom 0.4.3",
@@ -5047,9 +5047,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.5.15"
+version = "0.5.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35a133f956daabe89a61a685c2649f13d82d5aa4bd5d12d1277e1072a21c0694"
+checksum = "af66907df18639dcf4db56ca65490cabc4b27a97dbadd96f2926cca73298f016"
 dependencies = [
  "cfg_aliases",
  "libc",
